@@ -202,11 +202,12 @@
         <p class="hint small">No cut goes deeper than the stock thickness less the safe floor. The slit stops the slit margin short of the true valley depth.</p>
         <div class="row"><span class="name">X0 Y0 at the panel's</span></div>
         <div class="seg corners" id="mc-corner">
-          <button data-corner="top-left">↖ Top left</button>
-          <button data-corner="top-right">Top right ↗</button>
-          <button data-corner="bottom-left">↙ Bottom left</button>
-          <button data-corner="bottom-right">Bottom right ↘</button>
+          <button data-corner="top-left" title="Top left on screen">↖ Back left</button>
+          <button data-corner="top-right" title="Top right on screen">Back right ↗</button>
+          <button data-corner="bottom-left" title="Bottom left on screen">↙ Front left</button>
+          <button data-corner="bottom-right" title="Bottom right on screen">Front right ↘</button>
         </div>
+        <p class="hint small">Front is the edge nearest you, with the board on the bed reading the right way up: the bottom edge on screen.</p>
         <div class="toggles mc-passes">
           <label><input type="checkbox" data-mc-pass="hairline" /> <i class="key outline"></i> Pass 1: hairline</label>
           <label><input type="checkbox" data-mc-pass="datum" /> <i class="key datum"></i> Pass 2: datum line</label>

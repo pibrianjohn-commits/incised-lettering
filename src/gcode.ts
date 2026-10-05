@@ -4,7 +4,7 @@
 //
 // Comments are plain ASCII in round brackets, which GRBL ignores.
 
-import type { MachineSettings, Pass, Pt3 } from './toolpath';
+import { CORNER_NAMES, type MachineSettings, type Pass, type Pt3 } from './toolpath';
 
 export interface GcodeInfo {
   title: string;
@@ -44,7 +44,7 @@ export function toGcode(passes: Pass[], m: MachineSettings, info: GcodeInfo, dat
 
   c(`Incised lettering marking-out: ${info.title}`);
   c(`Made ${date.toISOString().slice(0, 16).replace('T', ' ')}. Units mm, absolute.`);
-  c(`Panel ${n(info.panelWidth)} x ${n(info.panelHeight)} mm. X0 Y0 at the ${m.zeroCorner} corner of the panel. Z0 on the top surface.`);
+  c(`Panel ${n(info.panelWidth)} x ${n(info.panelHeight)} mm. X0 Y0 at the ${CORNER_NAMES[m.zeroCorner]} corner of the panel, front being nearest the operator. Z0 on the top surface.`);
   c(`Tool: ${m.toolAngle} deg V-bit, 6.35 mm. One tool for every pass.`);
   c(`Stock ${n(m.stockThickness)} mm, safe floor ${n(m.safeFloor)} mm. Deepest cut ${n(deepest)} mm.`);
   c(`Passes: ${passes.map((p) => p.title).join(', ')}.`);

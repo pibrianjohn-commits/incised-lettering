@@ -22,7 +22,7 @@ import { BED, BED_EXTENDED, bedFit, fitToLettering } from './panel';
 import { defaultGroups, type Side } from './groups';
 import { defaultBox, evenUp, fitBlock, fitLine, type EvenUp, type FitBy } from './spacing';
 import { toGcode } from './gcode';
-import { buildPasses, checkPasses, MAX_SCRIBE_DEPTH, type Check, type MachineSettings, type Pass, type PassName } from './toolpath';
+import { buildPasses, checkPasses, CORNER_NAMES, MAX_SCRIBE_DEPTH, type Check, type MachineSettings, type Pass, type PassName } from './toolpath';
 import { LetterStore } from './letters';
 import { negativeSpace } from './negativeSpace';
 import { History } from './history';
@@ -1837,7 +1837,7 @@ function showCam() {
       (p) => `<p><b>${esc(p.title)}:</b> ${what[p.name]}. ${p.cuts.length} cuts, ${(p.cutLength / 1000).toFixed(2)} m cut,
       deepest ${p.deepest.toFixed(2)} mm, feed ${feed(p)} mm/min, about ${minutes(p.minutes)}.</p>`,
     )
-    .join('') + `<p class="hint small">All passes: about ${minutes(total)} on the machine. Spindle ${m.spindle} rpm. X0 Y0 at the ${m.zeroCorner.replace('-', ' ')} corner, Z0 on the top surface.</p>`;
+    .join('') + `<p class="hint small">All passes: about ${minutes(total)} on the machine. Spindle ${m.spindle} rpm. X0 Y0 at the ${CORNER_NAMES[m.zeroCorner]} corner, Z0 on the top surface.</p>`;
   $('cam-checks').innerHTML = c.checks
     .map((k) => `<li class="${k.ok ? 'ok' : k.blocking ? 'bad' : 'warn'}">${k.ok ? '✓' : k.blocking ? '✗' : '!'} ${esc(k.text)}</li>`)
     .join('');
