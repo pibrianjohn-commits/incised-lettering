@@ -111,19 +111,64 @@ The tool is built in three stages, each usable in the workshop before the next b
 
 ## Order of work
 
-Agreed 5 Oct 2026: layout tools come first, then a 3D view. The rest of Stage 1 (depths, stroke order, tool passes and G-code) follows after these.
+What has been built so far. From here on, work follows the **Roadmap** below.
 
 1. **Done: first look.** Stand-in alphabet loaded, one word shown at true scale with outlines, valley lines with forked terminations, and datum lines.
-2. **Layout workspace.** Turn the flat view into a proper layout workspace:
+2. **Done: layout workspace.** The flat view became a layout workspace:
    - Pan by dragging and zoom with the scroll wheel towards the cursor. All marks stay hair-thin at every zoom level.
    - A text box for the inscription, with several lines allowed.
    - Sliders for cap height, overall letter spacing, line spacing and alignment, all updating live.
    - Kerning pair by pair: click the gap between two letters and nudge them closer or further apart in 0.1 mm steps, with the value shown.
    - Negative space: a toggle that shades the space between each pair of letters and shows its area in mm², so the spacing can be balanced by eye.
    - A slider for the datum offset. The datum line is kept wherever the stroke is wide enough and stops where it isn't.
-   - Follow-up (see Decisions): kerning for one gap only, a depth limit for negative space in open letters, and a datum line that follows the thick and thin.
    - Panel width and height boxes.
-3. **3D view (later, not yet built).** A 3D view like Kiri:Moto, with orbit, pan and zoom. It shows the board both as machined (hairline, datum line and valley slit cut) and as finished (letters fully carved). A light can be swept from left to right to show how the incised letters take shadow.
+   - Follow-up (see Decisions): kerning for one gap only, a depth limit for negative space in open letters, and a datum line that follows the thick and thin.
+
+## Roadmap
+
+Agreed 5 Oct 2026. Build in this order, one step at a time.
+
+1. **Lines and layout.**
+   - Each line is an object with a number.
+   - Click to select a line, drag to move it, and nudge it with the arrow keys: 0.1 mm per press, or 1 mm with Shift.
+   - Kerning inside a selected line stays fixed while it moves.
+   - Exact position boxes: left, centre and baseline.
+   - Snapping guides while dragging: panel centre, margins, border, the ends, centres, baselines and cap lines of other lines, and equal gaps. Hold Alt to drag freely.
+   - A dragged line stops following the line-spacing slider until "Return to auto". "Re-flow all" resets every line.
+   - Lock a line.
+   - Undo and redo.
+2. **Panel and border.**
+   - Panel size set by hand, or fitted to the inscription plus margins.
+   - Border inset from the panel edge. Border styles: none, single scribed, double, or incised like the letters. Corner styles come later.
+   - Margins set per side, measured from the border, or from the panel edge where there is no border.
+   - Machine bed check.
+3. **Right-hand inspection panel.**
+   - Overview of the whole panel with the letters filled solid black, with a toggle to show plain line blocks instead. It doubles as a navigator.
+   - Line list showing for each line: number, text, length in mm and as a % of panel width, cap height, position, colour (% of the line's area that is letter), auto or placed, and lock.
+   - Balance figures: space at top, bottom, left and right; the top-to-bottom ratio; and the visual centre of the lettering against the panel centre.
+4. **Spacing intelligence.**
+   - "Even up spacing" adjusts each pair until the measured spaces are optically equal. The changes are shown as suggestions to accept, refuse or tweak.
+   - Fit a line to a set width.
+   - Word stops: small incised triangles between words, cut like the letters.
+5. **Alphabet setting and alternates.**
+   - A mode for alphabet stones: A–Z, ampersand and numerals in classic layouts (tapering triangle, even rows, alphabet with motto), drawing on the layout types of Gill, Kindersley and others.
+   - Letters can have alternates (long-legged R, flourished ampersand, long-tailed Q), chosen per instance.
+6. **Working comfort.**
+   - Save and open projects as files.
+   - Save the carver's own presets.
+   - Client proof: export the layout as a clean PDF or image for customer approval.
+7. **3D view.**
+   - Like Kiri:Moto: orbit, pan and zoom.
+   - Set the stock size.
+   - Show the board as the 30° bit marks it out (hairline, datum, valley slit and fork stop cuts at true depth) and as the finished incised letter.
+   - A light that can be swept left to right to show the shadows.
+8. **G-code.** Generate the marking-out passes for the Genmitsu 3020-PRO Ultra as set out under Machine and G-code.
+
+**Later, not yet scheduled:**
+- Per-line cap height and scaling.
+- Non-ranging letters.
+- The carver's own alphabet, loaded from SVG files.
+- Curved baselines and carved banner scrolls (Stages 2 and 3).
 
 ## Technology and setup
 
@@ -152,8 +197,8 @@ Claude Code builds the tool from this brief; the carver judges the results in th
 * [ ] Carver reviews this brief and answers the open questions
 * [x] Create the GitHub repository and switch on GitHub Pages
 * [x] Stage 1, first step: load the stand-in alphabet and show one word with outlines and valley lines
-* [ ] Layout workspace (see Order of work)
-* [ ] 3D view (see Order of work)
+* [x] Layout workspace (see Order of work)
+* [ ] Roadmap steps 1–8 (see Roadmap)
 
 ## Decisions
 
