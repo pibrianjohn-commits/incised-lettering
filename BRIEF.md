@@ -1,0 +1,146 @@
+# Incised Lettering Tool — Project Brief
+
+Oct 5, 2026 · @BRIAN
+
+## Purpose
+
+The tool turns a line of text into G-code that scribes registration marks for hand-chiselled incised letters. The CNC marks out; the carver cuts.
+
+It is not a V-carving program and does not carve the letters. With a single 30° V-bit it scribes each letter's outline and a datum line, and sinks a narrow slit down the valley with stop cuts running up into the terminations. Every wall and termination face is cut by hand.
+
+It is private workshop software for Meanwhile Werkery: lettered panels, Masonic inscriptions and, later, lettering on carved banner scrolls.
+
+## The incised letter
+
+Every stroke is cut as a V-section trench with two walls meeting at a valley line. The software works out where that valley runs and how deep it sits.
+
+- **Outline.** The visible edge of the letter on the surface of the wood.
+- **Valley line.** The bottom of the trench, running down the middle of each stroke, halfway between its two edges. Geometrically this is the medial axis.
+- **Terminations.** At a stroke end the valley forks out to the corners, giving the triangular incised end. The medial axis does this naturally.
+- **Depth follows width.** The chisel angle is fixed, so a wider stroke is a deeper valley. At the traditional 60° included angle, depth ≈ 0.87 × stroke width.
+- **Bowls.** In D, B, O and other curved letters, the stroke swells and thins, so the valley deepens and shallows along its length. The depth rule handles this without special cases.
+- **Junctions.** Where a thin stroke or bowl meets a thick upright, the valleys must meet cleanly at the right depths.
+- **Order of cutting.** Thick strokes are always cut before thin ones. The software numbers the strokes in cutting order.
+
+The working formula, with w the stroke width and θ the included chisel angle:
+
+```latex
+d = \frac{w}{2} \cdot \frac{1}{\tan(\theta / 2)}
+```
+
+## What the software does
+
+The carver types the inscription, sees it laid out on the stock, checks it, then saves the G-code.
+
+1. Load an alphabet, the carver's own letters or a stand-in typeface.
+2. Type the inscription, one or more lines.
+3. Set the panel and stock: size, thickness, margins, line spacing, alignment.
+4. Adjust letter size and kerning, pair by pair where needed.
+5. The software computes each letter's outline, valley line, forked terminations and depths.
+6. It numbers the strokes in cutting order, thick first.
+7. Preview on screen: outlines, valleys, depth shading and stroke numbers, at true scale on the stock.
+8. Choose the tool and which passes to run.
+9. Save the G-code and an optional printed sheet showing the layout and cutting order.
+
+Nothing goes to the machine until the carver has checked the preview by eye.
+
+## Inputs and settings
+
+All measurements are metric, in millimetres and degrees.
+
+| Setting | What it controls | Starting value |
+| --- | --- | --- |
+| Alphabet | Letterforms used | Stand-in Roman typeface until the carver's own letters exist |
+| Inscription | The text, one or more lines | — |
+| Cap height | Letter size | 25 mm |
+| Kerning | Space between specific letter pairs, adjustable by hand | From the alphabet, then adjusted |
+| Letter and line spacing | Overall tracking and leading | — |
+| Alignment | Left, centred or right, per line | Centred |
+| Panel size | Width and height of the board | Must fit the bed: 300 × 205 mm, or 300 × 400 mm extended |
+| Stock thickness | Board thickness, so depths stay safe | — |
+| Margins and border | Clear space and an optional border line | — |
+| Chisel angle | Included angle of the finished V-section, sets valley depth | 60° |
+| Datum offset | How far the datum line sits inside the outline | 0.5–1 mm, tuned by feel |
+| Slit margin | How far the valley slit stops short of the true valley depth | 0.3 mm |
+| Tool | The V-bit used for every pass | 30° V-groove, 6.35 mm diameter |
+
+The carver's own letters will arrive later as drawn vector files (SVG) or a font file. The software must accept either without changing anything else.
+
+## Machine and G-code
+
+The G-code targets the Genmitsu 3020-PRO Ultra with its 500 W ER11 spindle, cutting oak. The controller dialect is GRBL, to be confirmed against the machine before the first cut.
+
+The G-code is written in millimetres and absolute coordinates, with zero at the top surface of the stock and a corner of the panel the carver chooses. One 30° V-bit does every pass, with no tool change:
+
+1. **Hairline.** A very light line on the true outline, marking where the finished arris will be.
+2. **Datum line.** A light line set in from the outline by the datum offset. The first chisel cut starts here.
+3. **Valley slit.** A narrow slit down every valley line, sunk to the true valley depth less the slit margin. At stroke ends it follows the forked lines up into each corner, rising to nothing at the corner point. These forks are the stop cuts for the termination triangles.
+
+The bit's faces are steeper than any face of a 60° letter, so the slit always stays inside the waste and cannot touch a finished wall or termination face.
+
+The carver then works each letter by hand:
+
+1. **First cut.** From the datum line down into the slit on both walls, taking out the bulk of the waste.
+2. **Tidy cut.** From the hairline down to the bottom of the slit, removing the thin skin left by the first cut and leaving the crisp arris and finished wall.
+3. **Terminations.** Each triangle face pared down to its fork stop cuts.
+
+The chosen bit is the [Amana Tool 45634-K](https://www.amanatool.com/products/inch/signmaking-engraving-cnc-router-bits-from-amana-tool/solid-carbide-spektratm-extreme-tool-life-coated-v-groove-signmaking-lettering-router-bits/45634-k-solid-carbide-v-groove-30-deg-x-1-4-dia-x-1-8-x-5-8-inch-shank-spektra-coated-router-bit.): solid carbide, 3 flutes, coated, 6.35 mm diameter, about 10.7 mm cutting depth and a 1/4" shank. That depth covers strokes up to about 12 mm wide. It needs a 1/4" (6.35 mm) ER11 collet, not 6 mm.
+
+Starting settings for oak, to be fine-tuned by test cuts. The spindle's top speed is assumed at about 12,000 rpm and should be checked.
+
+| Pass | Spindle | Feed | Depth per pass |
+| --- | --- | --- | --- |
+| Hairline | 12,000 rpm | 900 mm/min | 0.2 mm, single pass |
+| Datum line | 12,000 rpm | 900 mm/min | 0.3 mm, single pass |
+| Valley slit and forks | 12,000 rpm | 600–700 mm/min | 1.5–2 mm |
+| Plunging | — | 200–300 mm/min | — |
+
+Machine time is roughly 1.5 minutes per letter at 40 mm cap height, about 30 minutes for a 20-letter inscription.
+
+Safety and accuracy rules are built in. No pass may go below the stock thickness less a safe floor. The board's top surface must be flat and the Z zero exact, because the slit depth is measured from it; an unflat board can be faced on the machine first. The slit margin protects the valley line from small depth errors, so the chisel makes the final meeting at the bottom. Workholding stays as usual: Mitre Fix and decorator's tape.
+
+## Stages
+
+The tool is built in three stages, each usable in the workshop before the next begins.
+
+1. **Flat panel.** Straight lines of lettering on a flat board, with an optional border. This proves the outline, valley, depth, stroke order and G-code on real letters. Typical work: Masonic inscription panels, presentation panels with a lodge name, number and date, and panels with key hooks.
+2. **Curved baseline.** Lettering that follows a drawn curve on a flat surface, with letters turned to sit on the curve and spacing kept even along it.
+3. **Carved banner scroll.** Lettering projected onto the surface of a CNC-roughed ribbon, such as a church-style triple banner scroll. The software loads the scroll's 3D model and keeps every mark at the right depth relative to the wood as it actually is. Lettering breaks at the turnovers and foreshortens where the ribbon curves away, placed under the carver's control.
+
+## Technology and setup
+
+The tool is a browser app written in TypeScript, kept in a GitHub repository and published automatically to a web address with GitHub Pages. The carver opens it from a bookmark: no installing, no terminal, and it works the same on Ubuntu and Windows.
+
+- **Projects** save as files on the laptop, so designs stay with the carver.
+- **G-code** downloads as a file, ready for the machine's sender program.
+- **Letter shapes** are read with an established font and SVG library.
+- **Outline geometry** such as offsets and clean joins uses an established clipping library.
+- **Valley lines** are written carefully in-house, built on a Voronoi or straight-skeleton method, because they are the heart of the tool.
+- **3D work** for the banner scroll stage uses three.js to load the scroll model and project lettering onto it.
+
+TypeScript is chosen because it catches whole classes of mistakes before they reach the machine, which matters when the carver does not read the code. It is also the same family of language as Kiri:Moto and the kiri-bjm fork.
+
+## How we work
+
+Claude Code builds the tool from this brief; the carver judges the results in the preview and on the wood.
+
+- This brief is exported as Markdown into the repository and stays there as the reference every coding session works from.
+- A new repository is made under the carver's existing GitHub account, separate from the kiri-bjm fork.
+- Work goes in small steps, each ending with something the carver can open and look at.
+- Craft decisions stay with the carver. Where a rule is unclear, the code asks rather than guesses, and the answer is added to this brief.
+- Testing uses a fixed set of check letters covering the hard cases: I, O, D, B, R, S, A and W.
+- First cuts are made in scrap or PIR before oak.
+
+* [ ] Carver reviews this brief and answers the open questions
+* [ ] Create the GitHub repository and switch on GitHub Pages
+* [ ] Stage 1, first step: load the stand-in alphabet and show one word with outlines and valley lines
+
+## Open questions
+
+- Is 60° the right included chisel angle, or does it change with letter size or timber? To be settled with test letters in oak.
+- What datum offset and slit margin suit the carver's hand? Starting at 0.5–1 mm and 0.3 mm.
+- What is the spindle's actual top speed?
+- How should serifs and bracketing be handled at terminations, beyond the plain fork into the corners?
+- Where thick and thin strokes cross, as in A or W, which valley wins at the crossing?
+- Is the printed sheet showing the layout and cutting order wanted?
+- Which stand-in Roman typeface is closest to the letters the carver intends to draw?
