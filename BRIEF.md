@@ -20,7 +20,7 @@ Every stroke is cut as a V-section trench with two walls meeting at a valley lin
 - **Depth follows width.** The chisel angle is fixed, so a wider stroke is a deeper valley. At the traditional 60° included angle, depth ≈ 0.87 × stroke width.
 - **Bowls.** In D, B, O and other curved letters, the stroke swells and thins, so the valley deepens and shallows along its length. The depth rule handles this without special cases.
 - **Junctions.** Where a thin stroke or bowl meets a thick upright, the valleys must meet cleanly at the right depths.
-- **Order of cutting.** Thick strokes are always cut before thin ones. The software numbers the strokes in cutting order.
+- **Order of cutting.** Thin strokes are always cut before thick ones. Cutting a thin stroke into a thick stroke that has already been cut risks tear-out at the junction. The software numbers the strokes in cutting order, thin first.
 
 The working formula, with w the stroke width and θ the included chisel angle:
 
@@ -37,10 +37,10 @@ The carver types the inscription, sees it laid out on the stock, checks it, then
 3. Set the panel and stock: size, thickness, margins, line spacing, alignment.
 4. Adjust letter size and kerning, pair by pair where needed.
 5. The software computes each letter's outline, valley line, forked terminations and depths.
-6. It numbers the strokes in cutting order, thick first.
+6. It numbers the strokes in cutting order, thin first.
 7. Preview on screen: outlines, valleys, depth shading and stroke numbers, at true scale on the stock.
 8. Choose the tool and which passes to run.
-9. Save the G-code and an optional printed sheet showing the layout and cutting order.
+9. Save the G-code and an optional printed sheet showing the layout and cutting order (thin strokes first).
 
 Nothing goes to the machine until the carver has checked the preview by eye.
 
@@ -78,9 +78,11 @@ The G-code is written in millimetres and absolute coordinates, with zero at the 
 2. **Datum line.** A light line set in from the outline by a percentage of the local stroke width (never less than the datum minimum), so it follows the thick and thin. The first chisel cut starts here.
 3. **Valley slit.** A narrow slit down every valley line, sunk to the true valley depth less the slit margin. At stroke ends it follows the forked lines up into each corner, rising to nothing at the corner point. These forks are the stop cuts for the termination triangles.
 
+Within each pass the strokes are taken in cutting order, thin strokes first and thick strokes after, to match the hand cutting and avoid tear-out where a thin stroke meets a thick one.
+
 The bit's faces are steeper than any face of a 60° letter, so the slit always stays inside the waste and cannot touch a finished wall or termination face.
 
-The carver then works each letter by hand:
+The carver then works each letter by hand, thin strokes first and thick strokes after:
 
 1. **First cut.** From the datum line down into the slit on both walls, taking out the bulk of the waste.
 2. **Tidy cut.** From the hairline down to the bottom of the slit, removing the thin skin left by the first cut and leaving the crisp arris and finished wall.
@@ -162,7 +164,7 @@ Agreed 5 Oct 2026. Build in this order, one step at a time.
    - Set the stock size.
    - Show the board as the 30° bit marks it out (hairline, datum, valley slit and fork stop cuts at true depth) and as the finished incised letter.
    - A light that can be swept left to right to show the shadows.
-8. **G-code.** Generate the marking-out passes for the Genmitsu 3020-PRO Ultra as set out under Machine and G-code.
+8. **G-code.** Generate the marking-out passes for the Genmitsu 3020-PRO Ultra as set out under Machine and G-code, taking the strokes within each pass in cutting order: thin strokes first, then thick.
 
 **Later, not yet scheduled:**
 - Per-line cap height and scaling.
@@ -208,6 +210,7 @@ Answers from the carver, recorded as they are given.
 - **Kerning** (5 Oct 2026). A kerning adjustment applies to every place that pair of letters occurs. The kerning box also has a "this gap only" option, so a single gap can be adjusted on its own; that adjustment is added on top of the pair's.
 - **Negative space in open letters** (5 Oct 2026). The space between letters only counts a limited depth into open letters such as E, C, F, L and the mouth of G. The depth is set by eye with a slider, measured in from each letter's furthest point on that side, and the cut-off is shown on screen. Starting value 6 mm.
 - **Datum offset follows the stroke** (5 Oct 2026). The datum line is set in from the outline by a percentage of the local stroke width, so it follows the thick and thin, starting at 20%. A minimum distance (starting at 0.2 mm) stops it crowding the hairline. It is still dropped where the stroke is too narrow, which is wherever the stroke is narrower than twice the distance it would be set in.
+- **Cutting order: thin before thick** (5 Oct 2026). Correction to the earlier "thick first" rule. Thin strokes are cut first, then thick strokes, because cutting a thin stroke into a thick stroke that has already been cut risks tear-out at the junction. This applies to the stroke numbering, the printed cutting sheet and the order of strokes within the machine passes (Roadmap step 8).
 
 ## Open questions
 
