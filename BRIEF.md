@@ -128,6 +128,7 @@ What has been built so far. From here on, work follows the **Roadmap** below.
 3. **Done: workspace tools** (Roadmap, "Workspace tools", below).
 4. **Done: Roadmap step 1, lines and layout** (5 Oct 2026).
 5. **Done: Roadmap step 2, panel and border** (5 Oct 2026).
+6. **Done: Roadmap step 3, right-hand inspection panel** (5 Oct 2026).
 
 ## Roadmap
 
@@ -155,7 +156,7 @@ Agreed 5 Oct 2026. Build in this order, one step at a time.
    - Margins set per side, measured from the border, or from the panel edge where there is no border.
    - Machine bed check.
    - Background reference image: load a photo of an inscription, a rubbing, a drawing or an alphabet sheet behind the layout, scaled to true size and locked, to trace or match.
-3. **Right-hand inspection panel.**
+3. **Right-hand inspection panel.** *Done 5 Oct 2026.*
    - Overview of the whole panel with the letters filled solid black, with a toggle to show plain line blocks instead. It doubles as a navigator.
    - Line list showing for each line: number, text, length in mm and as a % of panel width, cap height, position, colour (% of the line's area that is letter), auto or placed, and lock.
    - Balance figures: space at top, bottom, left and right; the top-to-bottom ratio; and the visual centre of the lettering against the panel centre.
@@ -231,6 +232,7 @@ Answers from the carver, recorded as they are given.
 - **Negative space in open letters** (5 Oct 2026). The space between letters only counts a limited depth into open letters such as E, C, F, L and the mouth of G. The depth is set by eye with a slider, measured in from each letter's furthest point on that side, and the cut-off is shown on screen. Starting value 6 mm.
 - **Datum offset follows the stroke** (5 Oct 2026). The datum line is set in from the outline by a percentage of the local stroke width, so it follows the thick and thin, starting at 20%. A minimum distance (starting at 0.2 mm) stops it crowding the hairline. It is still dropped where the stroke is too narrow, which is wherever the stroke is narrower than twice the distance it would be set in.
 - **Cutting order: thin before thick** (5 Oct 2026). Correction to the earlier "thick first" rule. Thin strokes are cut first, then thick strokes, because cutting a thin stroke into a thick stroke that has already been cut risks tear-out at the junction. This applies to the stroke numbering, the printed cutting sheet and the order of strokes within the machine passes (Roadmap step 8).
+- **Incised border corners** (5 Oct 2026). On an incised border the valley forks only into the outer corners: these are hollows and need a stop cut. The inner corners are raised ridges, formed by paring both walls to meet, so they get no stop cut.
 
 ## Open questions
 
@@ -239,7 +241,6 @@ Answers from the carver, recorded as they are given.
 - What is the spindle's actual top speed?
 - How should serifs and bracketing be handled at terminations, beyond the plain fork into the corners?
 - Where thick and thin strokes cross, as in A or W, which valley wins at the crossing?
-- Incised border corners: for now the valley runs round the middle of the band and forks out to each outer corner (the mitre stop cut), and the inner corner is left as a plain arris. Is that how the corners should be set out until corner styles come?
 - Is the printed sheet showing the layout and cutting order wanted?
 - Which stand-in Roman typeface is closest to the letters the carver intends to draw?
 - The negative-space depth limit applies to every letter, so it also trims the space beside the slanting legs of A and V and under the arm of T, not only the bays of open letters. Is that wanted, or should those be left uncut?

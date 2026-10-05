@@ -16,6 +16,7 @@ import {
   type Project,
 } from './layout';
 import { loadImage, saveImage } from './imagestore';
+import { balanceHtml, lineListHtml, overviewSvg, overviewViewBox, type OverviewMode } from './inspector';
 import { BED, BED_EXTENDED, bedFit, fitToLettering } from './panel';
 import { LetterStore } from './letters';
 import { negativeSpace } from './negativeSpace';
@@ -52,6 +53,10 @@ let measure: { a: { x: number; y: number }; b: { x: number; y: number } } | null
 let guideDrag: { axis: 'x' | 'y'; index: number; at: number | null } | null = null;
 /** The selected line (0 = first), or null. */
 let selectedLine: number | null = null;
+/** The inspection panel: shown or hidden, and how the overview draws the letters. */
+const INSPECT_KEY = 'incised.inspect';
+let inspectOpen = readNumber(INSPECT_KEY, 1, 0, 1) === 1;
+let ovMode: OverviewMode = 'letters';
 /** The reference picture, ready to show (an object URL), once loaded. */
 let refUrl: string | null = null;
 /** Scaling the reference picture: the first point clicked, while waiting for the second. */
@@ -390,6 +395,7 @@ function draw() {
   showWarnings();
   showKerningSummary();
   showLineEditor();
+  drawInspector();
   applyView();
 }
 
@@ -463,6 +469,7 @@ function applyView() {
   }
 
   drawOverlay();
+  updateOverviewView();
   $('zoom-read').textContent = `${(v.scale / pxPerMm()).toFixed(2)} × true size`;
   $('ruler').style.width = `${100 * pxPerMm()}px`;
   $<HTMLInputElement>('cal').value = String(calibration);
@@ -568,6 +575,8 @@ function onKey(e: KeyboardEvent) {
 
   if (!e.altKey && /^[1-4]$/.test(e.key)) {
     applyPreset(PRESET_KEYS[Number(e.key) - 1]);
+  } else if (!e.altKey && (e.key === 'i' || e.key === 'I')) {
+    setInspect(!inspectOpen);
   } else if (!e.altKey && (e.key === 'm' || e.key === 'M')) {
     setMeasuring(!measuring);
   } else if (e.key === 'Tab' && (target === document.body || target.closest('#work'))) {
@@ -689,6 +698,7 @@ function wireTools() {
   // a click selects, a drag moves the line.
   work.addEventListener('pointerdown', onLinePress, true);
   wireLineEditor();
+  wireInspector();
 
   // Track the pointer for the ruler markers and the gap under it.
   work.addEventListener('pointermove', (e) => {
@@ -1235,6 +1245,103 @@ function onPicturePress(e: PointerEvent) {
   work.addEventListener('pointermove', move);
   work.addEventListener('pointerup', up);
   work.addEventListener('pointercancel', up);
+}
+
+// ---------------------------------------------------------------- inspection panel
+
+function wireInspector() {
+  setInspect(inspectOpen);
+  $('ins-toggle').addEventListener('click', () => setInspect(!inspectOpen));
+  $('ins-close').addEventListener('click', () => setInspect(false));
+  $('ov-mode').addEventListener('click', (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLElement>('[data-ov]');
+    if (!b) return;
+    ovMode = b.dataset.ov as OverviewMode;
+    drawInspector();
+  });
+
+  // The overview is a navigator: click or drag to centre the view there.
+  const ov = $<SVGSVGElement>('overview');
+  const goTo = (e: PointerEvent) => {
+    const m = ov.getScreenCTM();
+    if (!m) return;
+    const pt = new DOMPoint(e.clientX, e.clientY).matrixTransform(m.inverse());
+    const r = work.getBoundingClientRect();
+    const s = view.v.scale;
+    view.set({ scale: s, tx: r.width / 2 - pt.x * s, ty: r.height / 2 - pt.y * s });
+  };
+  ov.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    ov.setPointerCapture(e.pointerId);
+    goTo(e);
+    const move = (m: PointerEvent) => goTo(m);
+    const up = () => {
+      ov.removeEventListener('pointermove', move);
+      ov.removeEventListener('pointerup', up);
+    };
+    ov.addEventListener('pointermove', move);
+    ov.addEventListener('pointerup', up);
+  });
+
+  // The line list: click a line to select it; its buttons return it to auto or lock it.
+  $('line-list').addEventListener('click', (e) => {
+    const t = e.target as HTMLElement;
+    const auto = t.closest<HTMLElement>('[data-line-auto]');
+    const lock = t.closest<HTMLElement>('[data-line-lock]');
+    const card = t.closest<HTMLElement>('[data-select-line]');
+    if (auto) setPlacement(Number(auto.dataset.lineAuto), null);
+    else if (lock) {
+      const line = lineAtIndex(Number(lock.dataset.lineLock));
+      if (line) setPlacement(line.index, { ...placementOf(line), locked: !line.locked });
+    } else if (card) {
+      selectedLine = Number(card.dataset.selectLine);
+      selected = null;
+      draw();
+    }
+  });
+}
+
+function setInspect(open: boolean) {
+  inspectOpen = open;
+  document.body.classList.toggle('no-inspect', !open);
+  $('ins-toggle').classList.toggle('on', open);
+  try {
+    localStorage.setItem(INSPECT_KEY, open ? '1' : '0');
+  } catch {
+    /* not remembered */
+  }
+  drawInspector();
+}
+
+function drawInspector() {
+  if (!inspectOpen || !layout) return;
+  $('ov-mode')
+    .querySelectorAll<HTMLElement>('[data-ov]')
+    .forEach((b) => b.classList.toggle('on', b.dataset.ov === ovMode));
+  const ov = $<SVGSVGElement>('overview');
+  ov.setAttribute('viewBox', overviewViewBox(layout));
+  ov.innerHTML = overviewSvg(layout, ovMode, selectedLine);
+  $('line-list').innerHTML = lineListHtml(layout, selectedLine, esc);
+  $('balance').innerHTML = balanceHtml(layout);
+  updateOverviewView();
+}
+
+/** The box in the overview showing what the workspace has on screen. */
+function updateOverviewView() {
+  const rect = document.getElementById('ov-view');
+  if (!rect || !inspectOpen) return;
+  const r = work.getBoundingClientRect();
+  const v = view.v;
+  // What's on screen, trimmed to the overview so its edges always show.
+  const pad = 4;
+  const x0 = Math.max(-pad, (RULER - v.tx) / v.scale);
+  const y0 = Math.max(-pad, (RULER - v.ty) / v.scale);
+  const x1 = Math.min(project.panelWidth + pad, (r.width - v.tx) / v.scale);
+  const y1 = Math.min(project.panelHeight + pad, (r.height - v.ty) / v.scale);
+  rect.setAttribute('x', String(x0));
+  rect.setAttribute('y', String(y0));
+  rect.setAttribute('width', String(Math.max(0, x1 - x0)));
+  rect.setAttribute('height', String(Math.max(0, y1 - y0)));
 }
 
 // ---------------------------------------------------------------- helpers

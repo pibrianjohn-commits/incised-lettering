@@ -196,6 +196,7 @@
           <button id="undo" title="Undo (Ctrl+Z)">↶ Undo</button>
           <button id="redo" title="Redo (Ctrl+Shift+Z)">↷ Redo</button>
           <button id="measure" title="Measure between two points (M)">Measure</button>
+          <button id="ins-toggle" title="Show or hide the inspection panel (I)">Inspect</button>
           <button id="true-size">True size</button>
           <button id="fit">Fit panel</button>
           <span id="zoom-read"></span>
@@ -204,6 +205,32 @@
       <p id="help">Drag to move · Scroll to zoom · Drag from a ruler to make a guide, drag it back to remove it</p>
       <p id="loading">Loading letters…</p>
     </main>
+
+    <aside id="inspect" aria-label="Inspection panel">
+      <header class="ins-head">
+        <h2>Inspect</h2>
+        <button id="ins-close" class="quiet" title="Hide this panel (I)">Hide</button>
+      </header>
+      <section>
+        <div class="row">
+          <h3>Overview</h3>
+          <span class="seg" id="ov-mode">
+            <button data-ov="letters" title="Letters filled solid">Letters</button>
+            <button data-ov="blocks" title="Each line as a plain block">Blocks</button>
+          </span>
+        </div>
+        <svg id="overview" aria-label="Overview of the whole panel; click or drag to move the view"></svg>
+        <p class="hint small">Click or drag here to move the view; the box shows what's on screen. ✛ panel centre · ● visual centre of the lettering.</p>
+      </section>
+      <section>
+        <h3>Lines</h3>
+        <div id="line-list"></div>
+      </section>
+      <section>
+        <h3>Balance</h3>
+        <div id="balance"></div>
+      </section>
+    </aside>
 
     <script type="module" src="./src/main.ts"></script>
   </body>
