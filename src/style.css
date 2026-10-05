@@ -13,6 +13,10 @@
   --space: #2f8f5b;
   --accent: #8a5a1c;
   --warn: #9a3412;
+  --letter: #2a2018;
+  --guide: #0891b2;
+  --measure: #b5179e;
+  --ruler: 22px;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -89,7 +93,17 @@ input[type='number'] {
 .key.outline { border-color: var(--ink); border-top-width: 1px; }
 .key.datum { border-color: var(--datum); border-top-style: dashed; }
 .key.valley { border-color: var(--valley); }
-.key.fill { height: 10px; border: 1px solid var(--wood-edge); background: #b48a4e; }
+.key.fill { height: 10px; border: 1px solid var(--ink); background: var(--letter); }
+.key.guides { border-color: var(--wood-edge); border-top-style: dashed; border-top-width: 1px; }
+.key.kerns { border: 0; width: 22px; height: auto; font: 600 10px system-ui, sans-serif; color: var(--accent); text-align: center; }
+kbd {
+  font: 600 11px system-ui, sans-serif;
+  padding: 0 4px;
+  border: 1px solid var(--rule);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--bg);
+}
 .key.space { height: 10px; border: 1px solid var(--space); background: color-mix(in srgb, var(--space) 30%, transparent); }
 
 .hint { color: var(--muted); margin: 0 0 6px; font-size: 13px; }
@@ -148,7 +162,7 @@ summary { cursor: pointer; font-weight: 600; }
 #world .panel { fill: var(--wood); stroke: var(--wood-edge); stroke-width: 1.5; }
 #world .margin { fill: none; stroke: var(--wood-edge); stroke-width: 1; stroke-dasharray: 2 4; opacity: 0.5; }
 #world .guides line { stroke: var(--wood-edge); stroke-width: 1; stroke-dasharray: 4 4; opacity: 0.35; }
-#world .fill { fill: #b48a4e; opacity: 0.4; }
+#world .fill { fill: var(--letter); }
 #world .outline { fill: none; stroke: var(--outline); stroke-width: 1; }
 #world .datum { fill: none; stroke: var(--datum); stroke-width: 1; stroke-dasharray: 5 3; }
 #world .valley { fill: none; stroke: var(--valley); stroke-width: 1; stroke-linejoin: round; }
@@ -162,12 +176,22 @@ summary { cursor: pointer; font-weight: 600; }
 #work.hide-datum .datum,
 #work.hide-valley .valley,
 #work.hide-fill .fill,
-#work.hide-space .space { display: none; }
+#work.hide-space .space,
+#work.hide-guides .guides,
+#work.hide-guides .margin { display: none; }
+
+/* Design and Proof: just the letters. Proof also drops guides and dimensions. */
+#work.clean #labels .kern,
+#work.clean #world .gap:not(.sel) { fill-opacity: 0; stroke: none; }
+#work.clean #labels .kern { display: none; }
+#work.proof #overlay .guide,
+#work.proof #labels .dims { display: none; }
 
 #labels text { font: 12px system-ui, sans-serif; text-anchor: middle; paint-order: stroke; stroke: var(--wood); stroke-width: 3px; }
 #labels .area { fill: var(--space); font-weight: 600; }
 #labels .kern { fill: var(--accent); font-weight: 600; }
 #labels .kern.own { font-size: 11px; font-weight: 500; }
+#labels .kern.zero { fill: var(--muted); font-weight: 400; font-size: 11px; }
 #labels .dims { fill: var(--muted); stroke: var(--work); }
 
 #kern-pop {
@@ -193,13 +217,48 @@ summary { cursor: pointer; font-weight: 600; }
 
 #viewbar {
   position: absolute;
-  top: 12px;
-  right: 12px;
+  top: calc(var(--ruler) + 8px);
+  left: calc(var(--ruler) + 8px);
+  right: 8px;
   display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
   gap: 6px;
   align-items: center;
   cursor: default;
+  pointer-events: none;
 }
+#viewbar > * { pointer-events: auto; }
+#viewbar .tools { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+#viewbar .seg { background: var(--card); }
+#viewbar .seg kbd { margin-right: 3px; }
+#viewbar .seg button.on kbd { color: var(--ink); }
+#viewbar button:disabled { opacity: 0.45; cursor: default; }
+#measure.on { background: var(--accent); color: #fff; }
+
+/* Rulers along the top and left, in mm from the panel's top-left corner. */
+.ruler { position: absolute; background: var(--card); cursor: copy; touch-action: none; }
+#ruler-top { left: var(--ruler); top: 0; right: 0; height: var(--ruler); width: calc(100% - var(--ruler)); border-bottom: 1px solid var(--rule); overflow: visible; }
+#ruler-left { top: var(--ruler); left: 0; bottom: 0; width: var(--ruler); height: calc(100% - var(--ruler)); border-right: 1px solid var(--rule); overflow: visible; }
+#ruler-corner {
+  position: absolute; left: 0; top: 0; width: var(--ruler); height: var(--ruler);
+  background: var(--card); border: solid var(--rule); border-width: 0 1px 1px 0;
+  font: 9px system-ui, sans-serif; color: var(--muted); display: grid; place-items: center;
+}
+.ruler line { stroke: var(--muted); stroke-width: 1; shape-rendering: crispEdges; }
+.ruler text { font: 9px system-ui, sans-serif; fill: var(--muted); }
+.ruler line.cursor { stroke: var(--valley); }
+
+/* Guides and the measure tool, in screen pixels. */
+#overlay .guide line { stroke: var(--guide); stroke-width: 1; shape-rendering: crispEdges; }
+#overlay .guide line.hit { stroke: transparent; stroke-width: 9; cursor: grab; pointer-events: stroke; }
+#overlay .guide.live line { stroke-dasharray: 4 3; }
+#overlay .guide-label { font: 600 11px system-ui, sans-serif; fill: var(--guide); paint-order: stroke; stroke: var(--card); stroke-width: 3px; }
+#overlay .measure line { stroke: var(--measure); stroke-width: 1.5; }
+#overlay .measure circle { fill: var(--measure); }
+#overlay .measure text { font: 700 13px system-ui, sans-serif; fill: var(--measure); text-anchor: middle; paint-order: stroke; stroke: var(--card); stroke-width: 4px; }
+#overlay .measure text.small { font-size: 11px; font-weight: 500; }
+#work.measuring, #work.measuring * { cursor: crosshair; }
 #zoom-read {
   padding: 4px 8px;
   background: var(--card);
@@ -208,8 +267,8 @@ summary { cursor: pointer; font-weight: 600; }
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
-#help, #loading { position: absolute; left: 12px; bottom: 6px; margin: 0; color: var(--muted); font-size: 12px; pointer-events: none; }
-#loading { top: 12px; bottom: auto; font-size: 14px; }
+#help, #loading { position: absolute; left: calc(var(--ruler) + 10px); bottom: 6px; margin: 0; color: var(--muted); font-size: 12px; pointer-events: none; }
+#loading { top: calc(var(--ruler) + 50px); bottom: auto; font-size: 14px; }
 
 @font-face {
   font-family: 'Cinzel';

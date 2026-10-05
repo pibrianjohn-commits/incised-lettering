@@ -125,10 +125,17 @@ What has been built so far. From here on, work follows the **Roadmap** below.
    - A slider for the datum offset. The datum line is kept wherever the stroke is wide enough and stops where it isn't.
    - Panel width and height boxes.
    - Follow-up (see Decisions): kerning for one gap only, a depth limit for negative space in open letters, and a datum line that follows the thick and thin.
+3. **Done: workspace tools** (Roadmap, "Workspace tools", below).
 
 ## Roadmap
 
 Agreed 5 Oct 2026. Build in this order, one step at a time.
+
+**Workspace tools** (added and built 5 Oct 2026, ahead of step 1):
+- View presets, each on a number key: **Design (1)** letters filled solid dark, nothing else; **Spacing (2)** letters plus the shaded spaces and their areas; **Setting-out (3)** hairline, datum and valley lines only; **Proof (4)** clean letters with the border, as a client would see them. The individual tick boxes stay for fine control.
+- Keyboard kerning: with the cursor in a gap, Alt+arrow keys close or open it 0.1 mm, Alt+Shift+arrow 1 mm; Tab and Shift+Tab move to the next or previous gap. A toggle shows every kerning value as a small number under its gap.
+- Undo and redo (Ctrl+Z, Ctrl+Shift+Z) for every change.
+- Rulers in mm along the top and left of the workspace; guides dragged out of the rulers; a measure tool that reads the distance in mm between two points.
 
 1. **Lines and layout.**
    - Each line is an object with a number.
@@ -138,7 +145,7 @@ Agreed 5 Oct 2026. Build in this order, one step at a time.
    - Snapping guides while dragging: panel centre, margins, border, the ends, centres, baselines and cap lines of other lines, and equal gaps. Hold Alt to drag freely.
    - A dragged line stops following the line-spacing slider until "Return to auto". "Re-flow all" resets every line.
    - Lock a line.
-   - Undo and redo.
+   - Undo and redo (done early, with the workspace tools; it will need to cover line moves too).
    - Text stays editable after a line has been moved, and kerning survives text edits.
 2. **Panel and border.**
    - Panel size set by hand, or fitted to the inscription plus margins.
@@ -180,6 +187,8 @@ Agreed 5 Oct 2026. Build in this order, one step at a time.
 - Non-ranging letters.
 - The carver's own alphabet, loaded from SVG files.
 - Curved baselines and carved banner scrolls (Stages 2 and 3).
+- Double-click a letter to select it on its own.
+- Variants: save versions of a layout and compare them side by side.
 
 ## Technology and setup
 

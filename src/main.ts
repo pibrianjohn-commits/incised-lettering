@@ -3,6 +3,8 @@ import { contourToSvg, polylineToSvg } from './geometry';
 import { defaultProject, layoutPanel, type Align, type Gap, type Layout, type Project } from './layout';
 import { LetterStore } from './letters';
 import { negativeSpace } from './negativeSpace';
+import { History } from './history';
+import { RULER, rulerSvg } from './rulers';
 import { PanZoom, type ViewState } from './view';
 
 // ---------------------------------------------------------------- state
@@ -20,11 +22,22 @@ let layout: Layout | null = null;
 let selected: { line: number; n: number } | null = null;
 /** Whether the kerning box adjusts every place the pair occurs, or this gap only. */
 let kernMode: 'pair' | 'gap' = 'pair';
+/** The gap under the pointer, for keyboard kerning without clicking first. */
+let hovered: { line: number; n: number } | null = null;
+const history = new History<Project>();
+/** Pointer position over the workspace (px), for the ruler markers. */
+let pointer: { x: number; y: number } | null = null;
+/** Measure tool: on or off, and the two ends of the measurement in mm. */
+let measuring = false;
+let measure: { a: { x: number; y: number }; b: { x: number; y: number } } | null = null;
+/** A guide being dragged: which way it runs and where it is now (mm), or null when over a ruler. */
+let guideDrag: { axis: 'x' | 'y'; index: number; at: number | null } | null = null;
 
 const $ = <T extends Element = HTMLElement>(id: string) => document.getElementById(id) as unknown as T;
 const work = $('work');
 const world = $<SVGGElement>('world');
 const labels = $<SVGGElement>('labels');
+const overlay = $<SVGGElement>('overlay');
 const pop = $('kern-pop');
 
 const view = new PanZoom(work, {
@@ -80,17 +93,17 @@ function buildControls() {
     box.append(row);
     const range = row.querySelector<HTMLInputElement>('input[type=range]')!;
     const num = row.querySelector<HTMLInputElement>('input[type=number]')!;
-    range.addEventListener('input', () => update({ [s.key]: Number(range.value) }));
+    range.addEventListener('input', () => update({ [s.key]: Number(range.value) }, undefined, s.key));
     num.addEventListener('input', () => {
       const v = Number(num.value);
-      if (num.value !== '' && Number.isFinite(v)) update({ [s.key]: v }, num);
+      if (num.value !== '' && Number.isFinite(v)) update({ [s.key]: v }, num, s.key);
     });
   }
 
   const text = $<HTMLTextAreaElement>('text');
   text.addEventListener('input', () => {
     selected = null; // gaps are renumbered when the text changes
-    update({ text: text.value }, text);
+    update({ text: text.value }, text, 'text');
   });
 
   $('align').addEventListener('click', (e) => {
@@ -102,22 +115,27 @@ function buildControls() {
     const input = $<HTMLInputElement>(key);
     input.addEventListener('input', () => {
       const v = Number(input.value);
-      if (input.value !== '' && Number.isFinite(v) && v >= (key === 'margin' ? 0 : 1)) update({ [key]: v }, input);
+      if (input.value !== '' && Number.isFinite(v) && v >= (key === 'margin' ? 0 : 1)) update({ [key]: v }, input, key);
     });
   }
 
-  for (const layer of ['outline', 'datum', 'valley', 'fill', 'space']) {
+  for (const layer of LAYERS) {
     const cb = $<HTMLInputElement>(`show-${layer}`);
-    const sync = () => {
-      work.classList.toggle(`hide-${layer}`, !cb.checked);
-      if (layer === 'space') draw();
-    };
-    cb.addEventListener('change', sync);
-    work.classList.toggle(`hide-${layer}`, !cb.checked);
+    cb.addEventListener('change', () => {
+      setPreset(null); // fine control: no preset is exactly what's showing now
+      syncLayers();
+      draw();
+    });
   }
+  syncLayers();
+  $('presets').addEventListener('click', (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLElement>('[data-preset]');
+    if (b) applyPreset(b.dataset.preset as PresetName);
+  });
 
   // Kerning box.
   for (const el of [pop, $('viewbar')]) el.addEventListener('pointerdown', (e) => e.stopPropagation());
+  wireTools();
   pop.addEventListener('click', (e) => {
     const b = (e.target as HTMLElement).closest('button');
     if (!b) return;
@@ -129,16 +147,7 @@ function buildControls() {
       applyView();
     } else nudge(Number(b.dataset.nudge));
   });
-  document.addEventListener('keydown', (e) => {
-    if (!selected || (e.target as HTMLElement).closest('input, textarea')) return;
-    if (e.key === 'ArrowLeft') nudge(-1);
-    else if (e.key === 'ArrowRight') nudge(1);
-    else if (e.key === 'Escape') {
-      selected = null;
-      draw();
-    } else return;
-    e.preventDefault();
-  });
+  document.addEventListener('keydown', onKey);
   $('kerning-summary').addEventListener('click', (e) => {
     if ((e.target as HTMLElement).closest('#clear-kerning')) update({ kerning: {}, gapKerning: {} });
   });
@@ -155,19 +164,23 @@ function buildControls() {
   $('cal-reset').addEventListener('click', () => setCalibration(1));
 
   $('reset-all').addEventListener('click', () => {
-    if (!confirm('Clear the inscription, settings and kerning, and start again with OAK?')) return;
-    project = structuredClone(defaultProject);
+    if (!confirm('Clear the inscription, settings and kerning, and start again with OAK? (Undo brings it back.)')) return;
     selected = null;
-    update({});
+    update(structuredClone(defaultProject));
     fitPanel();
   });
 
   new ResizeObserver(() => applyView()).observe(work);
 }
 
-/** Apply a change to the project. `source` is the box being typed in, left alone. */
-function update(change: Partial<Project>, source?: Element) {
+/**
+ * Apply a change to the project. `source` is the box being typed in, left
+ * alone. Changes with the same `group` in quick succession undo as one step.
+ */
+function update(change: Partial<Project>, source?: Element, group: string | null = null) {
+  history.record(project, group);
   project = { ...project, ...change };
+  refreshUndoButtons();
   syncControls(source);
   saveProject();
   relayout();
@@ -192,19 +205,21 @@ function syncControls(source?: Element) {
     .forEach((b) => b.classList.toggle('on', b.dataset.align === project.align));
 }
 
-/** Move the selected gap's letters 0.1 mm closer (-1) or apart (+1); 0 puts it back. */
-function nudge(dir: number) {
+/** Move the selected gap's letters closer (dir -1) or apart (+1) by `step` mm; dir 0 puts it back. */
+function nudge(dir: number, step = 0.1) {
   const gap = selectedGap();
   if (!gap) return;
   if (kernMode === 'pair') {
     const k = { ...project.kerning };
-    const v = dir === 0 ? 0 : round(gap.pairKern + dir * 0.1, 1);
+    // Read the current setting, not the last drawing, so quick presses all count.
+    const v = dir === 0 ? 0 : round((project.kerning[gap.pair] ?? 0) + dir * step, 1);
     if (v === 0) delete k[gap.pair];
     else k[gap.pair] = v;
     update({ kerning: k });
   } else {
     const k = { ...project.gapKerning };
-    const v = dir === 0 ? 0 : round(gap.gapKern + dir * 0.1, 1);
+    const own = project.gapKerning[gap.key];
+    const v = dir === 0 ? 0 : round((own && own.pair === gap.pair ? own.mm : 0) + dir * step, 1);
     if (v === 0) delete k[gap.key];
     else k[gap.key] = { pair: gap.pair, mm: v };
     update({ gapKerning: k });
@@ -234,9 +249,26 @@ function relayout() {
 }
 
 function selectedGap(): Gap | null {
-  if (!layout || !selected) return null;
-  const inLine = layout.gaps.filter((g) => g.line === selected!.line);
-  return inLine[selected.n] ?? null;
+  return gapAt(selected);
+}
+
+function gapAt(at: { line: number; n: number } | null): Gap | null {
+  if (!layout || !at) return null;
+  const inLine = layout.gaps.filter((g) => g.line === at.line);
+  return inLine[at.n] ?? null;
+}
+
+/** Position of a gap in the whole inscription, reading order. */
+function gapIndex(at: { line: number; n: number } | null): number {
+  const g = gapAt(at);
+  return g && layout ? layout.gaps.indexOf(g) : -1;
+}
+
+function gapRef(i: number): { line: number; n: number } | null {
+  if (!layout || !layout.gaps.length) return null;
+  const all = layout.gaps;
+  const g = all[((i % all.length) + all.length) % all.length];
+  return { line: g.line, n: all.filter((h) => h.line === g.line).indexOf(g) };
 }
 
 const fmt = (n: number) => n.toFixed(3);
@@ -320,11 +352,12 @@ function applyView() {
       `<text class="area" x="${sx(s.gap.x).toFixed(1)}" y="${(sy(base - p.capHeight) - 6).toFixed(1)}">${Math.round(s.area)}</text>`,
     );
   }
+  const everyKern = $<HTMLInputElement>('show-kerns').checked;
   for (const g of labelData.gaps) {
-    if (!g.kern && !g.gapKern) continue;
+    if (!everyKern && !g.kern && !g.gapKern) continue;
     const base = layout!.lines[g.line].baselineY;
     const y = sy(base) + 14;
-    out.push(`<text class="kern" x="${sx(g.x).toFixed(1)}" y="${y.toFixed(1)}">${signed(g.kern)}</text>`);
+    out.push(`<text class="kern${g.kern ? '' : ' zero'}" x="${sx(g.x).toFixed(1)}" y="${y.toFixed(1)}">${signed(g.kern)}</text>`);
     if (g.gapKern) {
       out.push(
         `<text class="kern own" x="${sx(g.x).toFixed(1)}" y="${(y + 13).toFixed(1)}">this gap ${signed(g.gapKern)}</text>`,
@@ -356,6 +389,7 @@ function applyView() {
     pop.hidden = true;
   }
 
+  drawOverlay();
   $('zoom-read').textContent = `${(v.scale / pxPerMm()).toFixed(2)} × true size`;
   $('ruler').style.width = `${100 * pxPerMm()}px`;
   $<HTMLInputElement>('cal').value = String(calibration);
@@ -391,6 +425,266 @@ function showKerningSummary() {
 
 function fitPanel() {
   view.frame(project.panelWidth, project.panelHeight);
+}
+
+// ---------------------------------------------------------------- view presets
+
+const LAYERS = ['outline', 'datum', 'valley', 'fill', 'space', 'guides', 'kerns'] as const;
+type Layer = (typeof LAYERS)[number];
+type PresetName = 'design' | 'spacing' | 'setting' | 'proof';
+const PRESET_KEYS: PresetName[] = ['design', 'spacing', 'setting', 'proof'];
+
+/** Which layers each view preset shows. */
+const PRESETS: Record<PresetName, Layer[]> = {
+  design: ['fill'], // letters filled solid, nothing else
+  spacing: ['fill', 'space'], // letters plus shaded spaces and their areas
+  setting: ['outline', 'datum', 'valley'], // the marks the machine will make
+  proof: ['fill'], // clean letters on the panel, as a client would see them
+};
+
+function applyPreset(name: PresetName) {
+  for (const layer of LAYERS) $<HTMLInputElement>(`show-${layer}`).checked = PRESETS[name].includes(layer);
+  setPreset(name);
+  syncLayers();
+  draw();
+}
+
+function setPreset(name: PresetName | null) {
+  $('presets')
+    .querySelectorAll<HTMLElement>('[data-preset]')
+    .forEach((b) => b.classList.toggle('on', b.dataset.preset === name));
+  // Design and Proof hide the working labels; Proof also hides guides and dimensions.
+  work.classList.toggle('clean', name === 'design' || name === 'proof');
+  work.classList.toggle('proof', name === 'proof');
+}
+
+function syncLayers() {
+  for (const layer of LAYERS) work.classList.toggle(`hide-${layer}`, !$<HTMLInputElement>(`show-${layer}`).checked);
+}
+
+// ---------------------------------------------------------------- keys, undo
+
+function onKey(e: KeyboardEvent) {
+  const target = e.target as HTMLElement;
+  // Typing boxes keep their keys; tick boxes, sliders and buttons don't need them.
+  const inField = target.closest('textarea, select, input:not([type=checkbox]):not([type=range]):not([type=radio])');
+  // Undo and redo work everywhere, typing included, so every change is covered.
+  if ((e.ctrlKey || e.metaKey) && !e.altKey) {
+    const k = e.key.toLowerCase();
+    if (k === 'z') {
+      e.preventDefault();
+      if (e.shiftKey) redo();
+      else undo();
+    } else if (k === 'y') {
+      e.preventDefault();
+      redo();
+    }
+    return;
+  }
+  if (inField) return;
+
+  if (!e.altKey && /^[1-4]$/.test(e.key)) {
+    applyPreset(PRESET_KEYS[Number(e.key) - 1]);
+  } else if (!e.altKey && (e.key === 'm' || e.key === 'M')) {
+    setMeasuring(!measuring);
+  } else if (e.key === 'Tab' && (target === document.body || target.closest('#work'))) {
+    // Step through the gaps in reading order.
+    const cur = gapIndex(selected ?? hovered);
+    selected = gapRef(cur < 0 ? (e.shiftKey ? -1 : 0) : cur + (e.shiftKey ? -1 : 1));
+    draw();
+  } else if (e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+    // Kern the gap that's selected, or else the one under the pointer.
+    if (!gapAt(selected) && gapAt(hovered)) selected = hovered;
+    if (!gapAt(selected)) return;
+    nudge(e.key === 'ArrowLeft' ? -1 : 1, e.shiftKey ? 1 : 0.1);
+  } else if (e.key === 'Escape') {
+    if (measuring) setMeasuring(false);
+    selected = null;
+    draw();
+  } else return;
+  e.preventDefault();
+}
+
+function undo() {
+  const prev = history.undo(project);
+  if (prev) restore(prev);
+}
+
+function redo() {
+  const next = history.redo(project);
+  if (next) restore(next);
+}
+
+function restore(p: Project) {
+  project = p;
+  syncControls();
+  saveProject();
+  refreshUndoButtons();
+  relayout();
+}
+
+function refreshUndoButtons() {
+  $<HTMLButtonElement>('undo').disabled = !history.canUndo;
+  $<HTMLButtonElement>('redo').disabled = !history.canRedo;
+}
+
+// ---------------------------------------------------------------- rulers, guides, measure
+
+/** Screen point (client px) to panel millimetres. */
+function toMm(clientX: number, clientY: number) {
+  const r = work.getBoundingClientRect();
+  const v = view.v;
+  return { x: (clientX - r.left - v.tx) / v.scale, y: (clientY - r.top - v.ty) / v.scale };
+}
+
+function overRuler(clientX: number, clientY: number) {
+  const r = work.getBoundingClientRect();
+  return clientX - r.left < RULER || clientY - r.top < RULER;
+}
+
+function wireTools() {
+  $('undo').addEventListener('click', undo);
+  $('redo').addEventListener('click', redo);
+  $('measure').addEventListener('click', () => setMeasuring(!measuring));
+  refreshUndoButtons();
+
+  // Drag a guide out of a ruler: the top ruler gives a level guide, the left an upright one.
+  $('ruler-top').addEventListener('pointerdown', (e) => startGuideDrag('y', -1, e));
+  $('ruler-left').addEventListener('pointerdown', (e) => startGuideDrag('x', -1, e));
+  $('ruler-corner').addEventListener('pointerdown', (e) => e.stopPropagation());
+  overlay.addEventListener('pointerdown', (e) => {
+    const g = (e.target as Element).closest('[data-guide]');
+    if (!g || measuring) return;
+    const [axis, i] = g.getAttribute('data-guide')!.split(':');
+    startGuideDrag(axis as 'x' | 'y', Number(i), e);
+  });
+
+  // Measure: press, drag, release. Holds until the next measurement or Esc.
+  work.addEventListener(
+    'pointerdown',
+    (e) => {
+      if (!measuring || e.button !== 0) return;
+      if ((e.target as Element).closest('#viewbar, #kern-pop, .ruler, #ruler-corner')) return;
+      e.stopPropagation(); // don't pan
+      const a = toMm(e.clientX, e.clientY);
+      measure = { a, b: a };
+      work.setPointerCapture(e.pointerId);
+      const move = (m: PointerEvent) => {
+        let b = toMm(m.clientX, m.clientY);
+        // Shift keeps the measurement level or upright.
+        if (m.shiftKey) b = Math.abs(b.x - a.x) > Math.abs(b.y - a.y) ? { x: b.x, y: a.y } : { x: a.x, y: b.y };
+        measure = { a, b };
+        drawOverlay();
+      };
+      const up = () => {
+        work.removeEventListener('pointermove', move);
+        work.removeEventListener('pointerup', up);
+      };
+      work.addEventListener('pointermove', move);
+      work.addEventListener('pointerup', up);
+    },
+    true,
+  );
+
+  // Track the pointer for the ruler markers and the gap under it.
+  work.addEventListener('pointermove', (e) => {
+    const r = work.getBoundingClientRect();
+    pointer = { x: e.clientX - r.left, y: e.clientY - r.top };
+    const g = (e.target as Element).closest('[data-gap]');
+    hovered = g ? (([line, n]) => ({ line, n }))(g.getAttribute('data-gap')!.split(':').map(Number)) : null;
+    drawRulers();
+  });
+  work.addEventListener('pointerleave', () => {
+    pointer = null;
+    hovered = null;
+    drawRulers();
+  });
+}
+
+function setMeasuring(on: boolean) {
+  measuring = on;
+  if (!on) measure = null;
+  $('measure').classList.toggle('on', on);
+  work.classList.toggle('measuring', on);
+  drawOverlay();
+}
+
+function startGuideDrag(axis: 'x' | 'y', index: number, e: PointerEvent) {
+  if (e.button !== 0) return;
+  e.stopPropagation();
+  e.preventDefault();
+  const el = e.currentTarget as HTMLElement;
+  el.setPointerCapture(e.pointerId);
+  const at = (m: PointerEvent) => (overRuler(m.clientX, m.clientY) ? null : round(toMm(m.clientX, m.clientY)[axis], 1));
+  guideDrag = { axis, index, at: index >= 0 ? project.guides[axis][index] : null };
+  const move = (m: PointerEvent) => {
+    guideDrag = { axis, index, at: at(m) };
+    drawOverlay();
+  };
+  const up = (u: PointerEvent) => {
+    el.removeEventListener('pointermove', move);
+    el.removeEventListener('pointerup', up);
+    el.removeEventListener('pointercancel', up);
+    const where = u.type === 'pointerup' ? at(u) : index >= 0 ? project.guides[axis][index] : null;
+    guideDrag = null;
+    const list = project.guides[axis].slice();
+    if (index >= 0) list.splice(index, 1); // dragged back onto the ruler: removed
+    if (where !== null) list.push(where);
+    const changed = index >= 0 ? where !== project.guides[axis][index] : where !== null;
+    if (changed) update({ guides: { ...project.guides, [axis]: list } });
+    drawOverlay(); // show the dropped guide straight away
+  };
+  el.addEventListener('pointermove', move);
+  el.addEventListener('pointerup', up);
+  el.addEventListener('pointercancel', up);
+}
+
+/** Ruler guides and the measurement, drawn in screen pixels so they stay hair-thin. */
+function drawOverlay() {
+  const v = view.v;
+  const r = work.getBoundingClientRect();
+  const sx = (x: number) => (v.tx + x * v.scale).toFixed(1);
+  const sy = (y: number) => (v.ty + y * v.scale).toFixed(1);
+  const out: string[] = [];
+  const guide = (axis: 'x' | 'y', at: number, attr: string, live: boolean) => {
+    const c = axis === 'x' ? sx(at) : sy(at);
+    const pos = axis === 'x' ? `x1="${c}" x2="${c}" y1="0" y2="${r.height}"` : `y1="${c}" y2="${c}" x1="0" x2="${r.width}"`;
+    out.push(`<g class="guide${live ? ' live' : ''}" ${attr}><line class="hit" ${pos}/><line ${pos}/></g>`);
+    if (live) {
+      const label = `${axis === 'x' ? 'across' : 'down'} ${at.toFixed(1)} mm`;
+      const lx = axis === 'x' ? Number(c) + 6 : RULER + 6;
+      const ly = axis === 'x' ? RULER + 16 : Number(c) - 6;
+      out.push(`<text class="guide-label" x="${lx}" y="${ly}">${label}</text>`);
+    }
+  };
+  for (const axis of ['x', 'y'] as const) {
+    project.guides[axis].forEach((at, i) => {
+      if (guideDrag && guideDrag.axis === axis && guideDrag.index === i) return;
+      guide(axis, at, `data-guide="${axis}:${i}"`, false);
+    });
+  }
+  if (guideDrag && guideDrag.at !== null) guide(guideDrag.axis, guideDrag.at, '', true);
+
+  if (measure) {
+    const { a, b } = measure;
+    const d = Math.hypot(b.x - a.x, b.y - a.y);
+    out.push(`<g class="measure"><line x1="${sx(a.x)}" y1="${sy(a.y)}" x2="${sx(b.x)}" y2="${sy(b.y)}"/>`);
+    for (const p of [a, b]) out.push(`<circle cx="${sx(p.x)}" cy="${sy(p.y)}" r="3"/>`);
+    const mx = (Number(sx(a.x)) + Number(sx(b.x))) / 2;
+    const my = (Number(sy(a.y)) + Number(sy(b.y))) / 2;
+    out.push(
+      `<text x="${mx.toFixed(1)}" y="${(my - 10).toFixed(1)}">${d.toFixed(1)} mm</text>` +
+        `<text class="small" x="${mx.toFixed(1)}" y="${(my + 18).toFixed(1)}">across ${Math.abs(b.x - a.x).toFixed(1)} · down ${Math.abs(b.y - a.y).toFixed(1)}</text></g>`,
+    );
+  }
+  overlay.innerHTML = out.join('');
+  drawRulers();
+}
+
+function drawRulers() {
+  const r = work.getBoundingClientRect();
+  $('ruler-top').innerHTML = rulerSvg('x', r.width, view.v, pointer?.x ?? null);
+  $('ruler-left').innerHTML = rulerSvg('y', r.height, view.v, pointer?.y ?? null);
 }
 
 // ---------------------------------------------------------------- helpers

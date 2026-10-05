@@ -39,6 +39,8 @@ export interface Project {
    * (E, C, F, L, the mouth of G) counting their bays as space.
    */
   spaceDepth: number;
+  /** Guide lines dragged out of the rulers, mm from the panel's top-left corner. */
+  guides: { x: number[]; y: number[] };
 }
 
 export const defaultProject: Project = {
@@ -55,6 +57,7 @@ export const defaultProject: Project = {
   kerning: {},
   gapKerning: {},
   spaceDepth: 6,
+  guides: { x: [], y: [] },
 };
 
 /** Identifies a gap by its line and the position of the letter after it. */

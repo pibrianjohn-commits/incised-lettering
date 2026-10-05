@@ -50,6 +50,7 @@
       <section>
         <h2>Spacing</h2>
         <p class="hint">Click the gap between two letters to move them closer or further apart, either everywhere that pair of letters appears or in that one gap only.</p>
+        <p class="hint"><b>Keys:</b> point at or click a gap, then <kbd>Alt</kbd>+<kbd>←</kbd> / <kbd>→</kbd> closes or opens it 0.1 mm (add <kbd>Shift</kbd> for 1 mm). <kbd>Tab</kbd> and <kbd>Shift</kbd>+<kbd>Tab</kbd> step to the next or previous gap.</p>
         <div id="kerning-summary"></div>
         <p class="hint">With <b>Space between letters</b> shown (below), the space only counts so far into open letters such as E, C, F, L and the mouth of G. The green dashed lines show where it is cut off.</p>
         <div id="space-sliders"></div>
@@ -57,12 +58,15 @@
 
       <section>
         <h2>Show</h2>
+        <p class="hint">The view buttons above the panel (keys 1 to 4) set these for you. Tick or untick for finer control.</p>
         <div class="toggles">
           <label><input type="checkbox" id="show-outline" checked /> <i class="key outline"></i> Outline (hairline)</label>
           <label><input type="checkbox" id="show-datum" checked /> <i class="key datum"></i> Datum line</label>
           <label><input type="checkbox" id="show-valley" checked /> <i class="key valley"></i> Valley lines and forks</label>
-          <label><input type="checkbox" id="show-fill" /> <i class="key fill"></i> Shade the letters</label>
+          <label><input type="checkbox" id="show-fill" /> <i class="key fill"></i> Letters filled solid</label>
           <label><input type="checkbox" id="show-space" /> <i class="key space"></i> Space between letters (mm²)</label>
+          <label><input type="checkbox" id="show-guides" checked /> <i class="key guides"></i> Margin, baselines and cap lines</label>
+          <label><input type="checkbox" id="show-kerns" /> <i class="key kerns">0.0</i> Kerning value under every gap</label>
         </div>
       </section>
 
@@ -91,7 +95,11 @@
       <svg id="canvas" aria-label="Panel layout">
         <g id="world"></g>
         <g id="labels"></g>
+        <g id="overlay"></g>
       </svg>
+      <svg id="ruler-top" class="ruler" aria-label="Ruler in millimetres; drag down to make a guide"></svg>
+      <svg id="ruler-left" class="ruler" aria-label="Ruler in millimetres; drag right to make a guide"></svg>
+      <div id="ruler-corner" title="Rulers in mm from the panel's top-left corner">mm</div>
       <div id="kern-pop" hidden>
         <div class="pair"></div>
         <div class="seg mode">
@@ -110,11 +118,22 @@
         </div>
       </div>
       <div id="viewbar">
-        <button id="true-size">True size</button>
-        <button id="fit">Fit panel</button>
-        <span id="zoom-read"></span>
+        <span class="seg" id="presets">
+          <button data-preset="design" title="Letters filled solid, nothing else (key 1)"><kbd>1</kbd> Design</button>
+          <button data-preset="spacing" title="Letters with the spaces between them shaded and measured (key 2)"><kbd>2</kbd> Spacing</button>
+          <button data-preset="setting" title="Hairline, datum and valley lines only (key 3)"><kbd>3</kbd> Setting-out</button>
+          <button data-preset="proof" title="Clean letters as a client would see them (key 4)"><kbd>4</kbd> Proof</button>
+        </span>
+        <span class="tools">
+          <button id="undo" title="Undo (Ctrl+Z)">↶ Undo</button>
+          <button id="redo" title="Redo (Ctrl+Shift+Z)">↷ Redo</button>
+          <button id="measure" title="Measure between two points (M)">Measure</button>
+          <button id="true-size">True size</button>
+          <button id="fit">Fit panel</button>
+          <span id="zoom-read"></span>
+        </span>
       </div>
-      <p id="help">Drag to move · Scroll to zoom</p>
+      <p id="help">Drag to move · Scroll to zoom · Drag from a ruler to make a guide, drag it back to remove it</p>
       <p id="loading">Loading letters…</p>
     </main>
 
