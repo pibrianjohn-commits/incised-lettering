@@ -9,7 +9,7 @@
 import { gapKey, type LinePlacement, type Project } from './layout';
 
 /** The changes to apply to the project alongside `newText`. */
-export function remapForEdit(p: Project, newText: string): Pick<Project, 'gapKerning' | 'lines'> {
+export function remapForEdit(p: Project, newText: string): Pick<Project, 'gapKerning' | 'lines' | 'lineExtras'> {
   const before = [...p.text.replace(/\r/g, '')];
   const after = [...newText.replace(/\r/g, '')];
 
@@ -46,27 +46,31 @@ export function remapForEdit(p: Project, newText: string): Pick<Project, 'gapKer
     gapKerning[gapKey(nl, b - startsNew[nl])] = g;
   }
 
-  // A placed line follows its letters: the first of them that survives the edit.
-  const lines: Record<string, LinePlacement> = {};
-  for (const [key, place] of Object.entries(p.lines)) {
-    const li = Number(key);
-    if (li >= startsOld.length) continue;
-    const from = startsOld[li];
-    const to = lineEnd(before, startsOld, li);
-    let target: number | null = null;
-    for (let o = from; o < to && target === null; o++) {
-      const n = map(o);
-      if (n !== null) target = lineOf(startsNew, n);
+  // Anything kept per line (placement, fitted spacing) follows the line's
+  // letters: the first of them that survives the edit.
+  const followLine = <T>(rec: Record<string, T>): Record<string, T> => {
+    const out: Record<string, T> = {};
+    for (const [key, value] of Object.entries(rec)) {
+      const li = Number(key);
+      if (li >= startsOld.length) continue;
+      const from = startsOld[li];
+      const to = lineEnd(before, startsOld, li);
+      let target: number | null = null;
+      for (let o = from; o < to && target === null; o++) {
+        const n = map(o);
+        if (n !== null) target = lineOf(startsNew, n);
+      }
+      // An empty line, or one typed over entirely: keep it where its start went.
+      if (target === null) {
+        const n = map(from) ?? (from <= pre ? from : null);
+        if (n !== null && n <= after.length) target = lineOf(startsNew, n);
+      }
+      if (target !== null && !(String(target) in out)) out[String(target)] = value;
     }
-    // An empty line, or one typed over entirely: keep it where its start went.
-    if (target === null) {
-      const n = map(from) ?? (from <= pre ? from : null);
-      if (n !== null && n <= after.length) target = lineOf(startsNew, n);
-    }
-    if (target !== null && !(String(target) in lines)) lines[String(target)] = place;
-  }
+    return out;
+  };
 
-  return { gapKerning, lines };
+  return { gapKerning, lines: followLine<LinePlacement>(p.lines), lineExtras: followLine(p.lineExtras) };
 }
 
 /** Position of the first character of each line. */

@@ -6,6 +6,7 @@ import {
   defaultProject,
   layoutPanel,
   lineAnchor,
+  pairKerning,
   type Align,
   type Gap,
   type Layout,
@@ -18,6 +19,8 @@ import {
 import { loadImage, saveImage } from './imagestore';
 import { balanceHtml, lineListHtml, overviewSvg, overviewViewBox, type OverviewMode } from './inspector';
 import { BED, BED_EXTENDED, bedFit, fitToLettering } from './panel';
+import { defaultGroups, type Side } from './groups';
+import { defaultBox, evenUp, fitBlock, fitLine, type EvenUp, type FitBy } from './spacing';
 import { LetterStore } from './letters';
 import { negativeSpace } from './negativeSpace';
 import { History } from './history';
@@ -40,7 +43,15 @@ let layout: Layout | null = null;
 /** Selected gap, by line and position in the line, so it survives re-layout. */
 let selected: { line: number; n: number } | null = null;
 /** Whether the kerning box adjusts every place the pair occurs, or this gap only. */
-let kernMode: 'pair' | 'gap' = 'pair';
+let kernMode: 'group' | 'pair' | 'gap' = 'pair';
+/** Even-up suggestions on offer, the carver's tweaks to them, and whether to preview them on the panel. */
+let suggest: EvenUp | null = null;
+let tweaks: Record<string, number> = {};
+let previewSuggest = false;
+/** Fitting settings (not part of the job). */
+let fitBy: FitBy = 'letter';
+/** The alphabet's own settings are saved under its name. */
+let alphabetName = '';
 /** The gap under the pointer, for keyboard kerning without clicking first. */
 let hovered: { line: number; n: number } | null = null;
 const history = new History<Project>();
@@ -148,6 +159,7 @@ function buildControls() {
     });
   }
   wirePanel();
+  wireSpacing();
 
   for (const layer of LAYERS) {
     const cb = $<HTMLInputElement>(`show-${layer}`);
@@ -173,13 +185,16 @@ function buildControls() {
       selected = null;
       draw();
     } else if (b.dataset.mode) {
-      kernMode = b.dataset.mode as 'pair' | 'gap';
+      kernMode = b.dataset.mode as 'group' | 'pair' | 'gap';
       applyView();
     } else nudge(Number(b.dataset.nudge));
   });
   document.addEventListener('keydown', onKey);
   $('kerning-summary').addEventListener('click', (e) => {
-    if ((e.target as HTMLElement).closest('#clear-kerning')) update({ kerning: {}, gapKerning: {} });
+    if ((e.target as HTMLElement).closest('#clear-kerning')) {
+      if (confirm('Clear all group, pair and one-gap kerning? Group and pair kerning are shared by every job with this alphabet. (Undo brings it back.)'))
+        update({ kerning: {}, groupKerning: {}, gapKerning: {} });
+    }
   });
 
   // View.
@@ -194,9 +209,10 @@ function buildControls() {
   $('cal-reset').addEventListener('click', () => setCalibration(1));
 
   $('reset-all').addEventListener('click', () => {
-    if (!confirm('Clear the inscription, settings and kerning, and start again with OAK? (Undo brings it back.)')) return;
+    if (!confirm('Clear the inscription and settings and start again with OAK? The alphabet’s kerning is kept. (Undo brings it back.)')) return;
     selected = null;
-    update(structuredClone(defaultProject));
+    const { kerning, groupKerning, groups, evenUp } = project; // the alphabet's, kept
+    update({ ...structuredClone(defaultProject), kerning, groupKerning, groups, evenUp });
     fitPanel();
   });
 
@@ -231,6 +247,7 @@ function syncControls(source?: Element) {
     if (input !== source) input.value = String(project[key]);
   }
   syncPanelControls(source);
+  syncSpacingControls(source);
   $('align')
     .querySelectorAll('button')
     .forEach((b) => b.classList.toggle('on', b.dataset.align === project.align));
@@ -240,12 +257,20 @@ function syncControls(source?: Element) {
 function nudge(dir: number, step = 0.1) {
   const gap = selectedGap();
   if (!gap) return;
-  if (kernMode === 'pair') {
+  // Read the current settings, not the last drawing, so quick presses all count.
+  const [a, b] = [gap.left.char, gap.right.char];
+  if (kernMode === 'group' && gap.groupKey) {
+    const k = { ...project.groupKerning };
+    const v = dir === 0 ? 0 : round((k[gap.groupKey] ?? 0) + dir * step, 1);
+    if (v === 0) delete k[gap.groupKey];
+    else k[gap.groupKey] = v;
+    update({ groupKerning: k });
+  } else if (kernMode === 'pair' || kernMode === 'group') {
+    // An exact pair value starts from what the pair has now (its groups' value, if any)
+    // and from then on overrides the groups. "Back to 0" removes it, handing back to the groups.
     const k = { ...project.kerning };
-    // Read the current setting, not the last drawing, so quick presses all count.
-    const v = dir === 0 ? 0 : round((project.kerning[gap.pair] ?? 0) + dir * step, 1);
-    if (v === 0) delete k[gap.pair];
-    else k[gap.pair] = v;
+    if (dir === 0) delete k[gap.pair];
+    else k[gap.pair] = round(pairKerning(project, a, b).mm + dir * step, 1);
     update({ kerning: k });
   } else {
     const k = { ...project.gapKerning };
@@ -267,12 +292,12 @@ function relayout() {
   if (!store || pending) return;
   pending = requestAnimationFrame(() => {
     pending = 0;
-    layout = layoutPanel(store!, project, true);
+    layout = layoutPanel(store!, shownProject(), true);
     draw();
     clearTimeout(settle);
     if (layout.datumPending) {
       settle = window.setTimeout(() => {
-        layout = layoutPanel(store!, project);
+        layout = layoutPanel(store!, shownProject());
         draw();
       }, 150);
     }
@@ -365,6 +390,12 @@ function draw() {
     if (letter.datum.length) out.push(`<path class="datum" d="${letter.datum.map(contourToSvg).join('')}"/>`);
     out.push(`<path class="valley" d="${letter.valleys.map(polylineToSvg).join('')}"/>`);
   }
+  for (const stop of L.stops) {
+    const outline = stop.outline.map(contourToSvg).join('');
+    out.push(`<path class="fill" d="${outline}"/><path class="outline" d="${outline}"/>`);
+    if (stop.datum.length) out.push(`<path class="datum" d="${stop.datum.map(contourToSvg).join('')}"/>`);
+    out.push(`<path class="valley" d="${stop.valleys.map(polylineToSvg).join('')}"/>`);
+  }
 
   // Each line can be clicked to select it and dragged to move it.
   for (const line of L.lines) {
@@ -415,6 +446,14 @@ function applyView() {
       `<text class="area" x="${sx(s.gap.x).toFixed(1)}" y="${(sy(base - p.capHeight) - 6).toFixed(1)}">${Math.round(s.area)}</text>`,
     );
   }
+  // Pending even-up suggestions, in their own colour.
+  const pending = new Map((suggest?.suggestions ?? []).map((s) => [s.pair, tweaks[s.pair] ?? s.change]));
+  for (const g of labelData.gaps) {
+    const ch = pending.get(g.pair);
+    if (ch === undefined) continue;
+    const base = layout!.lines[g.line].baselineY;
+    out.push(`<text class="suggest" x="${sx(g.x).toFixed(1)}" y="${(sy(base) + 40).toFixed(1)}">${previewSuggest ? '' : '→ '}${signed(ch)}?</text>`);
+  }
   const everyKern = $<HTMLInputElement>('show-kerns').checked;
   for (const g of labelData.gaps) {
     if (!everyKern && !g.kern && !g.gapKern) continue;
@@ -455,11 +494,22 @@ function applyView() {
     pop.hidden = false;
     const pairName = `${g.left.char} ${g.right.char}`;
     pop.querySelector('.pair')!.textContent = pairName;
+    const groupName = g.groupKey ? `like ${g.groupKey.split('|')[0]} · like ${g.groupKey.split('|')[1]}` : null;
+    const mode = kernMode === 'group' && !g.groupKey ? 'pair' : kernMode;
     pop.querySelector('[data-mode="pair"]')!.textContent = `Every ${pairName}`;
-    pop.querySelectorAll<HTMLElement>('[data-mode]').forEach((b) => b.classList.toggle('on', b.dataset.mode === kernMode));
-    pop.querySelector('output')!.textContent = `${signed(kernMode === 'pair' ? g.pairKern : g.gapKern)} mm`;
-    pop.querySelector('.breakdown')!.textContent =
-      `Every ${pairName} ${signed(g.pairKern)} · this gap ${signed(g.gapKern)} · total ${signed(g.kern)} mm`;
+    const gb = pop.querySelector<HTMLButtonElement>('[data-mode="group"]')!;
+    gb.textContent = groupName ? `Group: ${groupName}` : 'No group';
+    gb.disabled = !groupName;
+    pop.querySelectorAll<HTMLElement>('[data-mode]').forEach((b) => b.classList.toggle('on', b.dataset.mode === mode));
+    const shown = mode === 'group' ? g.groupKern : mode === 'pair' ? g.pairKern : g.gapKern;
+    pop.querySelector('output')!.textContent = `${signed(shown)} mm`;
+    const parts = [
+      groupName ? `group ${signed(g.groupKern)}${g.pairFrom === 'pair' ? ' (overridden)' : ''}` : null,
+      g.pairFrom === 'pair' ? `${pairName} ${signed(g.pairKern)}` : null,
+      `this gap ${signed(g.gapKern)}`,
+      `total ${signed(g.kern)} mm`,
+    ].filter(Boolean);
+    pop.querySelector('.breakdown')!.textContent = parts.join(' · ');
     const x = sx(g.x);
     const y = sy(base - p.capHeight) - 28;
     pop.style.left = `${Math.round(x)}px`;
@@ -502,9 +552,11 @@ function showKerningSummary() {
     return `<b>${esc(a)} ${esc(b.join(''))}</b>`;
   };
   const pairs = Object.entries(project.kerning);
+  const groupsK = Object.entries(project.groupKerning);
   // Single gaps that still match the letters in that place.
   const own = layout ? layout.gaps.filter((g) => g.gapKern) : [];
   const items = [
+    ...groupsK.map(([k, v]) => `<li>Group: like <b>${esc(k.split('|')[0])}</b> · like <b>${esc(k.split('|')[1])}</b> ${signed(v)} mm</li>`),
     ...pairs.map(([k, v]) => `<li>${pairName(k)} everywhere ${signed(v)} mm</li>`),
     ...own.map((g) => `<li>${pairName(g.pair)} line ${g.line + 1}, this gap only ${signed(g.gapKern)} mm</li>`),
   ];
@@ -971,11 +1023,15 @@ function showLineEditor() {
       </div>`;
   }
   box.querySelector('.line-text')!.textContent = line.text.trim();
-  box.querySelector('.line-state')!.textContent = line.locked
+  const ex = project.lineExtras[String(line.index)];
+  const fitted = ex && (ex.letter || ex.word)
+    ? ` Fitted: ${[ex.letter ? `letter spacing ${signed(ex.letter)} mm` : '', ex.word ? `word spacing ${signed(ex.word)} mm` : ''].filter(Boolean).join(', ')}.`
+    : '';
+  box.querySelector('.line-state')!.textContent = (line.locked
     ? 'Locked: it will not move until unlocked.'
     : line.placed
       ? 'Placed by hand: it stays put when the line spacing or alignment changes.'
-      : 'Auto: it follows the line spacing and alignment.';
+      : 'Auto: it follows the line spacing and alignment.') + fitted;
   for (const input of box.querySelectorAll<HTMLInputElement>('[data-pos]')) {
     if (document.activeElement !== input) input.value = values[input.dataset.pos as keyof typeof values].toFixed(1);
     input.disabled = line.locked;
@@ -1344,6 +1400,298 @@ function updateOverviewView() {
   rect.setAttribute('height', String(Math.max(0, y1 - y0)));
 }
 
+// ---------------------------------------------------------------- spacing intelligence
+
+function alphaKey() {
+  return `incised.alphabet.${alphabetName}`;
+}
+
+/** Bring in the alphabet's saved kerning, groups and even-up settings. */
+function loadAlphabetSettings() {
+  try {
+    const raw = localStorage.getItem(alphaKey());
+    if (!raw) return; // first time with this alphabet: whatever the job has becomes the alphabet's
+    const a = JSON.parse(raw);
+    project = {
+      ...project,
+      kerning: { ...project.kerning, ...(a.kerning ?? {}) },
+      groupKerning: { ...project.groupKerning, ...(a.groupKerning ?? {}) },
+      groups: a.groups ?? project.groups,
+      evenUp: { ...project.evenUp, ...(a.evenUp ?? {}) },
+    };
+  } catch {
+    /* nothing saved */
+  }
+}
+
+/** The project as drawn: with even-up suggestions tried out, when previewing. */
+function shownProject(): Project {
+  if (!previewSuggest || !suggest?.suggestions.length) return project;
+  const kerning = { ...project.kerning };
+  for (const s of suggest.suggestions) {
+    const [a, b] = [...s.pair];
+    kerning[s.pair] = round(pairKerning(project, a, b).mm + (tweaks[s.pair] ?? s.change), 1);
+  }
+  return { ...project, kerning };
+}
+
+const STOP_SLIDERS = [
+  { key: 'size', name: 'Size', hint: 'side of the triangle, % of cap height', min: 8, max: 50, step: 1 },
+  { key: 'height', name: 'Height', hint: 'centre above the baseline, % of cap height', min: 5, max: 95, step: 1 },
+] as const;
+const FACTORS = [
+  { key: 'round', name: 'Round sides', hint: 'as in O, C, D' },
+  { key: 'straight', name: 'Straight sides', hint: 'as in H, I, N' },
+  { key: 'diagonal', name: 'Diagonal sides', hint: 'as in A, V, W' },
+] as const;
+
+function wireSpacing() {
+  // Even up.
+  const ref = $<HTMLInputElement>('eu-ref');
+  ref.addEventListener('input', () => {
+    const v = [...ref.value.toUpperCase()].slice(0, 2).join('');
+    if (v.length === 2) update({ evenUp: { ...project.evenUp, reference: v } }, ref, 'eu-ref');
+  });
+  const nudgeRef = (d: number) => {
+    const [a, b] = [...project.evenUp.reference];
+    if (!a || !b) return;
+    update({ kerning: { ...project.kerning, [a + b]: round(pairKerning(project, a, b).mm + d, 1) } });
+  };
+  $('eu-closer').addEventListener('click', () => nudgeRef(-0.1));
+  $('eu-apart').addEventListener('click', () => nudgeRef(0.1));
+  const box = $('eu-factors');
+  for (const f of FACTORS) {
+    const row = document.createElement('div');
+    row.className = 'slider';
+    row.innerHTML = `<div class="row"><label class="name" for="eu-${f.key}">${f.name} <small>${f.hint}</small></label><span><output id="eu-${f.key}-read"></output></span></div>
+      <input type="range" id="eu-${f.key}" min="0.5" max="1.5" step="0.05" />`;
+    box.append(row);
+    row.querySelector('input')!.addEventListener('input', (e) =>
+      update({ evenUp: { ...project.evenUp, [f.key]: Number((e.target as HTMLInputElement).value) } }, undefined, `eu-${f.key}`),
+    );
+  }
+  $('eu-suggest').addEventListener('click', () => {
+    if (!store || !layout) return;
+    suggest = evenUp(store, layoutPanel(store, project, true));
+    tweaks = {};
+    showSuggestions();
+    relayout();
+  });
+  $('eu-results').addEventListener('click', (e) => {
+    const t = (e.target as HTMLElement).closest<HTMLElement>('[data-act]');
+    if (!t || !suggest) return;
+    const pair = t.dataset.pair;
+    const act = t.dataset.act;
+    if (act === 'preview') {
+      previewSuggest = !previewSuggest;
+    } else if (act === 'accept' && pair) acceptSuggestions([pair]);
+    else if (act === 'refuse' && pair) dropSuggestions([pair]);
+    else if (act === 'accept-all') acceptSuggestions(suggest.suggestions.map((s) => s.pair));
+    else if (act === 'refuse-all') dropSuggestions(suggest.suggestions.map((s) => s.pair));
+    showSuggestions();
+    relayout();
+  });
+  $('eu-results').addEventListener('input', (e) => {
+    const t = (e.target as HTMLElement).closest<HTMLInputElement>('[data-tweak]');
+    if (!t) return;
+    const v = Number(t.value);
+    if (t.value !== '' && Number.isFinite(v)) tweaks[t.dataset.tweak!] = round(v, 1);
+    relayout();
+  });
+
+  // Fitting.
+  $('fit-by').addEventListener('click', (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLElement>('[data-by]');
+    if (b) fitBy = b.dataset.by as FitBy;
+    syncSpacingControls();
+  });
+  const fitSize = () => {
+    const d = defaultBox(project);
+    const w = Number($<HTMLInputElement>('fit-width').value) || d.width;
+    const h = Number($<HTMLInputElement>('fit-height').value) || d.height;
+    return { w, h };
+  };
+  $('fit-line').addEventListener('click', () => {
+    if (!store || selectedLine === null) return fitMessage('Select a line first: click it, or its number in the margin.');
+    const e = fitLine(store, project, selectedLine, fitSize().w, fitBy);
+    if (!e) return fitMessage(fitBy === 'word' ? 'That line has no word spaces to open or close.' : 'That line has too few letters to fit.');
+    update({ lineExtras: { ...project.lineExtras, [String(selectedLine)]: e } });
+    fitMessage(`Line ${selectedLine + 1} fitted to ${fitSize().w} mm.`);
+  });
+  $('fit-block').addEventListener('click', () => {
+    if (!store) return;
+    const { w, h } = fitSize();
+    const r = fitBlock(store, project, w, h, fitBy);
+    update({ lineExtras: r.lineExtras, ...(r.lineSpacing !== undefined ? { lineSpacing: r.lineSpacing } : {}) });
+    fitMessage(
+      `Every line fitted to ${w} mm${r.lineSpacing !== undefined ? `, block to ${h} mm high (line spacing ${r.lineSpacing.toFixed(1)} mm; lines placed by hand keep their places)` : ''}.` +
+        (r.skipped.length ? ` Line${r.skipped.length > 1 ? 's' : ''} ${r.skipped.join(', ')} could not be fitted ${fitBy === 'word' ? '(no word spaces)' : ''}.` : ''),
+    );
+  });
+  $('fit-clear').addEventListener('click', () => {
+    update({ lineExtras: {} });
+    fitMessage('Fitting cleared.');
+  });
+
+  // Word stops.
+  $<HTMLInputElement>('ws-on').addEventListener('change', (e) =>
+    update({ wordStops: { ...project.wordStops, on: (e.target as HTMLInputElement).checked } }),
+  );
+  const wsBox = $('ws-sliders');
+  for (const f of STOP_SLIDERS) {
+    const row = document.createElement('div');
+    row.className = 'slider';
+    row.innerHTML = `<div class="row"><label class="name" for="ws-${f.key}">${f.name} <small>${f.hint}</small></label><span><output id="ws-${f.key}-read"></output></span></div>
+      <input type="range" id="ws-${f.key}" min="${f.min}" max="${f.max}" step="${f.step}" />`;
+    wsBox.append(row);
+    row.querySelector('input')!.addEventListener('input', (e) =>
+      update({ wordStops: { ...project.wordStops, [f.key]: Number((e.target as HTMLInputElement).value) } }, undefined, `ws-${f.key}`),
+    );
+  }
+  $('ws-point').addEventListener('click', (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLElement>('[data-point]');
+    if (b) update({ wordStops: { ...project.wordStops, point: b.dataset.point as 'up' | 'down' } });
+  });
+
+  // Kerning groups.
+  $('groups-edit').addEventListener('change', (e) => {
+    const t = (e.target as HTMLElement).closest<HTMLInputElement>('[data-group]');
+    if (!t) return;
+    const [side, name] = t.dataset.group!.split(':') as [Side, string];
+    const groups = { left: { ...project.groups.left }, right: { ...project.groups.right } };
+    const members = [...new Set([...t.value.toUpperCase().replace(/\s/g, '')])].join('');
+    if (name === '+') {
+      if (members) groups[side][members[0]] = members; // a new group is named after its first letter
+    } else if (members) groups[side][name] = members;
+    else delete groups[side][name];
+    update({ groups });
+  });
+  $('groups-reset').addEventListener('click', () => update({ groups: structuredClone(defaultGroups) }));
+}
+
+function fitMessage(text: string) {
+  $('fit-msg').textContent = text;
+}
+
+function acceptSuggestions(pairs: string[]) {
+  if (!suggest) return;
+  const kerning = { ...project.kerning };
+  for (const pair of pairs) {
+    const s = suggest.suggestions.find((x) => x.pair === pair);
+    if (!s) continue;
+    const [a, b] = [...pair];
+    kerning[pair] = round(pairKerning(project, a, b).mm + (tweaks[pair] ?? s.change), 1);
+  }
+  update({ kerning });
+  dropSuggestions(pairs);
+}
+
+function dropSuggestions(pairs: string[]) {
+  if (!suggest) return;
+  suggest = { ...suggest, suggestions: suggest.suggestions.filter((s) => !pairs.includes(s.pair)) };
+  for (const p of pairs) delete tweaks[p];
+  if (!suggest.suggestions.length) previewSuggest = false;
+}
+
+function showSuggestions() {
+  const box = $('eu-results');
+  if (!suggest) {
+    box.innerHTML = '';
+    return;
+  }
+  if (!suggest.reference) {
+    box.innerHTML = `<p class="warn">The reference pair needs two letters the alphabet has.</p>`;
+    return;
+  }
+  const shape = (s: string) => ({ round: 'round', straight: 'straight', diagonal: 'diagonal' })[s];
+  const rows = suggest.suggestions
+    .map((s) => {
+      const [a, b] = [...s.pair];
+      return `<div class="sg">
+        <span class="sg-pair">${esc(a)} ${esc(b)}</span>
+        <span class="sg-figs">${Math.round(s.area)} → ${Math.round(s.target)} mm²<small>${shape(s.shapes[0])} · ${shape(s.shapes[1])}</small></span>
+        <input type="number" step="0.1" data-tweak="${esc(s.pair)}" value="${(tweaks[s.pair] ?? s.change).toFixed(1)}" title="Change to accept, mm (negative = closer)"/>
+        <button data-act="accept" data-pair="${esc(s.pair)}" title="Accept">✓</button>
+        <button data-act="refuse" data-pair="${esc(s.pair)}" title="Refuse" class="quiet">✗</button>
+      </div>`;
+    })
+    .join('');
+  box.innerHTML = suggest.suggestions.length
+    ? `<p class="hint small">Reference ${esc(suggest.reference.pair)}: ${Math.round(suggest.reference.area)} mm². Changes in mm, negative closer; edit one before accepting to tweak it.</p>
+       ${rows}
+       <div class="line-buttons wrap">
+         <button data-act="preview" class="${previewSuggest ? 'on' : ''}">${previewSuggest ? 'Previewing on the panel' : 'Preview on the panel'}</button>
+         <button data-act="accept-all">Accept all</button>
+         <button data-act="refuse-all" class="quiet">Refuse all</button>
+       </div>`
+    : `<p class="hint">Every pair matches the reference ${esc(suggest.reference.pair)} (${Math.round(suggest.reference.area)} mm²)${suggest.even.length ? '' : ''}. Nothing to suggest.</p>`;
+}
+
+function syncSpacingControls(source?: Element) {
+  const p = project;
+  const ref = $<HTMLInputElement>('eu-ref');
+  if (ref !== source) ref.value = p.evenUp.reference;
+  for (const f of FACTORS) {
+    $<HTMLInputElement>(`eu-${f.key}`).value = String(p.evenUp[f.key]);
+    $(`eu-${f.key}-read`).textContent = `× ${p.evenUp[f.key].toFixed(2)}`;
+  }
+  drawReferenceSample();
+
+  $('fit-by')
+    .querySelectorAll<HTMLElement>('[data-by]')
+    .forEach((b) => b.classList.toggle('on', b.dataset.by === fitBy));
+  const d = defaultBox(p);
+  $<HTMLInputElement>('fit-width').placeholder = String(d.width);
+  $<HTMLInputElement>('fit-height').placeholder = String(d.height);
+
+  $<HTMLInputElement>('ws-on').checked = p.wordStops.on;
+  for (const f of STOP_SLIDERS) {
+    $<HTMLInputElement>(`ws-${f.key}`).value = String(p.wordStops[f.key]);
+    $(`ws-${f.key}-read`).textContent = `${p.wordStops[f.key]}%`;
+  }
+  $('ws-point')
+    .querySelectorAll<HTMLElement>('[data-point]')
+    .forEach((b) => b.classList.toggle('on', b.dataset.point === p.wordStops.point));
+
+  const groupRows = (side: Side) =>
+    Object.entries(p.groups[side])
+      .map(
+        ([name, members]) =>
+          `<label>Like ${esc(name)} <input type="text" data-group="${side}:${esc(name)}" value="${esc(members)}" spellcheck="false" /></label>`,
+      )
+      .join('') + `<label class="new">New group <input type="text" data-group="${side}:+" placeholder="letters" spellcheck="false" /></label>`;
+  const ge = $('groups-edit');
+  if (!ge.contains(document.activeElement)) {
+    ge.innerHTML = `<h4>Left sides</h4><div class="groups">${groupRows('left')}</div><h4>Right sides</h4><div class="groups">${groupRows('right')}</div>`;
+  }
+}
+
+/** The reference pair on its own, with the space between its letters shaded and measured. */
+function drawReferenceSample() {
+  const svg = $<SVGSVGElement>('eu-sample');
+  const pair = project.evenUp.reference;
+  if (!store || [...pair].length !== 2) {
+    svg.innerHTML = '';
+    return;
+  }
+  const solo: Project = { ...project, text: pair, lines: {}, lineExtras: {}, gapKerning: {}, wordStops: { ...project.wordStops, on: false } };
+  const l = layoutPanel(store, solo, true);
+  const g = l.gaps[0];
+  const line = l.lines[0];
+  if (!g || !line.ink) {
+    svg.innerHTML = '';
+    return;
+  }
+  const k = project.capHeight;
+  const sp = negativeSpace(g, line.baselineY, k, project.spaceDepth);
+  const pad = k * 0.15;
+  svg.setAttribute('viewBox', `${line.ink.x0 - pad} ${line.baselineY - k - pad} ${line.ink.x1 - line.ink.x0 + 2 * pad} ${k + 2 * pad}`);
+  svg.innerHTML =
+    `<path class="eu-space" d="${contourToSvg(sp.shape)}"/>` +
+    `<path class="eu-ink" d="${l.letters.map((t) => t.outline.map(contourToSvg).join('')).join('')}"/>`;
+  $('eu-ref-read').textContent = `${signed(g.pairKern)} mm · ${Math.round(sp.area)} mm²`;
+}
+
 // ---------------------------------------------------------------- helpers
 
 function pxPerMm() {
@@ -1385,6 +1733,11 @@ function saveProject() {
   saveTimer = window.setTimeout(() => {
     try {
       localStorage.setItem(PROJECT_KEY, JSON.stringify(project));
+      // Kerning, groups and even-up settings belong to the alphabet, for every job.
+      if (alphabetName) {
+        const { kerning, groupKerning, groups, evenUp } = project;
+        localStorage.setItem(alphaKey(), JSON.stringify({ kerning, groupKerning, groups, evenUp }));
+      }
     } catch {
       /* storage unavailable */
     }
@@ -1422,6 +1775,9 @@ async function start() {
   if (!res.ok) throw new Error(`font file missing (${res.status})`);
   const alphabet = alphabetFromFont(await res.arrayBuffer(), 'SIL Open Font License 1.1');
   store = new LetterStore(alphabet);
+  alphabetName = alphabet.name;
+  loadAlphabetSettings();
+  syncControls();
   $('credit').innerHTML =
     `Stand-in alphabet: <b>${esc(alphabet.name)}</b> by Natanael Gama, ${alphabet.licence} ` +
     `(<a href="./fonts/OFL.txt">licence</a>).`;

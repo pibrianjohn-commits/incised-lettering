@@ -121,6 +121,72 @@
         <div id="kerning-summary"></div>
         <p class="hint">With <b>Space between letters</b> shown (below), the space only counts so far into open letters such as E, C, F, L and the mouth of G. The green dashed lines show where it is cut off.</p>
         <div id="space-sliders"></div>
+        <p class="hint small">Group and pair kerning are kept with the alphabet, so they apply every time those letters are typed, in every job. One-gap kerning stays with this job.</p>
+
+        <details id="even-up" open>
+          <summary>Even up spacing</summary>
+          <p class="hint">
+            Set one reference pair to look right by eye. Every other pair is then matched to its space, allowing for round,
+            straight and diagonal sides. Suggestions are only shown: nothing changes until you accept them.
+          </p>
+          <div class="boxes"><label>Reference pair <span><input type="text" id="eu-ref" maxlength="2" class="pair-input" /></span></label></div>
+          <svg id="eu-sample" aria-label="The reference pair with the space between its letters shaded"></svg>
+          <div class="kern-row eu-ref-row">
+            <button id="eu-closer">◀ Closer</button>
+            <output id="eu-ref-read"></output>
+            <button id="eu-apart">Apart ▶</button>
+          </div>
+          <div id="eu-factors"></div>
+          <button id="eu-suggest">Suggest spacing</button>
+          <div id="eu-results"></div>
+        </details>
+
+        <details id="fitting">
+          <summary>Fit to a width</summary>
+          <p class="hint">Stretch or squeeze a line to an exact length, end to end, by opening or closing its letter spacing or its word spacing.</p>
+          <div class="row">
+            <span class="name">Fill by</span>
+            <span class="seg" id="fit-by">
+              <button data-by="letter">Letter spacing</button>
+              <button data-by="word">Word spacing</button>
+            </span>
+          </div>
+          <div class="boxes">
+            <label>Width <span><input type="number" id="fit-width" min="1" step="0.5" /> mm</span></label>
+            <label>Height of the block <span><input type="number" id="fit-height" min="1" step="0.5" /> mm</span></label>
+          </div>
+          <p class="hint small">Both start as the space inside the margins. The height is used only by "Fit every line", from the top cap line to the bottom baseline.</p>
+          <div class="line-buttons wrap">
+            <button id="fit-line">Fit the selected line</button>
+            <button id="fit-block">Fit every line</button>
+            <button id="fit-clear" class="quiet">Clear fitting</button>
+          </div>
+          <p class="hint small" id="fit-msg"></p>
+        </details>
+
+        <details id="stops">
+          <summary>Word stops</summary>
+          <p class="hint">Small incised triangles between words, cut like the letters.</p>
+          <div class="toggles"><label><input type="checkbox" id="ws-on" /> Put a stop between words</label></div>
+          <div id="ws-sliders"></div>
+          <div class="row">
+            <span class="name">Point</span>
+            <span class="seg" id="ws-point">
+              <button data-point="up">Up ▲</button>
+              <button data-point="down">Down ▼</button>
+            </span>
+          </div>
+        </details>
+
+        <details id="groups-box">
+          <summary>Kerning groups</summary>
+          <p class="hint">
+            Letters whose side has the same shape are kerned together. Each line is one group: change its letters, or
+            clear them to remove it. A pair kerned on its own overrides its groups.
+          </p>
+          <div id="groups-edit"></div>
+          <button id="groups-reset" class="quiet">Back to the starting groups</button>
+        </details>
       </section>
 
       <section>
@@ -171,8 +237,9 @@
       <div id="kern-pop" hidden>
         <div class="pair"></div>
         <div class="seg mode">
-          <button data-mode="pair">Every pair</button>
-          <button data-mode="gap">This gap only</button>
+          <button data-mode="group" title="Every pair of letters with these two side shapes, in every job">Group</button>
+          <button data-mode="pair" title="Just this pair of letters, wherever it occurs, in every job">Every pair</button>
+          <button data-mode="gap" title="Just this one gap, in this job">This gap only</button>
         </div>
         <div class="kern-row">
           <button data-nudge="-1" title="Closer (← key)">◀ Closer</button>
