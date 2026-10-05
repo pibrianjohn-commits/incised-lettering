@@ -121,6 +121,7 @@ button {
   cursor: pointer;
 }
 button:hover { border-color: var(--accent); }
+button:disabled { opacity: 0.45; cursor: default; border-color: var(--rule); }
 button.quiet { font-size: 13px; color: var(--muted); }
 .seg { display: inline-flex; border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; }
 .seg button { border: 0; border-radius: 0; border-right: 1px solid var(--rule); }
@@ -168,6 +169,10 @@ summary { cursor: pointer; font-weight: 600; }
 #world .valley { fill: none; stroke: var(--valley); stroke-width: 1; stroke-linejoin: round; }
 #world .space path { fill: var(--space); fill-opacity: 0.22; stroke: var(--space); stroke-width: 1; stroke-opacity: 0.6; }
 #world .space path.cutoff { fill: none; stroke: var(--space); stroke-width: 1.5; stroke-opacity: 1; stroke-dasharray: 4 3; }
+#world .linehit { fill: var(--accent); fill-opacity: 0; cursor: move; }
+#world .linehit.locked { cursor: not-allowed; }
+#world .linehit.sel { stroke: var(--accent); stroke-width: 1; stroke-dasharray: 5 3; fill-opacity: 0.05; }
+#work.dragging-line, #work.dragging-line * { cursor: grabbing !important; }
 #world .gap { fill: var(--accent); fill-opacity: 0; cursor: pointer; }
 #world .gap:hover { fill-opacity: 0.12; }
 #world .gap.sel { fill-opacity: 0.18; stroke: var(--accent); stroke-width: 1; }
@@ -193,6 +198,27 @@ summary { cursor: pointer; font-weight: 600; }
 #labels .kern.own { font-size: 11px; font-weight: 500; }
 #labels .kern.zero { fill: var(--muted); font-weight: 400; font-size: 11px; }
 #labels .dims { fill: var(--muted); stroke: var(--work); }
+
+/* Line numbers in the workspace margin. */
+#labels .linenum { cursor: pointer; }
+#labels .linenum rect { fill: var(--card); stroke: var(--rule); }
+#labels .linenum text { font: 600 11px system-ui, sans-serif; fill: var(--ink); stroke: none; text-anchor: middle; }
+#labels .linenum.placed rect { stroke: var(--accent); }
+#labels .linenum.locked rect { stroke: var(--muted); stroke-dasharray: 2 2; }
+#labels .linenum.sel rect { fill: var(--accent); stroke: var(--accent); }
+#labels .linenum.sel text { fill: #fff; }
+#work.clean #labels .linenum { display: none; }
+
+/* Snapping guides while a line is dragged. */
+#overlay .snap line { stroke: var(--measure); stroke-width: 1; stroke-dasharray: 6 3; shape-rendering: crispEdges; }
+#overlay .snap text { font: 600 11px system-ui, sans-serif; fill: var(--measure); paint-order: stroke; stroke: var(--card); stroke-width: 3px; }
+
+.line-title { margin: 0 0 2px; }
+.line-text { font-family: 'Cinzel', Georgia, serif; letter-spacing: 0.04em; }
+.line-state { margin: 0 0 8px; color: var(--muted); font-size: 13px; }
+.line-buttons { display: flex; gap: 6px; margin: 8px 0; }
+.hint.small { font-size: 12px; margin-top: 4px; }
+#reflow { margin-top: 2px; }
 
 #kern-pop {
   position: absolute;

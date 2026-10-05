@@ -45,7 +45,8 @@ export class PanZoom {
   /** Show a w × h mm area centred, at `scale` px per mm (or fitted if omitted). */
   frame(w: number, h: number, scale?: number) {
     const r = this.el.getBoundingClientRect();
-    const s = scale ?? Math.min((r.width - 48) / w, (r.height - 48) / h);
+    // Leave room round the panel for the rulers and line numbers.
+    const s = scale ?? Math.min((r.width - 140) / w, (r.height - 120) / h);
     this.set({ scale: s, tx: (r.width - w * s) / 2, ty: (r.height - h * s) / 2 });
   }
 

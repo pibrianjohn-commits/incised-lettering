@@ -126,6 +126,7 @@ What has been built so far. From here on, work follows the **Roadmap** below.
    - Panel width and height boxes.
    - Follow-up (see Decisions): kerning for one gap only, a depth limit for negative space in open letters, and a datum line that follows the thick and thin.
 3. **Done: workspace tools** (Roadmap, "Workspace tools", below).
+4. **Done: Roadmap step 1, lines and layout** (5 Oct 2026).
 
 ## Roadmap
 
@@ -137,15 +138,15 @@ Agreed 5 Oct 2026. Build in this order, one step at a time.
 - Undo and redo (Ctrl+Z, Ctrl+Shift+Z) for every change.
 - Rulers in mm along the top and left of the workspace; guides dragged out of the rulers; a measure tool that reads the distance in mm between two points.
 
-1. **Lines and layout.**
-   - Each line is an object with a number.
-   - Click to select a line, drag to move it, and nudge it with the arrow keys: 0.1 mm per press, or 1 mm with Shift.
+1. **Lines and layout.** *Done 5 Oct 2026.*
+   - Each line is an object with a number, shown in the margin of the workspace beside the line.
+   - Click to select a line, drag to move it, and nudge it with the plain arrow keys: 0.1 mm per press, or 1 mm with Shift.
    - Kerning inside a selected line stays fixed while it moves.
    - Exact position boxes: left, centre and baseline.
-   - Snapping guides while dragging: panel centre, margins, border, the ends, centres, baselines and cap lines of other lines, and equal gaps. Hold Alt to drag freely.
+   - Snapping guides while dragging: panel centre, margins, border, the ruler guides, the ends, centres, baselines and cap lines of other lines, and equal gaps. Hold Alt to drag freely. (The border joins the list when borders exist, step 2.)
    - A dragged line stops following the line-spacing slider until "Return to auto". "Re-flow all" resets every line.
    - Lock a line.
-   - Undo and redo (done early, with the workspace tools; it will need to cover line moves too).
+   - Undo and redo, covering line moves (each drag is one step).
    - Text stays editable after a line has been moved, and kerning survives text edits.
 2. **Panel and border.**
    - Panel size set by hand, or fitted to the inscription plus margins.

@@ -41,6 +41,21 @@ export interface Project {
   spaceDepth: number;
   /** Guide lines dragged out of the rulers, mm from the panel's top-left corner. */
   guides: { x: number[]; y: number[] };
+  /** Lines placed or locked by hand, keyed by line number (0 = first line). */
+  lines: Record<string, LinePlacement>;
+}
+
+/**
+ * A line placed by hand. It keeps its place when the line-spacing slider or
+ * alignment changes, until it is returned to auto. `x` is where the line is
+ * anchored, read according to `align`: its left end, its centre, or its
+ * right end (pen positions, so editing the text keeps it anchored the same way).
+ */
+export interface LinePlacement {
+  x: number;
+  align: Align;
+  baseline: number;
+  locked?: boolean;
 }
 
 export const defaultProject: Project = {
@@ -58,6 +73,7 @@ export const defaultProject: Project = {
   gapKerning: {},
   spaceDepth: 6,
   guides: { x: [], y: [] },
+  lines: {},
 };
 
 /** Identifies a gap by its line and the position of the letter after it. */
@@ -93,9 +109,18 @@ export interface Gap {
 }
 
 export interface PlacedLine {
+  /** 0 for the first line. Shown to the carver as 1, 2, 3… */
+  index: number;
+  text: string;
   baselineY: number;
+  /** Pen start of the line, mm. */
   x0: number;
+  /** Pen width of the line (from the first pen position to the last), mm. */
   width: number;
+  /** Extent of the letters themselves, mm; null for a line with no letters. */
+  ink: { x0: number; x1: number } | null;
+  placed: boolean;
+  locked: boolean;
 }
 
 export interface Layout {
@@ -147,10 +172,17 @@ export function layoutPanel(store: LetterStore, p: Project, quick = false): Layo
     });
     const width = pen;
     const inner = p.panelWidth - 2 * p.margin;
-    const x0 =
-      p.align === 'left' ? p.margin : p.align === 'right' ? p.panelWidth - p.margin - width : p.margin + (inner - width) / 2;
-    const baselineY = firstBaseline + li * p.lineSpacing;
-    lines.push({ baselineY, x0, width });
+    const place = p.lines[String(li)];
+    const x0 = place
+      ? lineStart(place.x, place.align, width)
+      : p.align === 'left'
+        ? p.margin
+        : p.align === 'right'
+          ? p.panelWidth - p.margin - width
+          : p.margin + (inner - width) / 2;
+    const baselineY = place ? place.baseline : firstBaseline + li * p.lineSpacing;
+    const line: PlacedLine = { index: li, text, baselineY, x0, width, ink: null, placed: !!place, locked: !!place?.locked };
+    lines.push(line);
 
     let prev: PlacedLetter | null = null;
     chars.forEach((ch, i) => {
@@ -171,6 +203,9 @@ export function layoutPanel(store: LetterStore, p: Project, quick = false): Layo
         box: { x0: m.box.x0 + dx, x1: m.box.x1 + dx, y0: m.box.y0 + dy, y1: m.box.y1 + dy },
       };
       letters.push(L);
+      line.ink = line.ink
+        ? { x0: Math.min(line.ink.x0, L.box.x0), x1: Math.max(line.ink.x1, L.box.x1) }
+        : { x0: L.box.x0, x1: L.box.x1 };
       if (!m.datum) datumPending = true;
       if (L.box.x0 < p.margin - 0.01 || L.box.x1 > p.panelWidth - p.margin + 0.01) wide = true;
       if (prev) {
@@ -193,13 +228,24 @@ export function layoutPanel(store: LetterStore, p: Project, quick = false): Layo
     });
   });
 
-  const top = firstBaseline - k;
-  const bottom = firstBaseline + (texts.length - 1) * p.lineSpacing;
-  const tall = top < p.margin - 0.01 || bottom > p.panelHeight - p.margin + 0.01;
+  const inked = lines.filter((l) => l.ink);
+  const top = Math.min(...inked.map((l) => l.baselineY - k));
+  const bottom = Math.max(...inked.map((l) => l.baselineY));
+  const tall = inked.length > 0 && (top < p.margin - 0.01 || bottom > p.panelHeight - p.margin + 0.01);
 
   return { project: p, letters, gaps, lines, overflow: { wide, tall }, datumPending };
 }
 
 function round1(v: number) {
   return Math.round(v * 10) / 10;
+}
+
+/** Pen start of a line of pen width `width` anchored at `x` by `align`. */
+export function lineStart(x: number, align: Align, width: number): number {
+  return align === 'left' ? x : align === 'right' ? x - width : x - width / 2;
+}
+
+/** The anchor that puts a line of pen width `width` starting at `x0`, for `align`. */
+export function lineAnchor(x0: number, align: Align, width: number): number {
+  return align === 'left' ? x0 : align === 'right' ? x0 + width : x0 + width / 2;
 }
