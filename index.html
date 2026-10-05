@@ -189,6 +189,49 @@
         </details>
       </section>
 
+      <section id="machine">
+        <h2>Machine and G-code</h2>
+        <p class="hint">Marks out the letters with the 30° V-bit: hairline, datum line and valley slit (see the brief). Zero is the top surface of the stock.</p>
+        <div class="boxes">
+          <label>Stock thickness <span><input type="number" data-mc="stockThickness" min="0" step="0.5" placeholder="enter" /> mm</span></label>
+          <label>Safe floor <span><input type="number" data-mc="safeFloor" min="0.5" step="0.5" /> mm</span></label>
+          <label>Chisel angle <span><input type="number" data-mc="chiselAngle" min="30" max="120" step="1" /> °</span></label>
+          <label>Slit margin <span><input type="number" data-mc="slitMargin" min="0" step="0.05" /> mm</span></label>
+        </div>
+        <p class="hint small">No cut goes deeper than the stock thickness less the safe floor. The slit stops the slit margin short of the true valley depth.</p>
+        <div class="row"><span class="name">X0 Y0 at the panel's</span></div>
+        <div class="seg corners" id="mc-corner">
+          <button data-corner="top-left">↖ Top left</button>
+          <button data-corner="top-right">Top right ↗</button>
+          <button data-corner="bottom-left">↙ Bottom left</button>
+          <button data-corner="bottom-right">Bottom right ↘</button>
+        </div>
+        <div class="toggles mc-passes">
+          <label><input type="checkbox" data-mc-pass="hairline" /> <i class="key outline"></i> Pass 1: hairline</label>
+          <label><input type="checkbox" data-mc-pass="datum" /> <i class="key datum"></i> Pass 2: datum line</label>
+          <label><input type="checkbox" data-mc-pass="slit" /> <i class="key valley"></i> Pass 3: valley slit and forks</label>
+        </div>
+        <details>
+          <summary>Bit, speeds and depths</summary>
+          <div class="boxes">
+            <label>Bit angle <span><input type="number" data-mc="toolAngle" min="10" max="90" step="1" /> °</span></label>
+            <label>Bit cutting depth <span><input type="number" data-mc="toolCutDepth" min="1" step="0.1" /> mm</span></label>
+            <label>Spindle <span><input type="number" data-mc="spindle" min="1000" step="500" /> rpm</span></label>
+            <label>Hairline depth <span><input type="number" data-mc="hairlineDepth" min="0.05" step="0.05" /> mm</span></label>
+            <label>Hairline feed <span><input type="number" data-mc="feedHairline" min="50" step="50" /> mm/min</span></label>
+            <label>Datum depth <span><input type="number" data-mc="datumDepth" min="0.05" step="0.05" /> mm</span></label>
+            <label>Datum feed <span><input type="number" data-mc="feedDatum" min="50" step="50" /> mm/min</span></label>
+            <label>Slit depth per pass <span><input type="number" data-mc="slitStep" min="0.2" step="0.25" /> mm</span></label>
+            <label>Slit feed <span><input type="number" data-mc="feedSlit" min="50" step="50" /> mm/min</span></label>
+            <label>Plunge feed <span><input type="number" data-mc="feedPlunge" min="20" step="10" /> mm/min</span></label>
+            <label>Lift between cuts <span><input type="number" data-mc="safeZ" min="1" step="0.5" /> mm</span></label>
+          </div>
+          <p class="hint small">Starting values for oak from the brief, to be fine-tuned by test cuts.</p>
+        </details>
+        <button id="mc-preview" class="primary">Preview the passes…</button>
+        <p class="hint small" id="mc-note">The G-code can only be saved from the preview, once every pass has been looked at and every check is passed.</p>
+      </section>
+
       <section>
         <h2>Show</h2>
         <p class="hint">The view buttons above the panel (keys 1 to 4) set these for you. Tick or untick for finer control.</p>
@@ -268,6 +311,19 @@
           <button id="fit">Fit panel</button>
           <span id="zoom-read"></span>
         </span>
+      </div>
+      <div id="cam-bar" hidden>
+        <div class="cam-head">
+          <b>Check every pass before saving</b>
+          <span class="seg" id="cam-tabs"></span>
+          <button id="cam-close" class="quiet">Back to the layout</button>
+        </div>
+        <div id="cam-info"></div>
+        <ul id="cam-checks"></ul>
+        <div class="cam-save">
+          <span id="cam-viewed"></span>
+          <button id="cam-save" class="primary" disabled>Save G-code</button>
+        </div>
       </div>
       <p id="help">Drag to move · Scroll to zoom · Drag from a ruler to make a guide, drag it back to remove it</p>
       <p id="loading">Loading letters…</p>

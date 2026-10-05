@@ -432,3 +432,62 @@ body.no-inspect #inspect { display: none; }
   #side { height: auto; border-right: 0; border-bottom: 1px solid var(--rule); }
   #work { height: 70vh; order: -1; }
 }
+
+/* ---------------------------------------------------------- machine and G-code */
+
+button.primary { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 600; margin-top: 8px; }
+button.primary:disabled { background: var(--card); color: var(--muted); }
+.seg.corners { display: grid; grid-template-columns: 1fr 1fr; margin: 4px 0 8px; }
+.seg.corners button { border-bottom: 1px solid var(--rule); font-size: 13px; }
+.seg.corners button:nth-child(2n) { border-right: 0; }
+.mc-passes { margin: 6px 0; }
+#machine details .boxes { margin-top: 6px; }
+
+/* Toolpath preview: the letters drop back, the passes come forward. */
+#work.cam #world .datum,
+#work.cam #world .valley,
+#work.cam #world .space,
+#work.cam #world .fill,
+#work.cam #world .gap,
+#work.cam #world .linehit,
+#work.cam #labels .kern,
+#work.cam #labels .suggest,
+#work.cam #labels .area,
+#work.cam #labels .linenum { display: none; }
+#work.cam #world .outline { stroke: var(--muted); stroke-opacity: 0.35; }
+#world .tp path, #world .tp line { fill: none; }
+#world .tp-hair { stroke: var(--ink); stroke-width: 1.2; }
+#world .tp-datum { stroke: var(--datum); stroke-width: 1.2; }
+#world .tp-slit { stroke: #7f1d1d; stroke-width: 1; }
+#world .tp-slit-band line { stroke: var(--valley); stroke-opacity: 0.45; stroke-linecap: round; vector-effect: none; }
+#world .tp-rapid { stroke: var(--guide); stroke-width: 1; stroke-dasharray: 3 4; opacity: 0.7; }
+#labels .stroke-num { font: 700 10px system-ui, sans-serif; fill: #7f1d1d; stroke: var(--wood); stroke-width: 3px; }
+#labels .zero circle { fill: var(--measure); stroke: none; }
+#labels .zero line { stroke: var(--measure); stroke-width: 2; }
+#labels .zero text { font: 700 12px system-ui, sans-serif; fill: var(--measure); stroke: var(--work); stroke-width: 3px; }
+
+#cam-bar {
+  position: absolute;
+  left: calc(var(--ruler) + 8px);
+  right: 8px;
+  bottom: 8px;
+  max-height: 46%;
+  overflow-y: auto;
+  background: var(--card);
+  border: 2px solid var(--accent);
+  border-radius: 8px;
+  padding: 8px 12px;
+  box-shadow: 0 6px 24px rgb(0 0 0 / 0.2);
+  cursor: default;
+}
+.cam-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; }
+#cam-tabs button { font-size: 13px; }
+#cam-info p { margin: 6px 0; }
+#cam-checks { list-style: none; padding: 0; margin: 6px 0; font-size: 13px; }
+#cam-checks li { padding: 1px 0; }
+#cam-checks .ok { color: var(--space); }
+#cam-checks .bad { color: var(--warn); font-weight: 600; }
+#cam-checks .warn { color: var(--accent); }
+.cam-save { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.cam-save button { margin-top: 0; }
+#cam-viewed { font-size: 13px; color: var(--muted); }

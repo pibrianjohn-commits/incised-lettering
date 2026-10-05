@@ -3,6 +3,7 @@
 import { datumLines } from './datum';
 import type { Contour } from './geometry';
 import { defaultGroups, groupPairKey, type KernGroups } from './groups';
+import { defaultMachine, type MachineSettings } from './toolpath';
 import type { Box, LetterStore } from './letters';
 import type { ValleyLine } from './valley';
 
@@ -46,6 +47,8 @@ export interface Project {
   /** Extra spacing per line from fitting it to a width, mm, keyed by line number. */
   lineExtras: Record<string, LineExtra>;
   wordStops: WordStops;
+  /** Stock, tool, feeds, depths and which passes to run, for the G-code. */
+  machine: MachineSettings;
   /**
    * Hand kerning for one gap only, mm, added on top of the pair's kerning.
    * Keyed by gap (see gapKey); the pair is kept so that if the text is edited
@@ -96,6 +99,7 @@ export const defaultProject: Project = {
   evenUp: { reference: 'HH', round: 1, straight: 1, diagonal: 1 },
   lineExtras: {},
   wordStops: { on: false, size: 22, height: 45, point: 'down' },
+  machine: defaultMachine,
   gapKerning: {},
   spaceDepth: 6,
   guides: { x: [], y: [] },

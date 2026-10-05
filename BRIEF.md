@@ -64,6 +64,8 @@ All measurements are metric, in millimetres and degrees.
 | Datum set-in | How far the datum line sits inside the outline, as a percentage of the local stroke width | 20% |
 | Datum minimum | The datum line never comes closer to the outline than this | 0.2 mm |
 | Slit margin | How far the valley slit stops short of the true valley depth | 0.3 mm |
+| Safe floor | No cut comes closer to the back of the board than this | 3 mm |
+| Zero corner | The panel corner that is X0 Y0 on the machine | Bottom left |
 | Tool | The V-bit used for every pass | 30° V-groove, 6.35 mm diameter |
 
 The carver's own letters will arrive later as drawn vector files (SVG) or a font file. The software must accept either without changing anything else.
@@ -130,10 +132,13 @@ What has been built so far. From here on, work follows the **Roadmap** below.
 5. **Done: Roadmap step 2, panel and border** (5 Oct 2026).
 6. **Done: Roadmap step 3, right-hand inspection panel** (5 Oct 2026).
 7. **Done: Roadmap step 4, spacing intelligence** (5 Oct 2026).
+8. **Done: Roadmap step 8, G-code** (5 Oct 2026), brought forward so the method can be tested in wood.
 
 ## Roadmap
 
 Agreed 5 Oct 2026. Build in this order, one step at a time.
+
+**Change of order** (5 Oct 2026): step 8 (G-code) is built next, before steps 5, 6 and 7, so the method can be tested in wood as soon as the 30° bit arrives. The order from here is 8, then 5, 6, 7.
 
 **Workspace tools** (added and built 5 Oct 2026, ahead of step 1):
 - View presets, each on a number key: **Design (1)** letters filled solid dark, nothing else; **Spacing (2)** letters plus the shaded spaces and their areas; **Setting-out (3)** hairline, datum and valley lines only; **Proof (4)** clean letters with the border, as a client would see them. The individual tick boxes stay for fine control.
@@ -184,7 +189,7 @@ Agreed 5 Oct 2026. Build in this order, one step at a time.
    - Set the stock size.
    - Show the board as the 30° bit marks it out (hairline, datum, valley slit and fork stop cuts at true depth) and as the finished incised letter.
    - A light that can be swept left to right to show the shadows.
-8. **G-code.** Generate the marking-out passes for the Genmitsu 3020-PRO Ultra as set out under Machine and G-code, taking the strokes within each pass in cutting order: thin strokes first, then thick.
+8. **G-code.** *Done 5 Oct 2026.* Generate the marking-out passes for the Genmitsu 3020-PRO Ultra as set out under Machine and G-code, taking the strokes within each pass in cutting order: thin strokes first, then thick. Every pass is shown on screen (the slit at its true cut width, strokes numbered in cutting order, travel moves dashed, X0 Y0 marked), with safety checks; the G-code can be saved only after every pass has been looked at and every blocking check is passed, and any change to the layout closes the preview.
 
 **Later, not yet scheduled:**
 - Per-line cap height and scaling.
@@ -246,4 +251,8 @@ Answers from the carver, recorded as they are given.
 - Which stand-in Roman typeface is closest to the letters the carver intends to draw?
 - Even-up factors for round, straight and diagonal sides: they start at 1.0 (pure equal space). Measured with the 6 mm depth limit, round pairs such as H O come out with less space than H H, so at 1.0 the suggestions open them up; a round factor below 1 (try 0.8) brings them closer. What factors look right by eye?
 - Word stops start as triangles with sides 22% of the cap height, centred 45% up, pointing down. Is that the right size, height and direction?
+- G-code cutting order: for now the machine works letter by letter in reading order, and within each letter takes thin strokes first, then thick (a "stroke" being one run of valley line between forks, so the short forks into the corners, being thinnest, come first and act as stop cuts). Is letter by letter right, or should all thin strokes on the panel go before any thick ones?
+- Safe floor starts at 3 mm and the zero corner at bottom left. Are those right for the workshop?
+- Scribed (single and double) borders are cut in the hairline pass, at the hairline depth. Should they be deeper, as a finished line rather than a marking-out line?
+- The G-code is written for GRBL and still needs confirming against the machine and its sender before the first cut: run it in the air (Z raised) or in scrap first.
 - The negative-space depth limit applies to every letter, so it also trims the space beside the slanting legs of A and V and under the arm of T, not only the bays of open letters. Is that wanted, or should those be left uncut?
