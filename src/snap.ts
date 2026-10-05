@@ -1,8 +1,8 @@
-// Snapping a line while it is dragged: to the panel centre, the margins, the
+// Snapping a line while it is dragged: to the panel centre, the margins, the border, the
 // ruler guides, the ends, centres, baselines and cap lines of other lines, and
 // to positions that make the spacing between lines equal.
 
-import type { Layout } from './layout';
+import { borderDepth, contentBox, type Layout } from './layout';
 
 /** Which part of the moving line a target lines up with. */
 export type Feature = 'left' | 'centre' | 'right' | 'base' | 'cap' | 'mid';
@@ -36,16 +36,23 @@ export function nearest(features: { f: Feature; at: number }[], targets: SnapTar
 export function snapTargets(layout: Layout, index: number): { x: SnapTarget[]; y: SnapTarget[] } {
   const p = layout.project;
   const k = p.capHeight;
+  const box = contentBox(p);
   const x: SnapTarget[] = [
     { at: p.panelWidth / 2, label: 'panel centre', for: ['centre'] },
-    { at: p.margin, label: 'left margin', for: ['left'] },
-    { at: p.panelWidth - p.margin, label: 'right margin', for: ['right'] },
+    { at: box.x0, label: 'left margin', for: ['left'] },
+    { at: box.x1, label: 'right margin', for: ['right'] },
   ];
   const y: SnapTarget[] = [
     { at: p.panelHeight / 2, label: 'panel centre', for: ['mid'] },
-    { at: p.margin, label: 'top margin', for: ['cap'] },
-    { at: p.panelHeight - p.margin, label: 'bottom margin', for: ['base'] },
+    { at: box.y0, label: 'top margin', for: ['cap'] },
+    { at: box.y1, label: 'bottom margin', for: ['base'] },
   ];
+  // The border's inner edge, as well as the margins inside it.
+  const d = borderDepth(p.border);
+  if (d > 0) {
+    x.push({ at: d, label: 'border', for: ['left'] }, { at: p.panelWidth - d, label: 'border', for: ['right'] });
+    y.push({ at: d, label: 'border', for: ['cap'] }, { at: p.panelHeight - d, label: 'border', for: ['base'] });
+  }
   for (const g of p.guides.x) x.push({ at: g, label: 'guide', for: ['left', 'centre', 'right'] });
   for (const g of p.guides.y) y.push({ at: g, label: 'guide', for: ['base', 'cap', 'mid'] });
 

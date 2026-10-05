@@ -58,8 +58,8 @@ describe('lines', () => {
   });
 
   it('snaps to ruler guides', () => {
-    const l = lay({ guides: { x: [33], y: [] } });
-    const s = nearest([{ f: 'left', at: 33.5 }], snapTargets(l, 0).x, 1);
+    const l = lay({ guides: { x: [3], y: [] } }); // near the panel edge, clear of everything else
+    const s = nearest([{ f: 'left', at: 3.5 }], snapTargets(l, 0).x, 1);
     expect(s?.target.label).toBe('guide');
   });
 

@@ -51,11 +51,67 @@
       <section>
         <h2>Panel</h2>
         <div class="boxes">
-          <label>Width <span><input type="number" id="panelWidth" min="10" max="1000" step="1" /> mm</span></label>
-          <label>Height <span><input type="number" id="panelHeight" min="10" max="1000" step="1" /> mm</span></label>
-          <label>Margin <span><input type="number" id="margin" min="0" max="200" step="0.5" /> mm</span></label>
+          <label>Width <span><input type="number" id="panelWidth" min="10" max="1000" step="0.5" /> mm</span></label>
+          <label>Height <span><input type="number" id="panelHeight" min="10" max="1000" step="0.5" /> mm</span></label>
         </div>
+        <button id="fit-panel" title="Size the panel to hold the lettering plus the margins and border">Fit panel to the lettering</button>
+        <p id="bed-status"></p>
         <div id="warnings"></div>
+      </section>
+
+      <section>
+        <h2>Border</h2>
+        <span class="seg" id="border-style">
+          <button data-border="none">None</button>
+          <button data-border="single">Single</button>
+          <button data-border="double">Double</button>
+          <button data-border="incised">Incised</button>
+        </span>
+        <div class="boxes" id="border-boxes">
+          <label data-for="single double incised">In from the panel edge <span><input type="number" id="b-inset" min="0" step="0.5" /> mm</span></label>
+          <label data-for="double">Gap between the lines <span><input type="number" id="b-gap" min="0.2" step="0.1" /> mm</span></label>
+          <label data-for="incised">Width of the cut <span><input type="number" id="b-width" min="0.5" step="0.1" /> mm</span></label>
+        </div>
+        <p class="hint" id="border-hint"></p>
+      </section>
+
+      <section>
+        <h2>Margins</h2>
+        <p class="hint" id="margin-hint"></p>
+        <div class="margins-grid">
+          <label class="m-top">Top <input type="number" id="m-top" min="0" step="0.5" /></label>
+          <label class="m-left">Left <input type="number" id="m-left" min="0" step="0.5" /></label>
+          <span class="m-mid">mm</span>
+          <label class="m-right">Right <input type="number" id="m-right" min="0" step="0.5" /></label>
+          <label class="m-bottom">Bottom <input type="number" id="m-bottom" min="0" step="0.5" /></label>
+        </div>
+        <div class="boxes"><label>All four sides <span><input type="number" id="m-all" min="0" step="0.5" placeholder="—" /> mm</span></label></div>
+      </section>
+
+      <section>
+        <h2>Reference picture</h2>
+        <p class="hint">
+          Put a photo of an inscription, a rubbing, a drawing or an alphabet sheet behind the layout to trace or match.
+          Scale it to true size, line it up, then lock it.
+        </p>
+        <input type="file" id="ref-file" accept="image/*" hidden />
+        <button id="ref-load">Load a picture…</button>
+        <div id="ref-controls" hidden>
+          <div class="toggles">
+            <label><input type="checkbox" id="ref-visible" /> Show the picture</label>
+            <label><input type="checkbox" id="ref-locked" /> Lock it in place</label>
+          </div>
+          <div class="slider">
+            <div class="row"><label class="name" for="ref-opacity">Strength</label><span id="ref-opacity-read"></span></div>
+            <input type="range" id="ref-opacity" min="0.05" max="1" step="0.05" />
+          </div>
+          <div class="boxes"><label>Width on the panel <span><input type="number" id="ref-width" min="1" step="0.1" /> mm</span></label></div>
+          <div class="line-buttons">
+            <button id="ref-scale" title="Click two points on the picture a known distance apart, then type that distance">Scale from two points</button>
+            <button id="ref-remove" class="quiet">Remove</button>
+          </div>
+          <p class="hint small" id="ref-hint">While it's unlocked, drag the picture to move it.</p>
+        </div>
       </section>
 
       <section>
@@ -78,6 +134,7 @@
           <label><input type="checkbox" id="show-space" /> <i class="key space"></i> Space between letters (mm²)</label>
           <label><input type="checkbox" id="show-guides" checked /> <i class="key guides"></i> Margin, baselines and cap lines</label>
           <label><input type="checkbox" id="show-kerns" /> <i class="key kerns">0.0</i> Kerning value under every gap</label>
+          <label><input type="checkbox" id="show-bed" /> <i class="key bed"></i> Machine bed outline</label>
         </div>
       </section>
 
