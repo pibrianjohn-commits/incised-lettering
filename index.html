@@ -309,10 +309,41 @@
           <button id="redo" title="Redo (Ctrl+Shift+Z)">↷ Redo</button>
           <button id="measure" title="Measure between two points (M)">Measure</button>
           <button id="ins-toggle" title="Show or hide the inspection panel (I)">Inspect</button>
+          <button id="v3d-open" title="The board in 3D, as marked out and as finished (key 5)"><kbd>5</kbd> 3D view</button>
           <button id="true-size">True size</button>
           <button id="fit">Fit panel</button>
           <span id="zoom-read"></span>
         </span>
+      </div>
+      <div id="v3d" hidden>
+        <div id="v3d-canvas"></div>
+        <div id="v3d-bar">
+          <div class="v3d-row">
+            <span class="seg" id="v3d-state">
+              <button data-state="marked" title="As the 30° bit leaves it: exactly the passes the G-code makes">Marked out by the bit</button>
+              <button data-state="finished" title="The letters carved to the chisel angle">Finished letters</button>
+            </span>
+            <span class="seg" id="v3d-colour">
+              <button data-colour="wood">Wood</button>
+              <button data-colour="depth">Depth colours</button>
+            </span>
+            <span class="seg">
+              <button data-view="fit">Whole board</button>
+              <button data-view="top">From above</button>
+              <button data-view="front">Along the front</button>
+            </span>
+            <button id="v3d-close" class="quiet" title="Back to the layout (Esc)">Back to the layout</button>
+          </div>
+          <div class="v3d-row">
+            <label class="v3d-slider">Light from <small>left</small><input type="range" id="v3d-across" min="-90" max="90" step="1" /><small>right</small></label>
+            <label class="v3d-slider">Light height <small>low</small><input type="range" id="v3d-height" min="3" max="85" step="1" /><small>high</small></label>
+            <button id="v3d-sweep">Sweep ▶</button>
+            <span id="v3d-legend"></span>
+          </div>
+          <p id="v3d-note" class="hint small"></p>
+        </div>
+        <p id="v3d-working" hidden>Working out the board…</p>
+        <p id="v3d-help">Left-drag to turn · right-drag to move · scroll to zoom</p>
       </div>
       <div id="cam-bar" hidden>
         <div class="cam-head">

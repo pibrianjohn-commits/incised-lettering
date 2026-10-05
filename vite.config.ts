@@ -4,4 +4,6 @@ import { defineConfig } from 'vite';
 // (https://<user>.github.io/incised-lettering/) as well as locally.
 export default defineConfig({
   base: './',
+  // three.js (the 3D view) is one large piece, loaded only when the 3D view is opened.
+  build: { chunkSizeWarningLimit: 700 },
 });

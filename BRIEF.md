@@ -134,6 +134,7 @@ What has been built so far. From here on, work follows the **Roadmap** below.
 6. **Done: Roadmap step 3, right-hand inspection panel** (5 Oct 2026).
 7. **Done: Roadmap step 4, spacing intelligence** (5 Oct 2026).
 8. **Done: Roadmap step 8, G-code** (5 Oct 2026), brought forward so the method can be tested in wood.
+9. **Done: Roadmap step 7, 3D view** (5 Oct 2026).
 
 ## Roadmap
 
@@ -185,7 +186,7 @@ Agreed 5 Oct 2026. Build in this order, one step at a time.
    - A library of complete finished layouts, saved and reused (not empty templates).
    - Client proof: export the layout as a clean PDF or image for customer approval.
    - Full-size printed template: print the layout at 1:1 across several sheets, for transfer or for checking against the wood.
-7. **3D view.**
+7. **3D view.** *Done 5 Oct 2026.* The board at its panel size and real stock thickness; "Marked out by the bit" is stamped from exactly the cuts in the G-code, and "Finished letters" carves every letter to the chisel angle; wood or depth colours; a light swept from the left, over the top of the panel, to the right, and raised or lowered, with shadows traced across the cuts. Opened with the 3D view button or key 5.
    - Like Kiri:Moto: orbit, pan and zoom.
    - Set the stock size.
    - Show the board as the 30° bit marks it out (hairline, datum, valley slit and fork stop cuts at true depth) and as the finished incised letter.

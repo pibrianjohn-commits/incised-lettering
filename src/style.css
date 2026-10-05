@@ -491,3 +491,31 @@ button.primary:disabled { background: var(--card); color: var(--muted); }
 .cam-save { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .cam-save button { margin-top: 0; }
 #cam-viewed { font-size: 13px; color: var(--muted); }
+
+/* ---------------------------------------------------------- 3D view */
+
+#v3d { position: absolute; inset: 0; z-index: 5; background: #2b2620; cursor: default; }
+#v3d-canvas { position: absolute; inset: 0; }
+#v3d-canvas canvas { display: block; cursor: grab; }
+#v3d-canvas canvas:active { cursor: grabbing; }
+#v3d-bar {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  right: 8px;
+  background: color-mix(in srgb, var(--card) 92%, transparent);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  padding: 6px 10px;
+}
+.v3d-row { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin: 2px 0; }
+.v3d-row .seg button, .v3d-row > button { font-size: 13px; }
+#v3d-close { margin-left: auto; }
+.v3d-slider { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+.v3d-slider small { color: var(--muted); }
+.v3d-slider input { width: 150px; accent-color: var(--accent); }
+#v3d-legend { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
+.v3d-ramp { display: inline-block; width: 110px; height: 10px; border-radius: 3px; background: linear-gradient(to right, #c9a26b, #faE68c, #f59433, #cc2e2e, #591a73); }
+#v3d-note { margin: 4px 0 0; }
+#v3d-working { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); color: #f4ead8; font-size: 15px; margin: 0; }
+#v3d-help { position: absolute; left: 12px; bottom: 6px; margin: 0; color: #cbbfa9; font-size: 12px; pointer-events: none; }
