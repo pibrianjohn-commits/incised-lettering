@@ -97,6 +97,29 @@ describe('passes', () => {
   });
 });
 
+describe('scribed borders', () => {
+  const border = { style: 'double' as const, inset: 6, gap: 1.5, width: 3 };
+  it('are cut in the hairline pass at their own depth, 0.2 mm to start', () => {
+    const hair = buildPasses(lay({ border }), m)[0];
+    const lines = hair.cuts.filter((c) => c.item === 'border');
+    expect(lines).toHaveLength(2);
+    for (const c of lines) for (const p of c.points) expect(p.z).toBeCloseTo(-0.2, 9);
+  });
+
+  it('can be set deeper for a finished line, up to 1 mm and no further', () => {
+    const at = (d: number) => buildPasses(lay({ border }), { ...m, scribeDepth: d })[0].cuts.find((c) => c.item === 'border')!.points[0].z;
+    expect(at(0.8)).toBeCloseTo(-0.8, 9);
+    expect(at(3)).toBeCloseTo(-1, 9);
+    // The letters' hairline is unchanged.
+    expect(buildPasses(lay({ border }), { ...m, scribeDepth: 0.8 })[0].cuts[0].points[0].z).toBeCloseTo(-0.2, 9);
+  });
+
+  it('an incised border keeps its edges at the hairline depth', () => {
+    const hair = buildPasses(lay({ border: { ...border, style: 'incised' } }), { ...m, scribeDepth: 0.9 })[0];
+    for (const c of hair.cuts.filter((x) => x.item === 'border')) expect(c.points[0].z).toBeCloseTo(-0.2, 9);
+  });
+});
+
 describe('safety checks', () => {
   const layout = lay();
   it('no G-code without the stock thickness', () => {
