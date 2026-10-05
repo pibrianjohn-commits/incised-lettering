@@ -12,7 +12,7 @@
 // of outline are noise from the sampling and are thrown away.
 
 import Delaunator from 'delaunator';
-import { densify, insideShape, simplify, type Contour, type Pt } from './geometry';
+import { densify, insideShape, type Contour, type Pt } from './geometry';
 
 /** A point on a valley line. `r` is the distance to the outline, i.e. half the stroke width there. */
 export interface ValleyPt extends Pt {
@@ -88,7 +88,7 @@ export function valleyLines(contours: Contour[], opts: ValleyOptions = defaultVa
     link(t2, t1);
   }
 
-  return chain(adj, centre as ValleyPt[]).map((line) => simplify(line, opts.simplifyTol));
+  return chain(adj, centre as ValleyPt[]).map((line) => simplifyValley(line, opts.simplifyTol));
 }
 
 function circumcentre(a: Pt, b: Pt, c: Pt): ValleyPt | null {
@@ -147,4 +147,43 @@ function chain(adj: Map<number, number[]>, pts: ValleyPt[]): ValleyLine[] {
     for (const v of nb) if (!used.has(key(u, v))) walk(u, v);
   }
   return lines;
+}
+
+/**
+ * Douglas–Peucker that keeps a point if dropping it would move the line OR
+ * change the stroke width (r) by more than `tol`. The width matters as much
+ * as the position: the datum line and the slit depth are worked out from it.
+ */
+function simplifyValley(pts: ValleyLine, tol: number): ValleyLine {
+  if (pts.length < 3) return pts.slice();
+  const keep = new Uint8Array(pts.length);
+  keep[0] = keep[pts.length - 1] = 1;
+  const stack: [number, number][] = [[0, pts.length - 1]];
+  while (stack.length) {
+    const [s, e] = stack.pop()!;
+    const a = pts[s];
+    const b = pts[e];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const len2 = dx * dx + dy * dy;
+    let worst = 0;
+    let idx = -1;
+    for (let i = s + 1; i < e; i++) {
+      const p = pts[i];
+      let t = len2 ? ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2 : 0;
+      t = Math.max(0, Math.min(1, t));
+      const dPos = Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
+      const dR = Math.abs(p.r - (a.r + t * (b.r - a.r)));
+      const d = Math.max(dPos, dR);
+      if (d > worst) {
+        worst = d;
+        idx = i;
+      }
+    }
+    if (idx >= 0 && worst > tol) {
+      keep[idx] = 1;
+      stack.push([s, idx], [idx, e]);
+    }
+  }
+  return pts.filter((_, i) => keep[i]);
 }

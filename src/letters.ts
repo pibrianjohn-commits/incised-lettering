@@ -1,11 +1,11 @@
 // Works out each letter's marks once and keeps them, so sliders stay quick.
 //
 // Outline and valley lines scale exactly with letter size, so they are worked
-// out once per character at a cap height of 1 and scaled. The datum line is a
-// fixed distance in millimetres, so it is worked out per size and offset.
+// out once per character at a cap height of 1 and scaled. The datum line has
+// a minimum distance in millimetres, so it is worked out per size and rule.
 
 import type { Alphabet } from './alphabet';
-import { datumLines } from './datum';
+import { datumLines, type DatumRule } from './datum';
 import type { Contour } from './geometry';
 import { valleyLines, type ValleyLine } from './valley';
 
@@ -20,7 +20,8 @@ export interface Box {
 export interface LetterMarks {
   outline: Contour[];
   valleys: ValleyLine[];
-  datum: Contour[];
+  /** null when asked for quickly and not worked out yet (see `marks`). */
+  datum: Contour[] | null;
   box: Box;
 }
 
@@ -29,22 +30,43 @@ interface UnitLetter {
   valleys: ValleyLine[];
 }
 
+type Sized = Omit<LetterMarks, 'datum'>;
+
 export class LetterStore {
   private unit = new Map<string, UnitLetter | null>();
-  private sized = new Map<string, LetterMarks | null>();
+  private sized = new Map<string, Sized | null>();
+  private datums = new Map<string, Contour[]>();
 
   constructor(readonly alphabet: Alphabet) {}
 
-  marks(char: string, capHeight: number, datumOffset: number): LetterMarks | null {
-    const key = `${char}|${capHeight}|${datumOffset}`;
+  /**
+   * The letter's marks at this cap height. Datum lines are the slowest part;
+   * with `quick` set they are only returned if already worked out, so a
+   * slider being dragged stays smooth, and are filled in afterwards.
+   */
+  marks(char: string, capHeight: number, rule: DatumRule, quick = false): LetterMarks | null {
+    const m = this.sizedLetter(char, capHeight);
+    if (!m) return null;
+    const key = `${char}|${capHeight}|${rule.percent}|${rule.minimum}`;
+    let datum = this.datums.get(key) ?? null;
+    if (!datum && !quick) {
+      datum = datumLines(m.valleys, rule);
+      if (this.datums.size > 2000) this.datums.clear();
+      this.datums.set(key, datum);
+    }
+    return { ...m, datum };
+  }
+
+  private sizedLetter(char: string, capHeight: number): Sized | null {
+    const key = `${char}|${capHeight}`;
     if (this.sized.has(key)) return this.sized.get(key)!;
     const u = this.unitLetter(char);
-    let m: LetterMarks | null = null;
+    let m: Sized | null = null;
     if (u) {
       const k = capHeight;
       const outline = u.outline.map((c) => c.map((p) => ({ x: p.x * k, y: p.y * k })));
       const valleys = u.valleys.map((l) => l.map((p) => ({ x: p.x * k, y: p.y * k, r: p.r * k })));
-      m = { outline, valleys, datum: datumLines(outline, datumOffset), box: boxOf(outline) };
+      m = { outline, valleys, box: boxOf(outline) };
     }
     if (this.sized.size > 2000) this.sized.clear();
     this.sized.set(key, m);
@@ -59,7 +81,7 @@ export class LetterStore {
       // Steps are in cap heights: 0.0015 is 0.04 mm on a 25 mm letter.
       u = {
         outline: shape.contours,
-        valleys: valleyLines(shape.contours, { step: 0.0015, minAngleDeg: 30, simplifyTol: 0.0003 }),
+        valleys: valleyLines(shape.contours, { step: 0.0015, minAngleDeg: 30, simplifyTol: 0.0001 }),
       };
     }
     this.unit.set(char, u);

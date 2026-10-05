@@ -153,6 +153,7 @@ summary { cursor: pointer; font-weight: 600; }
 #world .datum { fill: none; stroke: var(--datum); stroke-width: 1; stroke-dasharray: 5 3; }
 #world .valley { fill: none; stroke: var(--valley); stroke-width: 1; stroke-linejoin: round; }
 #world .space path { fill: var(--space); fill-opacity: 0.22; stroke: var(--space); stroke-width: 1; stroke-opacity: 0.6; }
+#world .space path.cutoff { fill: none; stroke: var(--space); stroke-width: 1.5; stroke-opacity: 1; stroke-dasharray: 4 3; }
 #world .gap { fill: var(--accent); fill-opacity: 0; cursor: pointer; }
 #world .gap:hover { fill-opacity: 0.12; }
 #world .gap.sel { fill-opacity: 0.18; stroke: var(--accent); stroke-width: 1; }
@@ -166,6 +167,7 @@ summary { cursor: pointer; font-weight: 600; }
 #labels text { font: 12px system-ui, sans-serif; text-anchor: middle; paint-order: stroke; stroke: var(--wood); stroke-width: 3px; }
 #labels .area { fill: var(--space); font-weight: 600; }
 #labels .kern { fill: var(--accent); font-weight: 600; }
+#labels .kern.own { font-size: 11px; font-weight: 500; }
 #labels .dims { fill: var(--muted); stroke: var(--work); }
 
 #kern-pop {
@@ -183,6 +185,9 @@ summary { cursor: pointer; font-weight: 600; }
 #kern-pop .pair { font: 20px 'Cinzel', Georgia, serif; letter-spacing: 0.3em; margin-bottom: 4px; }
 #kern-pop .kern-row { display: flex; align-items: center; gap: 8px; justify-content: center; }
 #kern-pop .kern-row.small { margin-top: 6px; }
+#kern-pop .mode { margin-bottom: 8px; }
+#kern-pop .mode button { font-size: 12px; padding: 3px 10px; }
+#kern-pop .breakdown { margin-top: 6px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 #kern-pop .kern-row.small button { font-size: 12px; padding: 2px 8px; }
 #kern-pop output { min-width: 70px; font-weight: 700; font-variant-numeric: tabular-nums; }
 

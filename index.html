@@ -32,6 +32,12 @@
       </section>
 
       <section>
+        <h2>Datum line</h2>
+        <p class="hint">Follows the thick and thin. It stops where the stroke is too narrow to fit a line each side.</p>
+        <div id="datum-sliders"></div>
+      </section>
+
+      <section>
         <h2>Panel</h2>
         <div class="boxes">
           <label>Width <span><input type="number" id="panelWidth" min="10" max="1000" step="1" /> mm</span></label>
@@ -43,8 +49,10 @@
 
       <section>
         <h2>Spacing</h2>
-        <p class="hint">Click the gap between two letters to move them closer or further apart. The change applies wherever that pair of letters appears.</p>
+        <p class="hint">Click the gap between two letters to move them closer or further apart, either everywhere that pair of letters appears or in that one gap only.</p>
         <div id="kerning-summary"></div>
+        <p class="hint">With <b>Space between letters</b> shown (below), the space only counts so far into open letters such as E, C, F, L and the mouth of G. The green dashed lines show where it is cut off.</p>
+        <div id="space-sliders"></div>
       </section>
 
       <section>
@@ -86,11 +94,16 @@
       </svg>
       <div id="kern-pop" hidden>
         <div class="pair"></div>
+        <div class="seg mode">
+          <button data-mode="pair">Every pair</button>
+          <button data-mode="gap">This gap only</button>
+        </div>
         <div class="kern-row">
           <button data-nudge="-1" title="Closer (← key)">◀ Closer</button>
           <output></output>
           <button data-nudge="1" title="Further apart (→ key)">Apart ▶</button>
         </div>
+        <div class="breakdown"></div>
         <div class="kern-row small">
           <button data-nudge="0">Back to 0</button>
           <button data-close>Done</button>

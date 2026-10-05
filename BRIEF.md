@@ -53,14 +53,16 @@ All measurements are metric, in millimetres and degrees.
 | Alphabet | Letterforms used | Stand-in Roman typeface until the carver's own letters exist |
 | Inscription | The text, one or more lines | — |
 | Cap height | Letter size | 25 mm |
-| Kerning | Space between specific letter pairs, adjustable by hand | From the alphabet, then adjusted |
+| Kerning | Space between specific letter pairs, adjustable by hand, for every place the pair occurs or for one gap only | From the alphabet, then adjusted |
+| Space depth | How far into a letter the negative-space measure counts | 6 mm, set by eye |
 | Letter and line spacing | Overall tracking and leading | — |
 | Alignment | Left, centred or right, per line | Centred |
 | Panel size | Width and height of the board | Must fit the bed: 300 × 205 mm, or 300 × 400 mm extended |
 | Stock thickness | Board thickness, so depths stay safe | — |
 | Margins and border | Clear space and an optional border line | — |
 | Chisel angle | Included angle of the finished V-section, sets valley depth | 60° |
-| Datum offset | How far the datum line sits inside the outline | 0.5–1 mm, tuned by feel |
+| Datum set-in | How far the datum line sits inside the outline, as a percentage of the local stroke width | 20% |
+| Datum minimum | The datum line never comes closer to the outline than this | 0.2 mm |
 | Slit margin | How far the valley slit stops short of the true valley depth | 0.3 mm |
 | Tool | The V-bit used for every pass | 30° V-groove, 6.35 mm diameter |
 
@@ -73,7 +75,7 @@ The G-code targets the Genmitsu 3020-PRO Ultra with its 500 W ER11 spindle, cutt
 The G-code is written in millimetres and absolute coordinates, with zero at the top surface of the stock and a corner of the panel the carver chooses. One 30° V-bit does every pass, with no tool change:
 
 1. **Hairline.** A very light line on the true outline, marking where the finished arris will be.
-2. **Datum line.** A light line set in from the outline by the datum offset. The first chisel cut starts here.
+2. **Datum line.** A light line set in from the outline by a percentage of the local stroke width (never less than the datum minimum), so it follows the thick and thin. The first chisel cut starts here.
 3. **Valley slit.** A narrow slit down every valley line, sunk to the true valley depth less the slit margin. At stroke ends it follows the forked lines up into each corner, rising to nothing at the corner point. These forks are the stop cuts for the termination triangles.
 
 The bit's faces are steeper than any face of a 60° letter, so the slit always stays inside the waste and cannot touch a finished wall or termination face.
@@ -119,6 +121,7 @@ Agreed 5 Oct 2026: layout tools come first, then a 3D view. The rest of Stage 1 
    - Kerning pair by pair: click the gap between two letters and nudge them closer or further apart in 0.1 mm steps, with the value shown.
    - Negative space: a toggle that shades the space between each pair of letters and shows its area in mm², so the spacing can be balanced by eye.
    - A slider for the datum offset. The datum line is kept wherever the stroke is wide enough and stops where it isn't.
+   - Follow-up (see Decisions): kerning for one gap only, a depth limit for negative space in open letters, and a datum line that follows the thick and thin.
    - Panel width and height boxes.
 3. **3D view (later, not yet built).** A 3D view like Kiri:Moto, with orbit, pan and zoom. It shows the board both as machined (hairline, datum line and valley slit cut) and as finished (letters fully carved). A light can be swept from left to right to show how the incised letters take shadow.
 
@@ -156,16 +159,18 @@ Claude Code builds the tool from this brief; the carver judges the results in th
 
 Answers from the carver, recorded as they are given.
 
-- **Datum line on narrow strokes** (5 Oct 2026). Keep a datum line wherever the stroke is wide enough and stop it where it isn't. A stroke narrower than twice the datum offset gets no datum line along that stretch.
+- **Datum line on narrow strokes** (5 Oct 2026). Keep a datum line wherever the stroke is wide enough and stop it where it isn't.
+- **Kerning** (5 Oct 2026). A kerning adjustment applies to every place that pair of letters occurs. The kerning box also has a "this gap only" option, so a single gap can be adjusted on its own; that adjustment is added on top of the pair's.
+- **Negative space in open letters** (5 Oct 2026). The space between letters only counts a limited depth into open letters such as E, C, F, L and the mouth of G. The depth is set by eye with a slider, measured in from each letter's furthest point on that side, and the cut-off is shown on screen. Starting value 6 mm.
+- **Datum offset follows the stroke** (5 Oct 2026). The datum line is set in from the outline by a percentage of the local stroke width, so it follows the thick and thin, starting at 20%. A minimum distance (starting at 0.2 mm) stops it crowding the hairline. It is still dropped where the stroke is too narrow, which is wherever the stroke is narrower than twice the distance it would be set in.
 
 ## Open questions
 
 - Is 60° the right included chisel angle, or does it change with letter size or timber? To be settled with test letters in oak.
-- What datum offset and slit margin suit the carver's hand? Starting at 0.5–1 mm and 0.3 mm.
+- What datum set-in, datum minimum and slit margin suit the carver's hand? Starting at 20%, 0.2 mm and 0.3 mm.
 - What is the spindle's actual top speed?
 - How should serifs and bracketing be handled at terminations, beyond the plain fork into the corners?
 - Where thick and thin strokes cross, as in A or W, which valley wins at the crossing?
 - Is the printed sheet showing the layout and cutting order wanted?
 - Which stand-in Roman typeface is closest to the letters the carver intends to draw?
-- Should a kerning adjustment apply to every place a pair of letters occurs (all "AV"s together), or to each gap on its own? For now it applies to every place the pair occurs.
-- In the negative-space measure, how far into an open letter (the bays of E, the mouth of C, under the arm of T) should the space count? For now it runs right in to the ink between the cap line and the baseline.
+- The negative-space depth limit applies to every letter, so it also trims the space beside the slanting legs of A and V and under the arm of T, not only the bays of open letters. Is that wanted, or should those be left uncut?

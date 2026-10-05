@@ -18,12 +18,27 @@ export interface Project {
   panelWidth: number; // mm
   panelHeight: number; // mm
   margin: number; // mm, clear space inside the panel edge
-  datumOffset: number; // mm
+  /** Datum line set in from the outline by this percentage of the local stroke width… */
+  datumPercent: number;
+  /** …but never closer to the outline than this, mm. */
+  datumMinimum: number;
   /**
    * Hand kerning in mm, keyed by the letter pair (e.g. "AV"). Applies to
    * every place that pair occurs, on top of the alphabet's own kerning.
    */
   kerning: Record<string, number>;
+  /**
+   * Hand kerning for one gap only, mm, added on top of the pair's kerning.
+   * Keyed by gap (see gapKey); the pair is kept so that if the text is edited
+   * and different letters end up in that place, the adjustment is ignored.
+   */
+  gapKerning: Record<string, { pair: string; mm: number }>;
+  /**
+   * Negative space counts no further than this into a letter, measured in
+   * from the letter's furthest point on that side, mm. Stops open letters
+   * (E, C, F, L, the mouth of G) counting their bays as space.
+   */
+  spaceDepth: number;
 }
 
 export const defaultProject: Project = {
@@ -35,9 +50,17 @@ export const defaultProject: Project = {
   panelWidth: 150,
   panelHeight: 60,
   margin: 10,
-  datumOffset: 0.75,
+  datumPercent: 20,
+  datumMinimum: 0.2,
   kerning: {},
+  gapKerning: {},
+  spaceDepth: 6,
 };
+
+/** Identifies a gap by its line and the position of the letter after it. */
+export function gapKey(line: number, index: number): string {
+  return `${line}:${index}`;
+}
 
 export interface PlacedLetter {
   char: string;
@@ -54,7 +77,13 @@ export interface Gap {
   line: number;
   left: PlacedLetter;
   right: PlacedLetter;
-  /** Hand kerning for this pair, mm. */
+  /** Identifies this gap for one-gap kerning. */
+  key: string;
+  /** Hand kerning for this pair wherever it occurs, mm. */
+  pairKern: number;
+  /** Extra hand kerning for this gap only, mm. */
+  gapKern: number;
+  /** Total hand kerning at this gap, mm. */
   kern: number;
   /** Middle of the gap between the two letters' extremes, mm. */
   x: number;
@@ -73,9 +102,15 @@ export interface Layout {
   lines: PlacedLine[];
   /** Lettering that runs outside the margins. */
   overflow: { wide: boolean; tall: boolean };
+  /** Some datum lines were left off in a quick layout. */
+  datumPending: boolean;
 }
 
-export function layoutPanel(store: LetterStore, p: Project): Layout {
+/**
+ * With `quick` set, datum lines not already worked out are left off
+ * (`datumPending` is then true) so that dragging a slider stays smooth.
+ */
+export function layoutPanel(store: LetterStore, p: Project, quick = false): Layout {
   const k = p.capHeight;
   const alphabet = store.alphabet;
   const texts = p.text.replace(/\r/g, '').split('\n');
@@ -88,18 +123,23 @@ export function layoutPanel(store: LetterStore, p: Project): Layout {
   const gaps: Gap[] = [];
   const lines: PlacedLine[] = [];
   let wide = false;
+  let datumPending = false;
 
   texts.forEach((text, li) => {
     const chars = [...text];
     // Pen position of each character from the start of the line.
     const pens: number[] = [];
     let pen = 0;
+    const gapKern = (i: number) => {
+      const g = p.gapKerning[gapKey(li, i)];
+      return g && g.pair === chars[i - 1] + chars[i] ? g.mm : 0;
+    };
     chars.forEach((ch, i) => {
       pens.push(pen);
       pen += (alphabet.letter(ch)?.advance ?? 0.3) * k;
       const next = chars[i + 1];
       if (next !== undefined) {
-        pen += alphabet.kerning(ch, next) * k + (p.kerning[ch + next] ?? 0) + p.letterSpacing;
+        pen += alphabet.kerning(ch, next) * k + (p.kerning[ch + next] ?? 0) + gapKern(i + 1) + p.letterSpacing;
       }
     });
     const width = pen;
@@ -111,7 +151,7 @@ export function layoutPanel(store: LetterStore, p: Project): Layout {
 
     let prev: PlacedLetter | null = null;
     chars.forEach((ch, i) => {
-      const m = store.marks(ch, k, p.datumOffset);
+      const m = store.marks(ch, k, { percent: p.datumPercent, minimum: p.datumMinimum }, quick);
       if (!m) {
         prev = null; // a space breaks the run: no gap to kern across it
         return;
@@ -124,14 +164,27 @@ export function layoutPanel(store: LetterStore, p: Project): Layout {
         line: li,
         outline: m.outline.map(move),
         valleys: m.valleys.map((v) => v.map((q) => ({ x: q.x + dx, y: q.y + dy, r: q.r }))),
-        datum: m.datum.map(move),
+        datum: (m.datum ?? []).map(move),
         box: { x0: m.box.x0 + dx, x1: m.box.x1 + dx, y0: m.box.y0 + dy, y1: m.box.y1 + dy },
       };
       letters.push(L);
+      if (!m.datum) datumPending = true;
       if (L.box.x0 < p.margin - 0.01 || L.box.x1 > p.panelWidth - p.margin + 0.01) wide = true;
       if (prev) {
         const pair = prev.char + ch;
-        gaps.push({ pair, line: li, left: prev, right: L, kern: p.kerning[pair] ?? 0, x: (prev.box.x1 + L.box.x0) / 2 });
+        const pairKern = p.kerning[pair] ?? 0;
+        const own = gapKern(i);
+        gaps.push({
+          pair,
+          line: li,
+          key: gapKey(li, i),
+          left: prev,
+          right: L,
+          pairKern,
+          gapKern: own,
+          kern: round1(pairKern + own),
+          x: (prev.box.x1 + L.box.x0) / 2,
+        });
       }
       prev = L;
     });
@@ -141,5 +194,9 @@ export function layoutPanel(store: LetterStore, p: Project): Layout {
   const bottom = firstBaseline + (texts.length - 1) * p.lineSpacing;
   const tall = top < p.margin - 0.01 || bottom > p.panelHeight - p.margin + 0.01;
 
-  return { project: p, letters, gaps, lines, overflow: { wide, tall } };
+  return { project: p, letters, gaps, lines, overflow: { wide, tall }, datumPending };
+}
+
+function round1(v: number) {
+  return Math.round(v * 10) / 10;
 }
