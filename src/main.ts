@@ -18,6 +18,8 @@ let store: LetterStore | null = null;
 let layout: Layout | null = null;
 /** Selected gap, by line and position in the line, so it survives re-layout. */
 let selected: { line: number; n: number } | null = null;
+/** Whether the kerning box adjusts every place the pair occurs, or this gap only. */
+let kernMode: 'pair' | 'gap' = 'pair';
 
 const $ = <T extends Element = HTMLElement>(id: string) => document.getElementById(id) as unknown as T;
 const work = $('work');
@@ -44,30 +46,35 @@ const view = new PanZoom(work, {
 // ---------------------------------------------------------------- controls
 
 interface SliderSpec {
-  key: 'capHeight' | 'letterSpacing' | 'lineSpacing' | 'datumOffset';
+  key: 'capHeight' | 'letterSpacing' | 'lineSpacing' | 'datumPercent' | 'datumMinimum' | 'spaceDepth';
+  /** Which side-panel section it sits in. */
+  box: string;
   name: string;
   min: number;
   max: number;
   step: number;
+  unit: string;
   hint?: string;
 }
 
 const sliders: SliderSpec[] = [
-  { key: 'capHeight', name: 'Cap height', min: 5, max: 120, step: 0.5 },
-  { key: 'letterSpacing', name: 'Letter spacing', min: -5, max: 15, step: 0.1, hint: 'added between every pair' },
-  { key: 'lineSpacing', name: 'Line spacing', min: 5, max: 250, step: 0.5, hint: 'baseline to baseline' },
-  { key: 'datumOffset', name: 'Datum offset', min: 0.2, max: 2, step: 0.05, hint: 'inside the outline' },
+  { key: 'capHeight', box: 'sliders', name: 'Cap height', min: 5, max: 120, step: 0.5, unit: 'mm' },
+  { key: 'letterSpacing', box: 'sliders', name: 'Letter spacing', min: -5, max: 15, step: 0.1, unit: 'mm', hint: 'added between every pair' },
+  { key: 'lineSpacing', box: 'sliders', name: 'Line spacing', min: 5, max: 250, step: 0.5, unit: 'mm', hint: 'baseline to baseline' },
+  { key: 'datumPercent', box: 'datum-sliders', name: 'Set in by', min: 5, max: 45, step: 1, unit: '%', hint: 'of the stroke width at that point' },
+  { key: 'datumMinimum', box: 'datum-sliders', name: 'But never less than', min: 0, max: 1.5, step: 0.05, unit: 'mm', hint: 'keeps it off the hairline' },
+  { key: 'spaceDepth', box: 'space-sliders', name: 'Count space into letters', min: 0.5, max: 40, step: 0.5, unit: 'mm', hint: 'measured in from each letter’s furthest point' },
 ];
 
 function buildControls() {
-  const box = $('sliders');
   for (const s of sliders) {
+    const box = $(s.box);
     const row = document.createElement('div');
     row.className = 'slider';
     row.innerHTML = `
       <div class="row">
         <label class="name" for="r-${s.key}">${s.name}${s.hint ? ` <small>${s.hint}</small>` : ''}</label>
-        <span><input type="number" id="n-${s.key}" min="${s.min}" max="${s.max}" step="${s.step}" /> mm</span>
+        <span><input type="number" id="n-${s.key}" min="${s.min}" max="${s.max}" step="${s.step}" /> ${s.unit}</span>
       </div>
       <input type="range" id="r-${s.key}" min="${s.min}" max="${s.max}" step="${s.step}" />`;
     box.append(row);
@@ -117,6 +124,9 @@ function buildControls() {
     if (b.hasAttribute('data-close')) {
       selected = null;
       draw();
+    } else if (b.dataset.mode) {
+      kernMode = b.dataset.mode as 'pair' | 'gap';
+      applyView();
     } else nudge(Number(b.dataset.nudge));
   });
   document.addEventListener('keydown', (e) => {
@@ -130,7 +140,7 @@ function buildControls() {
     e.preventDefault();
   });
   $('kerning-summary').addEventListener('click', (e) => {
-    if ((e.target as HTMLElement).closest('#clear-kerning')) update({ kerning: {} });
+    if ((e.target as HTMLElement).closest('#clear-kerning')) update({ kerning: {}, gapKerning: {} });
   });
 
   // View.
@@ -182,25 +192,44 @@ function syncControls(source?: Element) {
     .forEach((b) => b.classList.toggle('on', b.dataset.align === project.align));
 }
 
+/** Move the selected gap's letters 0.1 mm closer (-1) or apart (+1); 0 puts it back. */
 function nudge(dir: number) {
   const gap = selectedGap();
   if (!gap) return;
-  const k = { ...project.kerning };
-  const v = dir === 0 ? 0 : round((k[gap.pair] ?? 0) + dir * 0.1, 1);
-  if (v === 0) delete k[gap.pair];
-  else k[gap.pair] = v;
-  update({ kerning: k });
+  if (kernMode === 'pair') {
+    const k = { ...project.kerning };
+    const v = dir === 0 ? 0 : round(gap.pairKern + dir * 0.1, 1);
+    if (v === 0) delete k[gap.pair];
+    else k[gap.pair] = v;
+    update({ kerning: k });
+  } else {
+    const k = { ...project.gapKerning };
+    const v = dir === 0 ? 0 : round(gap.gapKern + dir * 0.1, 1);
+    if (v === 0) delete k[gap.key];
+    else k[gap.key] = { pair: gap.pair, mm: v };
+    update({ gapKerning: k });
+  }
 }
 
 // ---------------------------------------------------------------- drawing
 
+// Lay out quickly on every change, then fill in any datum lines left off
+// once things have been still for a moment.
 let pending = 0;
+let settle = 0;
 function relayout() {
   if (!store || pending) return;
   pending = requestAnimationFrame(() => {
     pending = 0;
-    layout = layoutPanel(store!, project);
+    layout = layoutPanel(store!, project, true);
     draw();
+    clearTimeout(settle);
+    if (layout.datumPending) {
+      settle = window.setTimeout(() => {
+        layout = layoutPanel(store!, project);
+        draw();
+      }, 150);
+    }
   });
 }
 
@@ -233,10 +262,16 @@ function draw() {
   out.push('</g>');
 
   const showSpace = $<HTMLInputElement>('show-space').checked;
-  const spaces = showSpace ? L.gaps.map((g) => negativeSpace(g, L.lines[g.line].baselineY, p.capHeight)) : [];
+  const spaces = showSpace
+    ? L.gaps.map((g) => negativeSpace(g, L.lines[g.line].baselineY, p.capHeight, p.spaceDepth))
+    : [];
   if (showSpace) {
     out.push('<g class="space">');
-    for (const s of spaces) out.push(`<path d="${contourToSvg(s.shape)}"/>`);
+    for (const s of spaces) {
+      out.push(`<path d="${contourToSvg(s.shape)}"/>`);
+      const cuts = s.cutoffs.filter((c) => c.length > 1);
+      if (cuts.length) out.push(`<path class="cutoff" d="${cuts.map(polylineToSvg).join('')}"/>`);
+    }
     out.push('</g>');
   }
 
@@ -286,9 +321,15 @@ function applyView() {
     );
   }
   for (const g of labelData.gaps) {
-    if (!g.kern) continue;
+    if (!g.kern && !g.gapKern) continue;
     const base = layout!.lines[g.line].baselineY;
-    out.push(`<text class="kern" x="${sx(g.x).toFixed(1)}" y="${(sy(base) + 14).toFixed(1)}">${signed(g.kern)}</text>`);
+    const y = sy(base) + 14;
+    out.push(`<text class="kern" x="${sx(g.x).toFixed(1)}" y="${y.toFixed(1)}">${signed(g.kern)}</text>`);
+    if (g.gapKern) {
+      out.push(
+        `<text class="kern own" x="${sx(g.x).toFixed(1)}" y="${(y + 13).toFixed(1)}">this gap ${signed(g.gapKern)}</text>`,
+      );
+    }
   }
   out.push(
     `<text class="dims" x="${sx(p.panelWidth / 2).toFixed(1)}" y="${(sy(p.panelHeight) + 18).toFixed(1)}">${p.panelWidth} × ${p.panelHeight} mm</text>`,
@@ -300,8 +341,13 @@ function applyView() {
   if (g) {
     const base = layout!.lines[g.line].baselineY;
     pop.hidden = false;
-    pop.querySelector('.pair')!.textContent = `${g.left.char} ${g.right.char}`;
-    pop.querySelector('output')!.textContent = `${signed(g.kern)} mm`;
+    const pairName = `${g.left.char} ${g.right.char}`;
+    pop.querySelector('.pair')!.textContent = pairName;
+    pop.querySelector('[data-mode="pair"]')!.textContent = `Every ${pairName}`;
+    pop.querySelectorAll<HTMLElement>('[data-mode]').forEach((b) => b.classList.toggle('on', b.dataset.mode === kernMode));
+    pop.querySelector('output')!.textContent = `${signed(kernMode === 'pair' ? g.pairKern : g.gapKern)} mm`;
+    pop.querySelector('.breakdown')!.textContent =
+      `Every ${pairName} ${signed(g.pairKern)} · this gap ${signed(g.gapKern)} · total ${signed(g.kern)} mm`;
     const x = sx(g.x);
     const y = sy(base - p.capHeight) - 28;
     pop.style.left = `${Math.round(x)}px`;
@@ -327,10 +373,19 @@ function showWarnings() {
 }
 
 function showKerningSummary() {
+  const pairName = (pair: string) => {
+    const [a, ...b] = [...pair];
+    return `<b>${esc(a)} ${esc(b.join(''))}</b>`;
+  };
   const pairs = Object.entries(project.kerning);
-  $('kerning-summary').innerHTML = pairs.length
-    ? `<ul class="pairs">${pairs.map(([k, v]) => `<li><b>${esc(k[0])} ${esc(k.slice(1))}</b> ${signed(v)} mm</li>`).join('')}</ul>` +
-      `<button id="clear-kerning" class="quiet">Clear all spacing adjustments</button>`
+  // Single gaps that still match the letters in that place.
+  const own = layout ? layout.gaps.filter((g) => g.gapKern) : [];
+  const items = [
+    ...pairs.map(([k, v]) => `<li>${pairName(k)} everywhere ${signed(v)} mm</li>`),
+    ...own.map((g) => `<li>${pairName(g.pair)} line ${g.line + 1}, this gap only ${signed(g.gapKern)} mm</li>`),
+  ];
+  $('kerning-summary').innerHTML = items.length
+    ? `<ul class="pairs">${items.join('')}</ul><button id="clear-kerning" class="quiet">Clear all spacing adjustments</button>`
     : '';
 }
 
