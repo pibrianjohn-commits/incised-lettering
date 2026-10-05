@@ -1,10 +1,22 @@
 import { alphabetFromFont } from './alphabet';
 import { contourToSvg, polylineToSvg } from './geometry';
-import { defaultProject, layoutPanel, type Align, type Gap, type Layout, type Project } from './layout';
+import {
+  defaultProject,
+  layoutPanel,
+  lineAnchor,
+  type Align,
+  type Gap,
+  type Layout,
+  type LinePlacement,
+  type PlacedLine,
+  type Project,
+} from './layout';
 import { LetterStore } from './letters';
 import { negativeSpace } from './negativeSpace';
 import { History } from './history';
+import { remapForEdit } from './remap';
 import { RULER, rulerSvg } from './rulers';
+import { nearest, snapTargets, type Snap } from './snap';
 import { PanZoom, type ViewState } from './view';
 
 // ---------------------------------------------------------------- state
@@ -32,6 +44,10 @@ let measuring = false;
 let measure: { a: { x: number; y: number }; b: { x: number; y: number } } | null = null;
 /** A guide being dragged: which way it runs and where it is now (mm), or null when over a ruler. */
 let guideDrag: { axis: 'x' | 'y'; index: number; at: number | null } | null = null;
+/** The selected line (0 = first), or null. */
+let selectedLine: number | null = null;
+/** What a line being dragged has snapped to, to draw the snapping guides. */
+let lineSnaps: { x: Snap | null; y: Snap | null } | null = null;
 
 const $ = <T extends Element = HTMLElement>(id: string) => document.getElementById(id) as unknown as T;
 const work = $('work');
@@ -44,14 +60,11 @@ const view = new PanZoom(work, {
   changed: () => {
     applyView();
   },
-  click: (target) => {
-    const g = target.closest('[data-gap]');
-    if (g) {
-      const [line, n] = g.getAttribute('data-gap')!.split(':').map(Number);
-      selected = { line, n };
-    } else {
-      selected = null;
-    }
+  // Clicks on letters, gaps and line numbers are handled by onLinePress;
+  // a click anywhere else clears the selection.
+  click: () => {
+    selected = null;
+    selectedLine = null;
     draw();
   },
 });
@@ -103,7 +116,8 @@ function buildControls() {
   const text = $<HTMLTextAreaElement>('text');
   text.addEventListener('input', () => {
     selected = null; // gaps are renumbered when the text changes
-    update({ text: text.value }, text, 'text');
+    // Placed lines and one-gap kerning follow their letters through the edit.
+    update({ text: text.value, ...remapForEdit(project, text.value) }, text, 'text');
   });
 
   $('align').addEventListener('click', (e) => {
@@ -315,6 +329,16 @@ function draw() {
     out.push(`<path class="valley" d="${letter.valleys.map(polylineToSvg).join('')}"/>`);
   }
 
+  // Each line can be clicked to select it and dragged to move it.
+  for (const line of L.lines) {
+    if (!line.ink) continue;
+    const cls = `linehit${line.index === selectedLine ? ' sel' : ''}${line.locked ? ' locked' : ''}`;
+    const y = line.baselineY - p.capHeight;
+    out.push(
+      `<rect class="${cls}" data-line="${line.index}" x="${fmt(line.ink.x0 - 0.5)}" y="${fmt(y - 0.5)}" width="${fmt(line.ink.x1 - line.ink.x0 + 1)}" height="${fmt(p.capHeight + 1)}"/>`,
+    );
+  }
+
   // Clickable gaps between letters.
   const sel = selectedGap();
   const counts = new Map<number, number>();
@@ -333,6 +357,7 @@ function draw() {
   labelData = { spaces, gaps: L.gaps };
   showWarnings();
   showKerningSummary();
+  showLineEditor();
   applyView();
 }
 
@@ -367,6 +392,22 @@ function applyView() {
   out.push(
     `<text class="dims" x="${sx(p.panelWidth / 2).toFixed(1)}" y="${(sy(p.panelHeight) + 18).toFixed(1)}">${p.panelWidth} × ${p.panelHeight} mm</text>`,
   );
+  // Line numbers in the margin, left of the panel, level with each line.
+  const numX = Math.max(RULER + 30, sx(0) - 10);
+  for (const line of layout?.lines ?? []) {
+    if (!line.ink) continue;
+    const y = sy(line.baselineY - p.capHeight / 2);
+    const state = line.locked ? 'locked' : line.placed ? 'placed' : 'auto';
+    const cls = `linenum ${state}${line.index === selectedLine ? ' sel' : ''}`;
+    const mark = line.locked ? ' ⚿' : line.placed ? ' ✥' : '';
+    const w = mark ? 36 : 24;
+    const title = `Line ${line.index + 1}: ${state === 'auto' ? 'auto (follows line spacing and alignment)' : state === 'placed' ? 'placed by hand' : 'locked'}`;
+    out.push(
+      `<g class="${cls}" data-line="${line.index}"><title>${esc(title)}</title>` +
+        `<rect x="${(numX - w).toFixed(1)}" y="${(y - 10).toFixed(1)}" width="${w}" height="20" rx="4"/>` +
+        `<text x="${(numX - w / 2).toFixed(1)}" y="${(y + 4).toFixed(1)}">${line.index + 1}${mark}</text></g>`,
+    );
+  }
   labels.innerHTML = out.join('');
 
   // Kerning box sits above the selected gap.
@@ -492,6 +533,12 @@ function onKey(e: KeyboardEvent) {
     const cur = gapIndex(selected ?? hovered);
     selected = gapRef(cur < 0 ? (e.shiftKey ? -1 : 0) : cur + (e.shiftKey ? -1 : 1));
     draw();
+  } else if (!e.altKey && e.key.startsWith('Arrow')) {
+    // Plain arrows move the selected line: 0.1 mm, or 1 mm with Shift.
+    if (selectedLine === null) return;
+    const step = e.shiftKey ? 1 : 0.1;
+    const [dx, dy] = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[e.key] ?? [0, 0];
+    moveLine(selectedLine, dx, dy);
   } else if (e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
     // Kern the gap that's selected, or else the one under the pointer.
     if (!gapAt(selected) && gapAt(hovered)) selected = hovered;
@@ -500,6 +547,7 @@ function onKey(e: KeyboardEvent) {
   } else if (e.key === 'Escape') {
     if (measuring) setMeasuring(false);
     selected = null;
+    selectedLine = null;
     draw();
   } else return;
   e.preventDefault();
@@ -585,6 +633,11 @@ function wireTools() {
     },
     true,
   );
+
+  // Press on a line (its letters, a gap, or its number in the margin):
+  // a click selects, a drag moves the line.
+  work.addEventListener('pointerdown', onLinePress, true);
+  wireLineEditor();
 
   // Track the pointer for the ruler markers and the gap under it.
   work.addEventListener('pointermove', (e) => {
@@ -677,6 +730,24 @@ function drawOverlay() {
         `<text class="small" x="${mx.toFixed(1)}" y="${(my + 18).toFixed(1)}">across ${Math.abs(b.x - a.x).toFixed(1)} · down ${Math.abs(b.y - a.y).toFixed(1)}</text></g>`,
     );
   }
+  // Snapping guides while a line is dragged.
+  if (lineSnaps) {
+    const p = project;
+    if (lineSnaps.x) {
+      const c = sx(lineSnaps.x.target.at);
+      out.push(
+        `<g class="snap"><line x1="${c}" x2="${c}" y1="${sy(-4)}" y2="${sy(p.panelHeight + 4)}"/>` +
+          `<text x="${Number(c) + 5}" y="${Number(sy(0)) - 6}">${esc(lineSnaps.x.target.label)}</text></g>`,
+      );
+    }
+    if (lineSnaps.y) {
+      const c = sy(lineSnaps.y.target.at);
+      out.push(
+        `<g class="snap"><line y1="${c}" y2="${c}" x1="${sx(-4)}" x2="${sx(p.panelWidth + 4)}"/>` +
+          `<text x="${Number(sx(p.panelWidth)) - 6}" y="${Number(c) - 5}" text-anchor="end">${esc(lineSnaps.y.target.label)}</text></g>`,
+      );
+    }
+  }
   overlay.innerHTML = out.join('');
   drawRulers();
 }
@@ -685,6 +756,202 @@ function drawRulers() {
   const r = work.getBoundingClientRect();
   $('ruler-top').innerHTML = rulerSvg('x', r.width, view.v, pointer?.x ?? null);
   $('ruler-left').innerHTML = rulerSvg('y', r.height, view.v, pointer?.y ?? null);
+}
+
+// ---------------------------------------------------------------- lines
+
+/** Where a line is now, as a placement (an auto line is worked out from its layout). */
+function placementOf(line: PlacedLine): LinePlacement {
+  const own = project.lines[String(line.index)];
+  if (own) return own;
+  return { x: lineAnchor(line.x0, project.align, line.width), align: project.align, baseline: line.baselineY };
+}
+
+function lineAtIndex(i: number | null): PlacedLine | null {
+  if (!layout || i === null) return null;
+  return layout.lines[i] ?? null;
+}
+
+function setPlacement(index: number, place: LinePlacement | null, group: string | null = null) {
+  const lines = { ...project.lines };
+  if (place) lines[String(index)] = place;
+  else delete lines[String(index)];
+  update({ lines }, undefined, group);
+}
+
+/** Nudge a line by (dx, dy) mm. An auto line becomes placed. */
+function moveLine(index: number, dx: number, dy: number) {
+  const line = lineAtIndex(index);
+  if (!line || line.locked) return;
+  const p0 = placementOf(line);
+  setPlacement(index, { ...p0, x: round(p0.x + dx, 3), baseline: round(p0.baseline + dy, 3) }, `nudge-line-${index}`);
+}
+
+function onLinePress(e: PointerEvent) {
+  if (measuring || e.button !== 0) return;
+  const t = e.target as Element;
+  const hit = t.closest('[data-gap], [data-line]');
+  if (!hit || !layout) return;
+  e.stopPropagation(); // not a pan
+  const gapAttr = hit.getAttribute('data-gap');
+  const index = gapAttr ? Number(gapAttr.split(':')[0]) : Number(hit.getAttribute('data-line'));
+  const line = lineAtIndex(index);
+  if (!line) return;
+
+  const start = { x: e.clientX, y: e.clientY };
+  const from = toMm(e.clientX, e.clientY);
+  const before = project;
+  const p0 = placementOf(line);
+  const ink = line.ink!;
+  const k = project.capHeight;
+  const targets = snapTargets(layout, index);
+  let dragging = false;
+
+  const move = (m: PointerEvent) => {
+    if (!dragging) {
+      if (Math.hypot(m.clientX - start.x, m.clientY - start.y) < 4 || line.locked) return;
+      dragging = true;
+      selectedLine = index;
+      work.setPointerCapture(m.pointerId);
+      work.classList.add('dragging-line');
+    }
+    const at = toMm(m.clientX, m.clientY);
+    let dx = at.x - from.x;
+    let dy = at.y - from.y;
+    let sx: Snap | null = null;
+    let sy: Snap | null = null;
+    if (!m.altKey) {
+      // Hold Alt to move freely, without snapping.
+      const tol = 8 / view.v.scale;
+      sx = nearest(
+        [
+          { f: 'left', at: ink.x0 + dx },
+          { f: 'centre', at: (ink.x0 + ink.x1) / 2 + dx },
+          { f: 'right', at: ink.x1 + dx },
+        ],
+        targets.x,
+        tol,
+      );
+      sy = nearest(
+        [
+          { f: 'base', at: line.baselineY + dy },
+          { f: 'cap', at: line.baselineY - k + dy },
+          { f: 'mid', at: line.baselineY - k / 2 + dy },
+        ],
+        targets.y,
+        tol,
+      );
+    }
+    dx = sx ? dx + sx.offset : round(dx, 1);
+    dy = sy ? dy + sy.offset : round(dy, 1);
+    lineSnaps = { x: sx, y: sy };
+    project = { ...project, lines: { ...project.lines, [String(index)]: { ...p0, x: round(p0.x + dx, 3), baseline: round(p0.baseline + dy, 3) } } };
+    relayout();
+  };
+  const up = (u: PointerEvent) => {
+    work.removeEventListener('pointermove', move);
+    work.removeEventListener('pointerup', up);
+    work.removeEventListener('pointercancel', up);
+    work.classList.remove('dragging-line');
+    lineSnaps = null;
+    if (dragging) {
+      // The whole drag is one step to undo.
+      if (project !== before) history.record(before);
+      refreshUndoButtons();
+      saveProject();
+      relayout();
+      return;
+    }
+    if (u.type !== 'pointerup') return;
+    // A click: a gap selects that gap for kerning (and its line); anything else selects the line.
+    selectedLine = index;
+    if (gapAttr) {
+      const [l, n] = gapAttr.split(':').map(Number);
+      selected = { line: l, n };
+    } else {
+      selected = null;
+    }
+    draw();
+  };
+  work.addEventListener('pointermove', move);
+  work.addEventListener('pointerup', up);
+  work.addEventListener('pointercancel', up);
+}
+
+/** The side-panel box for the selected line. */
+function showLineEditor() {
+  const box = $('line-editor');
+  const line = lineAtIndex(selectedLine);
+  if (!line || !line.ink) {
+    box.innerHTML = '';
+    box.dataset.line = '';
+    return;
+  }
+  const values = {
+    left: line.ink.x0,
+    centre: (line.ink.x0 + line.ink.x1) / 2,
+    baseline: line.baselineY,
+  };
+  // Rebuild only when a different line is selected, so typing in a box isn't interrupted.
+  if (box.dataset.line !== String(line.index)) {
+    box.dataset.line = String(line.index);
+    box.innerHTML = `
+      <p class="line-title"><b>Line ${line.index + 1}</b> <span class="line-text"></span></p>
+      <p class="line-state"></p>
+      <div class="boxes">
+        <label>Left end <span><input type="number" step="0.1" data-pos="left" /> mm</span></label>
+        <label>Centre <span><input type="number" step="0.1" data-pos="centre" /> mm</span></label>
+        <label>Baseline <span><input type="number" step="0.1" data-pos="baseline" /> mm</span></label>
+      </div>
+      <p class="hint small">Measured from the panel's left edge and top edge, to the letters themselves.</p>
+      <div class="line-buttons">
+        <button data-act="auto">Return to auto</button>
+        <button data-act="lock"></button>
+      </div>`;
+  }
+  box.querySelector('.line-text')!.textContent = line.text.trim();
+  box.querySelector('.line-state')!.textContent = line.locked
+    ? 'Locked: it will not move until unlocked.'
+    : line.placed
+      ? 'Placed by hand: it stays put when the line spacing or alignment changes.'
+      : 'Auto: it follows the line spacing and alignment.';
+  for (const input of box.querySelectorAll<HTMLInputElement>('[data-pos]')) {
+    if (document.activeElement !== input) input.value = values[input.dataset.pos as keyof typeof values].toFixed(1);
+    input.disabled = line.locked;
+  }
+  const auto = box.querySelector<HTMLButtonElement>('[data-act="auto"]')!;
+  auto.disabled = !line.placed || line.locked;
+  box.querySelector('[data-act="lock"]')!.textContent = line.locked ? 'Unlock' : 'Lock';
+}
+
+function wireLineEditor() {
+  const box = $('line-editor');
+  box.addEventListener('change', (e) => {
+    const input = (e.target as HTMLElement).closest<HTMLInputElement>('[data-pos]');
+    const line = lineAtIndex(selectedLine);
+    if (!input || !line?.ink || line.locked) return;
+    const v = Number(input.value);
+    if (input.value === '' || !Number.isFinite(v)) return;
+    const p0 = placementOf(line);
+    const pos = input.dataset.pos;
+    if (pos === 'baseline') setPlacement(line.index, { ...p0, baseline: v });
+    else {
+      const now = pos === 'left' ? line.ink.x0 : (line.ink.x0 + line.ink.x1) / 2;
+      setPlacement(line.index, { ...p0, x: round(p0.x + v - now, 3) });
+    }
+  });
+  box.addEventListener('click', (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLElement>('[data-act]');
+    const line = lineAtIndex(selectedLine);
+    if (!b || !line) return;
+    if (b.dataset.act === 'auto') setPlacement(line.index, null);
+    if (b.dataset.act === 'lock') setPlacement(line.index, { ...placementOf(line), locked: !line.locked });
+  });
+  $('reflow').addEventListener('click', () => {
+    // Every line back to auto, except locked ones, which stay where they are.
+    const kept = Object.fromEntries(Object.entries(project.lines).filter(([, pl]) => pl.locked));
+    update({ lines: kept });
+  });
 }
 
 // ---------------------------------------------------------------- helpers
