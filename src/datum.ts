@@ -4,12 +4,25 @@
 // edges of counters (the hole in O) correctly.
 
 import ClipperLib from 'clipper-lib';
-import type { Contour } from './geometry';
+import { signedArea, simplify, type Contour } from './geometry';
 
 const SCALE = 10000; // Clipper works in integers: 1 unit = 0.1 µm
 
+/**
+ * Where a stroke is narrower than twice the offset there is no room for a
+ * datum line, and the line simply stops (the carver's rule). Crumbs smaller
+ * than this area, left where a stroke only just pinches, are dropped. mm².
+ */
+const MIN_PIECE_AREA = 0.05;
+
 export function datumLines(contours: Contour[], offsetMm: number): Contour[] {
-  const paths = contours.map((c) => c.map((p) => ({ X: Math.round(p.x * SCALE), Y: Math.round(p.y * SCALE) })));
+  // Thin out the outline's points first (to within 2 µm): the offset is much quicker
+  // and the result is the same to well under the width of a scribed line.
+  const paths = contours.map((c) =>
+    simplify([...c, c[0]], 0.002)
+      .slice(0, -1)
+      .map((p) => ({ X: Math.round(p.x * SCALE), Y: Math.round(p.y * SCALE) })),
+  );
 
   // Tidy the outline first so outer edges and counters have consistent winding.
   const clean: ClipperLib.Paths = [];
@@ -29,5 +42,7 @@ export function datumLines(contours: Contour[], offsetMm: number): Contour[] {
   const result: ClipperLib.Paths = [];
   off.Execute(result, -offsetMm * SCALE);
 
-  return result.map((path) => path.map((p) => ({ x: p.X / SCALE, y: p.Y / SCALE })));
+  return result
+    .map((path) => path.map((p) => ({ x: p.X / SCALE, y: p.Y / SCALE })))
+    .filter((c) => Math.abs(signedArea(c)) >= MIN_PIECE_AREA);
 }

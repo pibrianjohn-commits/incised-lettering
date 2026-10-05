@@ -7,52 +7,104 @@
     <link rel="stylesheet" href="./src/style.css" />
   </head>
   <body>
-    <header>
-      <h1>Incised Lettering</h1>
-      <p class="sub">Stage 1, first step: stand-in alphabet, one word, outlines, valleys and datum lines. No G-code yet.</p>
-    </header>
+    <aside id="side">
+      <header>
+        <h1>Incised Lettering</h1>
+        <p class="sub">Layout workspace. No G-code yet.</p>
+      </header>
 
-    <main>
-      <section class="controls">
-        <div class="group">
-          <span class="label">Show</span>
-          <label><input type="checkbox" id="show-outline" checked /> <i class="key outline"></i> Outline (hairline)</label>
-          <label><input type="checkbox" id="show-datum" checked /> <i class="key datum"></i> Datum line</label>
-          <label><input type="checkbox" id="show-valley" checked /> <i class="key valley"></i> Valley lines and forks</label>
-          <label><input type="checkbox" id="show-fill" /> <i class="key fill"></i> Shade the letters</label>
-        </div>
-        <div class="group">
-          <span class="label">Magnify</span>
-          <span class="seg" id="zoom">
-            <button data-zoom="1" class="on">True size</button>
-            <button data-zoom="2">2×</button>
-            <button data-zoom="4">4×</button>
+      <section>
+        <h2><label for="text">Inscription</label></h2>
+        <textarea id="text" rows="4" spellcheck="false" placeholder="Type the inscription. Press Enter for a new line."></textarea>
+      </section>
+
+      <section>
+        <h2>Lettering</h2>
+        <div id="sliders"></div>
+        <div class="row">
+          <span class="name">Alignment</span>
+          <span class="seg" id="align">
+            <button data-align="left">Left</button>
+            <button data-align="centre">Centre</button>
+            <button data-align="right">Right</button>
           </span>
         </div>
       </section>
 
-      <section id="stage" aria-label="Panel preview"></section>
+      <section>
+        <h2>Panel</h2>
+        <div class="boxes">
+          <label>Width <span><input type="number" id="panelWidth" min="10" max="1000" step="1" /> mm</span></label>
+          <label>Height <span><input type="number" id="panelHeight" min="10" max="1000" step="1" /> mm</span></label>
+          <label>Margin <span><input type="number" id="margin" min="0" max="200" step="0.5" /> mm</span></label>
+        </div>
+        <div id="warnings"></div>
+      </section>
 
-      <section class="info">
-        <div class="card" id="settings"></div>
-        <div class="card">
-          <h2>Check the scale</h2>
-          <p>
-            Hold a steel rule against the screen. At <b>True size</b> the bar below should measure exactly
-            <b>100 mm</b>. If it doesn't, nudge it until it does. The screen remembers this.
-          </p>
-          <div id="ruler"></div>
-          <div class="calib">
-            <button id="cal-minus" title="Shorter">−</button>
-            <input type="range" id="cal" min="0.6" max="1.6" step="0.001" />
-            <button id="cal-plus" title="Longer">+</button>
-            <button id="cal-reset">Reset</button>
-          </div>
+      <section>
+        <h2>Spacing</h2>
+        <p class="hint">Click the gap between two letters to move them closer or further apart. The change applies wherever that pair of letters appears.</p>
+        <div id="kerning-summary"></div>
+      </section>
+
+      <section>
+        <h2>Show</h2>
+        <div class="toggles">
+          <label><input type="checkbox" id="show-outline" checked /> <i class="key outline"></i> Outline (hairline)</label>
+          <label><input type="checkbox" id="show-datum" checked /> <i class="key datum"></i> Datum line</label>
+          <label><input type="checkbox" id="show-valley" checked /> <i class="key valley"></i> Valley lines and forks</label>
+          <label><input type="checkbox" id="show-fill" /> <i class="key fill"></i> Shade the letters</label>
+          <label><input type="checkbox" id="show-space" /> <i class="key space"></i> Space between letters (mm²)</label>
         </div>
       </section>
+
+      <details>
+        <summary>Check the screen scale</summary>
+        <p class="hint">
+          Hold a steel rule against the screen. The bar below should measure exactly <b>100 mm</b>. If it doesn't, nudge it
+          until it does. This makes <b>True size</b> really full size, and the screen remembers it.
+        </p>
+        <div id="ruler"></div>
+        <div class="calib">
+          <button id="cal-minus" title="Shorter">−</button>
+          <input type="range" id="cal" min="0.6" max="1.6" step="0.001" />
+          <button id="cal-plus" title="Longer">+</button>
+          <button id="cal-reset">Reset</button>
+        </div>
+      </details>
+
+      <footer>
+        <button id="reset-all" class="quiet">Start again with OAK</button>
+        <p id="credit"></p>
+      </footer>
+    </aside>
+
+    <main id="work">
+      <svg id="canvas" aria-label="Panel layout">
+        <g id="world"></g>
+        <g id="labels"></g>
+      </svg>
+      <div id="kern-pop" hidden>
+        <div class="pair"></div>
+        <div class="kern-row">
+          <button data-nudge="-1" title="Closer (← key)">◀ Closer</button>
+          <output></output>
+          <button data-nudge="1" title="Further apart (→ key)">Apart ▶</button>
+        </div>
+        <div class="kern-row small">
+          <button data-nudge="0">Back to 0</button>
+          <button data-close>Done</button>
+        </div>
+      </div>
+      <div id="viewbar">
+        <button id="true-size">True size</button>
+        <button id="fit">Fit panel</button>
+        <span id="zoom-read"></span>
+      </div>
+      <p id="help">Drag to move · Scroll to zoom</p>
+      <p id="loading">Loading letters…</p>
     </main>
 
-    <footer id="credit"></footer>
     <script type="module" src="./src/main.ts"></script>
   </body>
 </html>
