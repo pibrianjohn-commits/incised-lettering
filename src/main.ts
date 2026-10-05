@@ -22,7 +22,7 @@ import { BED, BED_EXTENDED, bedFit, fitToLettering } from './panel';
 import { defaultGroups, type Side } from './groups';
 import { defaultBox, evenUp, fitBlock, fitLine, type EvenUp, type FitBy } from './spacing';
 import { toGcode } from './gcode';
-import { buildPasses, checkPasses, type Check, type MachineSettings, type Pass, type PassName } from './toolpath';
+import { buildPasses, checkPasses, MAX_SCRIBE_DEPTH, type Check, type MachineSettings, type Pass, type PassName } from './toolpath';
 import { LetterStore } from './letters';
 import { negativeSpace } from './negativeSpace';
 import { History } from './history';
@@ -1120,6 +1120,15 @@ function wirePanel() {
     });
   }
 
+  // Depth of a scribed border: 0.2 mm marks it out; up to 1 mm leaves a finished line.
+  const scribe = $<HTMLInputElement>('b-scribe');
+  scribe.addEventListener('input', () => {
+    const v = Number(scribe.value);
+    if (scribe.value === '' || !Number.isFinite(v) || v <= 0) return;
+    update({ machine: { ...project.machine, scribeDepth: Math.min(v, MAX_SCRIBE_DEPTH) } }, scribe, 'b-scribe');
+  });
+  scribe.addEventListener('change', () => syncPanelControls()); // show the value as kept (at most 1 mm)
+
   for (const side of SIDES) {
     const input = $<HTMLInputElement>(`m-${side}`);
     input.addEventListener('input', () => {
@@ -1208,12 +1217,14 @@ function syncPanelControls(source?: Element) {
     const input = $<HTMLInputElement>(id);
     if (input !== source) input.value = String(b[key]);
   }
+  const scribe = $<HTMLInputElement>('b-scribe');
+  if (scribe !== source) scribe.value = String(p.machine.scribeDepth);
   $('border-hint').textContent =
     b.style === 'none'
       ? ''
       : b.style === 'incised'
         ? 'Cut like the letters: hairline on both edges, datum lines by the same rule, and a valley forking into each corner. Corner styles come later.'
-        : 'Scribed hairline, measured to the line. Corner styles come later.';
+        : 'Scribed line, measured to the line. Its depth: 0.2 mm marks it out; up to 1 mm leaves a finished decorative line. Corner styles come later.';
   $('margin-hint').textContent =
     b.style === 'none'
       ? 'Clear space round the lettering, measured from the panel edge.'
@@ -1811,7 +1822,13 @@ function showCam() {
   const total = c.passes.reduce((s, p) => s + p.minutes, 0);
   const feed = (p: Pass) => (p.name === 'hairline' ? m.feedHairline : p.name === 'datum' ? m.feedDatum : m.feedSlit);
   const what: Record<PassName, string> = {
-    hairline: `a ${m.hairlineDepth} mm deep line on the true outline of every letter${c.project.border.style !== 'none' ? ' and the border' : ''}`,
+    hairline: `a ${m.hairlineDepth} mm deep line on the true outline of every letter${
+      c.project.border.style === 'incised'
+        ? ' and both edges of the border'
+        : c.project.border.style !== 'none'
+          ? `, and the scribed border at ${Math.min(m.scribeDepth, MAX_SCRIBE_DEPTH)} mm deep`
+          : ''
+    }`,
     datum: `a ${m.datumDepth} mm deep line on every datum line`,
     slit: `down every valley line to the true depth less ${m.slitMargin} mm, at most ${m.slitStep} mm per pass, rising to nothing at the corners. Numbers show the order within each letter: thin strokes first`,
   };

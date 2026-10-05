@@ -65,7 +65,8 @@ All measurements are metric, in millimetres and degrees.
 | Datum minimum | The datum line never comes closer to the outline than this | 0.2 mm |
 | Slit margin | How far the valley slit stops short of the true valley depth | 0.3 mm |
 | Safe floor | No cut comes closer to the back of the board than this | 3 mm |
-| Zero corner | The panel corner that is X0 Y0 on the machine | Bottom left |
+| Zero corner | The panel corner that is X0 Y0 on the machine | Bottom left (to be confirmed) |
+| Scribed border depth | Depth of a single or double border line | 0.2 mm, up to 1 mm |
 | Tool | The V-bit used for every pass | 30° V-groove, 6.35 mm diameter |
 
 The carver's own letters will arrive later as drawn vector files (SVG) or a font file. The software must accept either without changing anything else.
@@ -239,6 +240,9 @@ Answers from the carver, recorded as they are given.
 - **Datum offset follows the stroke** (5 Oct 2026). The datum line is set in from the outline by a percentage of the local stroke width, so it follows the thick and thin, starting at 20%. A minimum distance (starting at 0.2 mm) stops it crowding the hairline. It is still dropped where the stroke is too narrow, which is wherever the stroke is narrower than twice the distance it would be set in.
 - **Cutting order: thin before thick** (5 Oct 2026). Correction to the earlier "thick first" rule. Thin strokes are cut first, then thick strokes, because cutting a thin stroke into a thick stroke that has already been cut risks tear-out at the junction. This applies to the stroke numbering, the printed cutting sheet and the order of strokes within the machine passes (Roadmap step 8).
 - **Incised border corners** (5 Oct 2026). On an incised border the valley forks only into the outer corners: these are hollows and need a stop cut. The inner corners are raised ridges, formed by paring both walls to meet, so they get no stop cut.
+- **G-code cutting order** (5 Oct 2026). Letter by letter in reading order, and within each letter thin strokes before thick, as built.
+- **Safe floor** (5 Oct 2026). 3 mm is right.
+- **Scribed border depth** (5 Oct 2026). Single and double borders have their own depth setting, starting at 0.2 mm (a marking-out line) and allowed up to about 1 mm for a finished decorative line. They are cut in the hairline pass. An incised border's edges stay at the hairline depth.
 
 ## Open questions
 
@@ -251,8 +255,6 @@ Answers from the carver, recorded as they are given.
 - Which stand-in Roman typeface is closest to the letters the carver intends to draw?
 - Even-up factors for round, straight and diagonal sides: they start at 1.0 (pure equal space). Measured with the 6 mm depth limit, round pairs such as H O come out with less space than H H, so at 1.0 the suggestions open them up; a round factor below 1 (try 0.8) brings them closer. What factors look right by eye?
 - Word stops start as triangles with sides 22% of the cap height, centred 45% up, pointing down. Is that the right size, height and direction?
-- G-code cutting order: for now the machine works letter by letter in reading order, and within each letter takes thin strokes first, then thick (a "stroke" being one run of valley line between forks, so the short forks into the corners, being thinnest, come first and act as stop cuts). Is letter by letter right, or should all thin strokes on the panel go before any thick ones?
-- Safe floor starts at 3 mm and the zero corner at bottom left. Are those right for the workshop?
-- Scribed (single and double) borders are cut in the hairline pass, at the hairline depth. Should they be deeper, as a finished line rather than a marking-out line?
+- Zero corner: which corner of the panel should be X0 Y0 on the machine? The answer came back with the placeholder still in it ("[write your corner here, e.g. front left]"). It stays at bottom left (the corner nearest you and to the left, if the panel lies on the bed as it is drawn on screen) until confirmed.
 - The G-code is written for GRBL and still needs confirming against the machine and its sender before the first cut: run it in the air (Z raised) or in scrap first.
 - The negative-space depth limit applies to every letter, so it also trims the space beside the slanting legs of A and V and under the arm of T, not only the bays of open letters. Is that wanted, or should those be left uncut?

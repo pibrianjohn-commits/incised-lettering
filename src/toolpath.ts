@@ -35,6 +35,11 @@ export interface MachineSettings {
   spindle: number; // rpm
   hairlineDepth: number; // mm
   datumDepth: number; // mm
+  /**
+   * Depth of a scribed (single or double) border line, mm: 0.2 marks it out
+   * like the hairline; up to about 1 mm leaves a finished decorative line.
+   */
+  scribeDepth: number;
   /** Most the slit goes down in one pass, mm. */
   slitStep: number;
   feedHairline: number; // mm/min
@@ -57,6 +62,7 @@ export const defaultMachine: MachineSettings = {
   spindle: 12000,
   hairlineDepth: 0.2,
   datumDepth: 0.3,
+  scribeDepth: 0.2,
   slitStep: 1.75,
   feedHairline: 900,
   feedDatum: 900,
@@ -115,9 +121,14 @@ export function slitDepth(r: number, m: MachineSettings): number {
 /** Rapid moves are taken at roughly this speed for the time estimate, mm/min. */
 const RAPID = 1500;
 
+/** Deepest a scribed border line may be set, mm (BRIEF.md, Decisions). */
+export const MAX_SCRIBE_DEPTH = 1;
+
 interface Item {
   id: string;
   outline: Contour[];
+  /** Scribed border lines, cut in the hairline pass at their own depth. */
+  scribes?: Contour[];
   datum: Contour[];
   valleys: ValleyLine[];
 }
@@ -136,7 +147,7 @@ function items(layout: Layout): Item[] {
   const out: Item[] = list;
   const bm = borderMarks(p.border, p.panelWidth, p.panelHeight, { percent: p.datumPercent, minimum: p.datumMinimum });
   if (bm.scribes.length || bm.outline.length) {
-    out.push({ id: 'border', outline: [...bm.scribes, ...bm.outline], datum: bm.datum, valleys: bm.valleys });
+    out.push({ id: 'border', outline: bm.outline, scribes: bm.scribes, datum: bm.datum, valleys: bm.valleys });
   }
   return out;
 }
@@ -213,6 +224,12 @@ export function buildPasses(layout: Layout, m: MachineSettings): Pass[] {
     for (const it of list) {
       for (const c of nearestOrder(it.outline, at)) {
         cuts.push({ item: it.id, feed: m.feedHairline, points: close(c).map((p) => ({ ...p, z: -m.hairlineDepth })) });
+        at = c[0];
+      }
+      // A scribed border is cut here too, at its own depth (never past the limit).
+      const scribeZ = -Math.min(m.scribeDepth, MAX_SCRIBE_DEPTH);
+      for (const c of nearestOrder(it.scribes ?? [], at)) {
+        cuts.push({ item: it.id, feed: m.feedHairline, points: close(c).map((p) => ({ ...p, z: scribeZ })) });
         at = c[0];
       }
     }
