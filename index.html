@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Incised Lettering</title>
+    <link rel="stylesheet" href="./src/style.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Incised Lettering</h1>
+      <p class="sub">Stage 1, first step: stand-in alphabet, one word, outlines, valleys and datum lines. No G-code yet.</p>
+    </header>
+
+    <main>
+      <section class="controls">
+        <div class="group">
+          <span class="label">Show</span>
+          <label><input type="checkbox" id="show-outline" checked /> <i class="key outline"></i> Outline (hairline)</label>
+          <label><input type="checkbox" id="show-datum" checked /> <i class="key datum"></i> Datum line</label>
+          <label><input type="checkbox" id="show-valley" checked /> <i class="key valley"></i> Valley lines and forks</label>
+          <label><input type="checkbox" id="show-fill" /> <i class="key fill"></i> Shade the letters</label>
+        </div>
+        <div class="group">
+          <span class="label">Magnify</span>
+          <span class="seg" id="zoom">
+            <button data-zoom="1" class="on">True size</button>
+            <button data-zoom="2">2×</button>
+            <button data-zoom="4">4×</button>
+          </span>
+        </div>
+      </section>
+
+      <section id="stage" aria-label="Panel preview"></section>
+
+      <section class="info">
+        <div class="card" id="settings"></div>
+        <div class="card">
+          <h2>Check the scale</h2>
+          <p>
+            Hold a steel rule against the screen. At <b>True size</b> the bar below should measure exactly
+            <b>100 mm</b>. If it doesn't, nudge it until it does. The screen remembers this.
+          </p>
+          <div id="ruler"></div>
+          <div class="calib">
+            <button id="cal-minus" title="Shorter">−</button>
+            <input type="range" id="cal" min="0.6" max="1.6" step="0.001" />
+            <button id="cal-plus" title="Longer">+</button>
+            <button id="cal-reset">Reset</button>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer id="credit"></footer>
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>
