@@ -17,7 +17,14 @@ export interface Project {
   align: Align;
   panelWidth: number; // mm
   panelHeight: number; // mm
-  margin: number; // mm, clear space inside the panel edge
+  /**
+   * Clear space round the lettering, mm, per side. Measured from the
+   * border's inner edge, or from the panel edge where there is no border.
+   */
+  margins: Margins;
+  border: Border;
+  /** Picture placed behind the layout to trace or match; the picture itself is stored separately. */
+  refImage: RefImage | null;
   /** Datum line set in from the outline by this percentage of the local stroke width… */
   datumPercent: number;
   /** …but never closer to the outline than this, mm. */
@@ -66,7 +73,9 @@ export const defaultProject: Project = {
   align: 'centre',
   panelWidth: 150,
   panelHeight: 60,
-  margin: 10,
+  margins: { top: 10, right: 10, bottom: 10, left: 10 },
+  border: { style: 'none', inset: 6, gap: 1.5, width: 3 },
+  refImage: null,
   datumPercent: 20,
   datumMinimum: 0.2,
   kerning: {},
@@ -75,6 +84,63 @@ export const defaultProject: Project = {
   guides: { x: [], y: [] },
   lines: {},
 };
+
+export interface Margins {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+}
+
+export type BorderStyle = 'none' | 'single' | 'double' | 'incised';
+
+export interface Border {
+  style: BorderStyle;
+  /** Distance from the panel edge to the border's outer edge, mm. */
+  inset: number;
+  /** Double border: distance between the two lines, mm. */
+  gap: number;
+  /** Incised border: width of the cut band, mm. */
+  width: number;
+}
+
+export interface RefImage {
+  /** Top-left corner, mm from the panel's top-left corner. */
+  x: number;
+  y: number;
+  /** Width on the panel, mm; the height follows from the picture's shape. */
+  width: number;
+  /** Height ÷ width of the picture. */
+  aspect: number;
+  opacity: number; // 0–1
+  locked: boolean;
+  visible: boolean;
+}
+
+/** How far in from the panel edge the border's inner edge is (0 with no border), mm. */
+export function borderDepth(b: Border): number {
+  switch (b.style) {
+    case 'none':
+      return 0;
+    case 'single':
+      return b.inset;
+    case 'double':
+      return b.inset + b.gap;
+    case 'incised':
+      return b.inset + b.width;
+  }
+}
+
+/** The area the lettering sits in: inside the border and the margins, mm. */
+export function contentBox(p: Project): { x0: number; y0: number; x1: number; y1: number } {
+  const d = borderDepth(p.border);
+  return {
+    x0: d + p.margins.left,
+    y0: d + p.margins.top,
+    x1: p.panelWidth - d - p.margins.right,
+    y1: p.panelHeight - d - p.margins.bottom,
+  };
+}
 
 /** Identifies a gap by its line and the position of the letter after it. */
 export function gapKey(line: number, index: number): string {
@@ -143,9 +209,10 @@ export function layoutPanel(store: LetterStore, p: Project, quick = false): Layo
   const alphabet = store.alphabet;
   const texts = p.text.replace(/\r/g, '').split('\n');
 
-  // Stack the lines so the block of capitals is centred top to bottom.
+  // Stack the lines so the block of capitals is centred top to bottom within the margins.
+  const box = contentBox(p);
   const blockHeight = k + (texts.length - 1) * p.lineSpacing;
-  const firstBaseline = (p.panelHeight - blockHeight) / 2 + k;
+  const firstBaseline = box.y0 + (box.y1 - box.y0 - blockHeight) / 2 + k;
 
   const letters: PlacedLetter[] = [];
   const gaps: Gap[] = [];
@@ -171,15 +238,26 @@ export function layoutPanel(store: LetterStore, p: Project, quick = false): Layo
       }
     });
     const width = pen;
-    const inner = p.panelWidth - 2 * p.margin;
+    // Where the letters themselves start and end, measured from the pen start.
+    // Auto lines are aligned by their letters, as a carver measures them, not
+    // by the invisible space each letter carries either side.
+    let inkL = Infinity;
+    let inkR = -Infinity;
+    chars.forEach((ch, i) => {
+      const m = store.marks(ch, k, { percent: p.datumPercent, minimum: p.datumMinimum }, true);
+      if (!m) return;
+      inkL = Math.min(inkL, pens[i] + m.box.x0);
+      inkR = Math.max(inkR, pens[i] + m.box.x1);
+    });
+    if (inkL > inkR) inkL = inkR = 0; // no letters on this line
     const place = p.lines[String(li)];
     const x0 = place
       ? lineStart(place.x, place.align, width)
       : p.align === 'left'
-        ? p.margin
+        ? box.x0 - inkL
         : p.align === 'right'
-          ? p.panelWidth - p.margin - width
-          : p.margin + (inner - width) / 2;
+          ? box.x1 - inkR
+          : (box.x0 + box.x1) / 2 - (inkL + inkR) / 2;
     const baselineY = place ? place.baseline : firstBaseline + li * p.lineSpacing;
     const line: PlacedLine = { index: li, text, baselineY, x0, width, ink: null, placed: !!place, locked: !!place?.locked };
     lines.push(line);
@@ -207,7 +285,7 @@ export function layoutPanel(store: LetterStore, p: Project, quick = false): Layo
         ? { x0: Math.min(line.ink.x0, L.box.x0), x1: Math.max(line.ink.x1, L.box.x1) }
         : { x0: L.box.x0, x1: L.box.x1 };
       if (!m.datum) datumPending = true;
-      if (L.box.x0 < p.margin - 0.01 || L.box.x1 > p.panelWidth - p.margin + 0.01) wide = true;
+      if (L.box.x0 < box.x0 - 0.01 || L.box.x1 > box.x1 + 0.01) wide = true;
       if (prev) {
         const pair = prev.char + ch;
         const pairKern = p.kerning[pair] ?? 0;
@@ -231,7 +309,7 @@ export function layoutPanel(store: LetterStore, p: Project, quick = false): Layo
   const inked = lines.filter((l) => l.ink);
   const top = Math.min(...inked.map((l) => l.baselineY - k));
   const bottom = Math.max(...inked.map((l) => l.baselineY));
-  const tall = inked.length > 0 && (top < p.margin - 0.01 || bottom > p.panelHeight - p.margin + 0.01);
+  const tall = inked.length > 0 && (top < box.y0 - 0.01 || bottom > box.y1 + 0.01);
 
   return { project: p, letters, gaps, lines, overflow: { wide, tall }, datumPending };
 }

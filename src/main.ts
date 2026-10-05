@@ -1,16 +1,22 @@
 import { alphabetFromFont } from './alphabet';
+import { borderMarks } from './border';
 import { contourToSvg, polylineToSvg } from './geometry';
 import {
+  contentBox,
   defaultProject,
   layoutPanel,
   lineAnchor,
   type Align,
   type Gap,
   type Layout,
+  type BorderStyle,
   type LinePlacement,
+  type Margins,
   type PlacedLine,
   type Project,
 } from './layout';
+import { loadImage, saveImage } from './imagestore';
+import { BED, BED_EXTENDED, bedFit, fitToLettering } from './panel';
 import { LetterStore } from './letters';
 import { negativeSpace } from './negativeSpace';
 import { History } from './history';
@@ -46,6 +52,10 @@ let measure: { a: { x: number; y: number }; b: { x: number; y: number } } | null
 let guideDrag: { axis: 'x' | 'y'; index: number; at: number | null } | null = null;
 /** The selected line (0 = first), or null. */
 let selectedLine: number | null = null;
+/** The reference picture, ready to show (an object URL), once loaded. */
+let refUrl: string | null = null;
+/** Scaling the reference picture: the first point clicked, while waiting for the second. */
+let scaling: { a: { x: number; y: number } | null } | null = null;
 /** What a line being dragged has snapped to, to draw the snapping guides. */
 let lineSnaps: { x: Snap | null; y: Snap | null } | null = null;
 
@@ -125,13 +135,14 @@ function buildControls() {
     if (b) update({ align: b.dataset.align as Align });
   });
 
-  for (const key of ['panelWidth', 'panelHeight', 'margin'] as const) {
+  for (const key of ['panelWidth', 'panelHeight'] as const) {
     const input = $<HTMLInputElement>(key);
     input.addEventListener('input', () => {
       const v = Number(input.value);
-      if (input.value !== '' && Number.isFinite(v) && v >= (key === 'margin' ? 0 : 1)) update({ [key]: v }, input, key);
+      if (input.value !== '' && Number.isFinite(v) && v >= 1) update({ [key]: v }, input, key);
     });
   }
+  wirePanel();
 
   for (const layer of LAYERS) {
     const cb = $<HTMLInputElement>(`show-${layer}`);
@@ -210,10 +221,11 @@ function syncControls(source?: Element) {
   }
   const text = $<HTMLTextAreaElement>('text');
   if (text !== source) text.value = project.text;
-  for (const key of ['panelWidth', 'panelHeight', 'margin'] as const) {
+  for (const key of ['panelWidth', 'panelHeight'] as const) {
     const input = $<HTMLInputElement>(key);
     if (input !== source) input.value = String(project[key]);
   }
+  syncPanelControls(source);
   $('align')
     .querySelectorAll('button')
     .forEach((b) => b.classList.toggle('on', b.dataset.align === project.align));
@@ -293,11 +305,31 @@ function draw() {
   const L = layout;
   const out: string[] = [];
 
+  // The machine bed, drawn from the panel's top-left corner (the G-code zero), the same way round as the panel.
+  const fit = bedFit(p.panelWidth, p.panelHeight);
+  const bed = fit === 'standard' ? BED : BED_EXTENDED;
+  const [bw, bh] = p.panelWidth >= p.panelHeight ? [bed.width, bed.height] : [bed.height, bed.width];
+  out.push(`<g class="bed"><rect x="0" y="0" width="${bw}" height="${bh}"/></g>`);
+
   out.push(`<rect class="panel" x="0" y="0" width="${p.panelWidth}" height="${p.panelHeight}"/>`);
-  if (p.margin > 0) {
+  const ri = p.refImage;
+  if (ri && refUrl && ri.visible) {
     out.push(
-      `<rect class="margin" x="${p.margin}" y="${p.margin}" width="${Math.max(0, p.panelWidth - 2 * p.margin)}" height="${Math.max(0, p.panelHeight - 2 * p.margin)}"/>`,
+      `<image class="refimg${ri.locked ? ' locked' : ''}" ${ri.locked ? '' : 'data-refimage="1"'} href="${refUrl}" x="${fmt(ri.x)}" y="${fmt(ri.y)}" width="${fmt(ri.width)}" height="${fmt(ri.width * ri.aspect)}" opacity="${ri.opacity}" preserveAspectRatio="none"/>`,
     );
+  }
+  const cb = contentBox(p);
+  if (cb.x1 > cb.x0 && cb.y1 > cb.y0) {
+    out.push(`<rect class="margin" x="${fmt(cb.x0)}" y="${fmt(cb.y0)}" width="${fmt(cb.x1 - cb.x0)}" height="${fmt(cb.y1 - cb.y0)}"/>`);
+  }
+  // The border, cut and drawn like the letters.
+  const bm = borderMarks(p.border, p.panelWidth, p.panelHeight, { percent: p.datumPercent, minimum: p.datumMinimum });
+  if (bm.scribes.length) out.push(`<path class="outline scribe" d="${bm.scribes.map(contourToSvg).join('')}"/>`);
+  if (bm.outline.length) {
+    const d = bm.outline.map(contourToSvg).join('');
+    out.push(`<path class="fill" fill-rule="evenodd" d="${d}"/><path class="outline" d="${d}"/>`);
+    if (bm.datum.length) out.push(`<path class="datum" d="${bm.datum.map(contourToSvg).join('')}"/>`);
+    out.push(`<path class="valley" d="${bm.valleys.map(polylineToSvg).join('')}"/>`);
   }
   out.push('<g class="guides">');
   for (const line of L.lines) {
@@ -441,10 +473,20 @@ function showWarnings() {
   const w: string[] = [];
   if (layout!.overflow.wide) w.push('The lettering runs past the side margins.');
   if (layout!.overflow.tall) w.push('The lines run past the top or bottom margin.');
-  const fits = (a: number, b: number) => (p.panelWidth <= a && p.panelHeight <= b) || (p.panelWidth <= b && p.panelHeight <= a);
-  if (!fits(300, 400)) w.push('The panel is bigger than the machine bed, even extended (300 × 400 mm).');
-  else if (!fits(300, 205)) w.push('The panel needs the extended bed (300 × 400 mm).');
+  const box = contentBox(p);
+  if (box.x1 <= box.x0 || box.y1 <= box.y0) w.push('The border and margins leave no room for the lettering.');
   $('warnings').innerHTML = w.map((t) => `<p class="warn">${t}</p>`).join('');
+
+  // Machine bed check.
+  const fit = bedFit(p.panelWidth, p.panelHeight);
+  const status = $('bed-status');
+  status.className = `bed-status ${fit}`;
+  status.textContent =
+    fit === 'standard'
+      ? `Fits the machine bed (${BED.width} × ${BED.height} mm).`
+      : fit === 'extended'
+        ? `Needs the extended bed (${BED_EXTENDED.width} × ${BED_EXTENDED.height} mm).`
+        : `Too big for the machine, even with the extended bed (${BED_EXTENDED.width} × ${BED_EXTENDED.height} mm).`;
 }
 
 function showKerningSummary() {
@@ -470,7 +512,7 @@ function fitPanel() {
 
 // ---------------------------------------------------------------- view presets
 
-const LAYERS = ['outline', 'datum', 'valley', 'fill', 'space', 'guides', 'kerns'] as const;
+const LAYERS = ['outline', 'datum', 'valley', 'fill', 'space', 'guides', 'kerns', 'bed'] as const;
 type Layer = (typeof LAYERS)[number];
 type PresetName = 'design' | 'spacing' | 'setting' | 'proof';
 const PRESET_KEYS: PresetName[] = ['design', 'spacing', 'setting', 'proof'];
@@ -546,6 +588,12 @@ function onKey(e: KeyboardEvent) {
     nudge(e.key === 'ArrowLeft' ? -1 : 1, e.shiftKey ? 1 : 0.1);
   } else if (e.key === 'Escape') {
     if (measuring) setMeasuring(false);
+    if (scaling) {
+      scaling = null;
+      measure = null;
+      syncPanelControls();
+      drawOverlay();
+    }
     selected = null;
     selectedLine = null;
     draw();
@@ -633,6 +681,9 @@ function wireTools() {
     },
     true,
   );
+
+  // The reference picture: drag it while unlocked, or click two points to scale it.
+  work.addEventListener('pointerdown', onPicturePress, true);
 
   // Press on a line (its letters, a gap, or its number in the margin):
   // a click selects, a drag moves the line.
@@ -954,6 +1005,238 @@ function wireLineEditor() {
   });
 }
 
+// ---------------------------------------------------------------- panel, border, margins, picture
+
+const SIDES = ['top', 'right', 'bottom', 'left'] as const;
+
+function wirePanel() {
+  $('fit-panel').addEventListener('click', fitPanelToLettering);
+
+  $('border-style').addEventListener('click', (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLElement>('[data-border]');
+    if (b) update({ border: { ...project.border, style: b.dataset.border as BorderStyle } });
+  });
+  for (const [id, key, min] of [
+    ['b-inset', 'inset', 0],
+    ['b-gap', 'gap', 0.2],
+    ['b-width', 'width', 0.5],
+  ] as const) {
+    const input = $<HTMLInputElement>(id);
+    input.addEventListener('input', () => {
+      const v = Number(input.value);
+      if (input.value !== '' && Number.isFinite(v) && v >= min) update({ border: { ...project.border, [key]: v } }, input, id);
+    });
+  }
+
+  for (const side of SIDES) {
+    const input = $<HTMLInputElement>(`m-${side}`);
+    input.addEventListener('input', () => {
+      const v = Number(input.value);
+      if (input.value !== '' && Number.isFinite(v) && v >= 0) update({ margins: { ...project.margins, [side]: v } }, input, `m-${side}`);
+    });
+  }
+  const all = $<HTMLInputElement>('m-all');
+  all.addEventListener('input', () => {
+    const v = Number(all.value);
+    if (all.value !== '' && Number.isFinite(v) && v >= 0) update({ margins: { top: v, right: v, bottom: v, left: v } }, all, 'm-all');
+  });
+
+  // Reference picture.
+  const file = $<HTMLInputElement>('ref-file');
+  $('ref-load').addEventListener('click', () => file.click());
+  file.addEventListener('change', async () => {
+    const f = file.files?.[0];
+    file.value = '';
+    if (f) await loadPicture(f);
+  });
+  $<HTMLInputElement>('ref-visible').addEventListener('change', (e) =>
+    setPicture({ visible: (e.target as HTMLInputElement).checked }),
+  );
+  $<HTMLInputElement>('ref-locked').addEventListener('change', (e) =>
+    setPicture({ locked: (e.target as HTMLInputElement).checked }),
+  );
+  const opacity = $<HTMLInputElement>('ref-opacity');
+  opacity.addEventListener('input', () => setPicture({ opacity: Number(opacity.value) }, 'ref-opacity'));
+  const width = $<HTMLInputElement>('ref-width');
+  width.addEventListener('change', () => {
+    const v = Number(width.value);
+    if (width.value !== '' && Number.isFinite(v) && v > 0) setPicture({ width: v });
+  });
+  $('ref-scale').addEventListener('click', () => {
+    if (measuring) setMeasuring(false);
+    scaling = scaling ? null : { a: null };
+    syncPanelControls();
+    drawOverlay();
+  });
+  $('ref-remove').addEventListener('click', () => {
+    scaling = null;
+    update({ refImage: null });
+  });
+}
+
+function setPicture(change: Partial<NonNullable<Project['refImage']>>, group: string | null = null) {
+  if (!project.refImage) return;
+  update({ refImage: { ...project.refImage, ...change } }, undefined, group);
+}
+
+async function loadPicture(blob: Blob) {
+  const url = URL.createObjectURL(blob);
+  const img = new Image();
+  img.src = url;
+  try {
+    await img.decode();
+  } catch {
+    URL.revokeObjectURL(url);
+    alert('That file could not be opened as a picture.');
+    return;
+  }
+  if (refUrl) URL.revokeObjectURL(refUrl);
+  refUrl = url;
+  await saveImage(blob);
+  // Start it the width of the panel, at the top-left corner, half strength and unlocked.
+  update({
+    refImage: { x: 0, y: 0, width: project.panelWidth, aspect: img.naturalHeight / img.naturalWidth, opacity: 0.5, locked: false, visible: true },
+  });
+}
+
+function syncPanelControls(source?: Element) {
+  const p = project;
+  const b = p.border;
+  $('border-style')
+    .querySelectorAll<HTMLElement>('[data-border]')
+    .forEach((el) => el.classList.toggle('on', el.dataset.border === b.style));
+  $('border-boxes')
+    .querySelectorAll<HTMLElement>('[data-for]')
+    .forEach((el) => (el.hidden = !el.dataset.for!.split(' ').includes(b.style)));
+  for (const [id, key] of [
+    ['b-inset', 'inset'],
+    ['b-gap', 'gap'],
+    ['b-width', 'width'],
+  ] as const) {
+    const input = $<HTMLInputElement>(id);
+    if (input !== source) input.value = String(b[key]);
+  }
+  $('border-hint').textContent =
+    b.style === 'none'
+      ? ''
+      : b.style === 'incised'
+        ? 'Cut like the letters: hairline on both edges, datum lines by the same rule, and a valley forking into each corner. Corner styles come later.'
+        : 'Scribed hairline, measured to the line. Corner styles come later.';
+  $('margin-hint').textContent =
+    b.style === 'none'
+      ? 'Clear space round the lettering, measured from the panel edge.'
+      : "Clear space round the lettering, measured from the border's inner edge.";
+  for (const side of SIDES) {
+    const input = $<HTMLInputElement>(`m-${side}`);
+    if (input !== source) input.value = String(p.margins[side]);
+  }
+  const all = $<HTMLInputElement>('m-all');
+  const m: Margins = p.margins;
+  if (all !== source) all.value = m.top === m.right && m.top === m.bottom && m.top === m.left ? String(m.top) : '';
+
+  const ri = p.refImage;
+  $('ref-controls').hidden = !ri;
+  $('ref-load').textContent = ri ? 'Load a different picture…' : 'Load a picture…';
+  if (ri) {
+    $<HTMLInputElement>('ref-visible').checked = ri.visible;
+    $<HTMLInputElement>('ref-locked').checked = ri.locked;
+    $<HTMLInputElement>('ref-opacity').value = String(ri.opacity);
+    $('ref-opacity-read').textContent = `${Math.round(ri.opacity * 100)}%`;
+    const w = $<HTMLInputElement>('ref-width');
+    if (w !== source && document.activeElement !== w) w.value = ri.width.toFixed(1);
+    $('ref-scale').classList.toggle('on', !!scaling);
+    $<HTMLButtonElement>('ref-scale').disabled = ri.locked;
+    $('ref-hint').textContent = scaling
+      ? scaling.a
+        ? 'Now click the second point.'
+        : 'Click the first of two points on the picture whose real distance apart you know.'
+      : ri.locked
+        ? 'Locked: unlock it to move or scale it.'
+        : 'While it is unlocked, drag the picture to move it.';
+    if (!refUrl) $('ref-hint').textContent = 'The picture itself was not kept by this browser; load it again.';
+  }
+}
+
+/** One undoable step: size the panel round the lettering and shift everything placed by hand to match. */
+function fitPanelToLettering() {
+  if (!layout) return;
+  const f = fitToLettering(layoutPanel(store!, project));
+  if (!f) return;
+  const lines = Object.fromEntries(
+    Object.entries(project.lines).map(([k, pl]) => [k, { ...pl, x: pl.x + f.dx, baseline: pl.baseline + f.dy }]),
+  );
+  const guides = { x: project.guides.x.map((g) => round(g + f.dx, 1)), y: project.guides.y.map((g) => round(g + f.dy, 1)) };
+  const refImage = project.refImage ? { ...project.refImage, x: project.refImage.x + f.dx, y: project.refImage.y + f.dy } : null;
+  update({ panelWidth: f.width, panelHeight: f.height, lines, guides, refImage });
+  requestAnimationFrame(fitPanel);
+}
+
+function onPicturePress(e: PointerEvent) {
+  const ri = project.refImage;
+  if (!ri || measuring || e.button !== 0) return;
+  const t = e.target as Element;
+  if (t.closest('#viewbar, #kern-pop, .ruler, #ruler-corner')) return;
+
+  // Scaling: two clicks on the picture, then the real distance between them.
+  if (scaling) {
+    e.stopPropagation();
+    const at = toMm(e.clientX, e.clientY);
+    if (!scaling.a) {
+      scaling = { a: at };
+      measure = { a: at, b: at };
+      const follow = (m: PointerEvent) => {
+        if (!scaling?.a) return work.removeEventListener('pointermove', follow);
+        measure = { a: scaling.a, b: toMm(m.clientX, m.clientY) };
+        drawOverlay();
+      };
+      work.addEventListener('pointermove', follow);
+      syncPanelControls();
+      drawOverlay();
+      return;
+    }
+    const a = scaling.a;
+    scaling = null;
+    measure = null;
+    const onScreen = Math.hypot(at.x - a.x, at.y - a.y);
+    syncPanelControls();
+    drawOverlay();
+    if (onScreen < 0.5) return;
+    const answer = prompt(`These two points are ${onScreen.toFixed(1)} mm apart on the panel now.\nHow far apart are they really, in mm?`);
+    const real = Number(answer?.replace(',', '.'));
+    if (!answer || !Number.isFinite(real) || real <= 0) return;
+    // Scale about the first point, so it stays where it is.
+    const k = real / onScreen;
+    setPicture({ width: ri.width * k, x: a.x - (a.x - ri.x) * k, y: a.y - (a.y - ri.y) * k });
+    return;
+  }
+
+  // Dragging the unlocked picture (lines and gaps on top of it take the press first).
+  if (!t.closest('[data-refimage]')) return;
+  e.stopPropagation();
+  const from = toMm(e.clientX, e.clientY);
+  const before = project;
+  const start = { x: ri.x, y: ri.y };
+  work.setPointerCapture(e.pointerId);
+  const move = (m: PointerEvent) => {
+    const at = toMm(m.clientX, m.clientY);
+    project = { ...project, refImage: { ...ri, x: round(start.x + at.x - from.x, 1), y: round(start.y + at.y - from.y, 1) } };
+    draw();
+  };
+  const up = () => {
+    work.removeEventListener('pointermove', move);
+    work.removeEventListener('pointerup', up);
+    work.removeEventListener('pointercancel', up);
+    if (project !== before) {
+      history.record(before);
+      refreshUndoButtons();
+      saveProject();
+    }
+  };
+  work.addEventListener('pointermove', move);
+  work.addEventListener('pointerup', up);
+  work.addEventListener('pointercancel', up);
+}
+
 // ---------------------------------------------------------------- helpers
 
 function pxPerMm() {
@@ -973,7 +1256,16 @@ function setCalibration(v: number) {
 function loadProject(): Project {
   try {
     const raw = localStorage.getItem(PROJECT_KEY);
-    if (raw) return { ...structuredClone(defaultProject), ...JSON.parse(raw) };
+    if (raw) {
+      const saved = JSON.parse(raw);
+      // Older saves had one margin for all four sides.
+      if (typeof saved.margin === 'number' && !saved.margins) {
+        const m = saved.margin;
+        saved.margins = { top: m, right: m, bottom: m, left: m };
+      }
+      delete saved.margin;
+      return { ...structuredClone(defaultProject), ...saved };
+    }
   } catch {
     /* fall through to the default */
   }
@@ -1027,6 +1319,11 @@ async function start() {
     `Stand-in alphabet: <b>${esc(alphabet.name)}</b> by Natanael Gama, ${alphabet.licence} ` +
     `(<a href="./fonts/OFL.txt">licence</a>).`;
   layout = layoutPanel(store, project);
+  if (project.refImage) {
+    const blob = await loadImage();
+    if (blob) refUrl = URL.createObjectURL(blob);
+    syncPanelControls();
+  }
   $('loading').hidden = true;
   fitPanel();
   draw();

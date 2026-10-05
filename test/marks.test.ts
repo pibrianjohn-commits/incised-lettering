@@ -144,10 +144,13 @@ describe('layout tools', () => {
   });
 
   it('left and right alignment sit on the margins', () => {
-    const left = lay({ align: 'left', margin: 12 });
-    expect(left.lines[0].x0).toBe(12);
-    const right = lay({ align: 'right', margin: 12 });
-    expect(right.lines[0].x0 + right.lines[0].width).toBeCloseTo(150 - 12, 6);
+    // Measured to the letters themselves.
+    const left = lay({ align: 'left', margins: { top: 10, right: 12, bottom: 10, left: 12 } });
+    expect(left.lines[0].ink!.x0).toBeCloseTo(12, 6);
+    const right = lay({ align: 'right', margins: { top: 10, right: 12, bottom: 10, left: 12 } });
+    expect(right.lines[0].ink!.x1).toBeCloseTo(150 - 12, 6);
+    const centre = lay();
+    expect((centre.lines[0].ink!.x0 + centre.lines[0].ink!.x1) / 2).toBeCloseTo(75, 6);
   });
 
   it('a space breaks the run, so no kerning gap spans a word space', () => {

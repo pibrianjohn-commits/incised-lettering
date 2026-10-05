@@ -127,6 +127,7 @@ What has been built so far. From here on, work follows the **Roadmap** below.
    - Follow-up (see Decisions): kerning for one gap only, a depth limit for negative space in open letters, and a datum line that follows the thick and thin.
 3. **Done: workspace tools** (Roadmap, "Workspace tools", below).
 4. **Done: Roadmap step 1, lines and layout** (5 Oct 2026).
+5. **Done: Roadmap step 2, panel and border** (5 Oct 2026).
 
 ## Roadmap
 
@@ -143,12 +144,12 @@ Agreed 5 Oct 2026. Build in this order, one step at a time.
    - Click to select a line, drag to move it, and nudge it with the plain arrow keys: 0.1 mm per press, or 1 mm with Shift.
    - Kerning inside a selected line stays fixed while it moves.
    - Exact position boxes: left, centre and baseline.
-   - Snapping guides while dragging: panel centre, margins, border, the ruler guides, the ends, centres, baselines and cap lines of other lines, and equal gaps. Hold Alt to drag freely. (The border joins the list when borders exist, step 2.)
+   - Snapping guides while dragging: panel centre, margins, border, the ruler guides, the ends, centres, baselines and cap lines of other lines, and equal gaps. Hold Alt to drag freely.
    - A dragged line stops following the line-spacing slider until "Return to auto". "Re-flow all" resets every line.
    - Lock a line.
    - Undo and redo, covering line moves (each drag is one step).
    - Text stays editable after a line has been moved, and kerning survives text edits.
-2. **Panel and border.**
+2. **Panel and border.** *Done 5 Oct 2026.*
    - Panel size set by hand, or fitted to the inscription plus margins.
    - Border inset from the panel edge. Border styles: none, single scribed, double, or incised like the letters. Corner styles come later.
    - Margins set per side, measured from the border, or from the panel edge where there is no border.
@@ -238,6 +239,7 @@ Answers from the carver, recorded as they are given.
 - What is the spindle's actual top speed?
 - How should serifs and bracketing be handled at terminations, beyond the plain fork into the corners?
 - Where thick and thin strokes cross, as in A or W, which valley wins at the crossing?
+- Incised border corners: for now the valley runs round the middle of the band and forks out to each outer corner (the mitre stop cut), and the inner corner is left as a plain arris. Is that how the corners should be set out until corner styles come?
 - Is the printed sheet showing the layout and cutting order wanted?
 - Which stand-in Roman typeface is closest to the letters the carver intends to draw?
 - The negative-space depth limit applies to every letter, so it also trims the space beside the slanting legs of A and V and under the arm of T, not only the bays of open letters. Is that wanted, or should those be left uncut?
