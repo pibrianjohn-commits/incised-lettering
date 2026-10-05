@@ -107,6 +107,21 @@ The tool is built in three stages, each usable in the workshop before the next b
 2. **Curved baseline.** Lettering that follows a drawn curve on a flat surface, with letters turned to sit on the curve and spacing kept even along it.
 3. **Carved banner scroll.** Lettering projected onto the surface of a CNC-roughed ribbon, such as a church-style triple banner scroll. The software loads the scroll's 3D model and keeps every mark at the right depth relative to the wood as it actually is. Lettering breaks at the turnovers and foreshortens where the ribbon curves away, placed under the carver's control.
 
+## Order of work
+
+Agreed 5 Oct 2026: layout tools come first, then a 3D view. The rest of Stage 1 (depths, stroke order, tool passes and G-code) follows after these.
+
+1. **Done: first look.** Stand-in alphabet loaded, one word shown at true scale with outlines, valley lines with forked terminations, and datum lines.
+2. **Layout workspace.** Turn the flat view into a proper layout workspace:
+   - Pan by dragging and zoom with the scroll wheel towards the cursor. All marks stay hair-thin at every zoom level.
+   - A text box for the inscription, with several lines allowed.
+   - Sliders for cap height, overall letter spacing, line spacing and alignment, all updating live.
+   - Kerning pair by pair: click the gap between two letters and nudge them closer or further apart in 0.1 mm steps, with the value shown.
+   - Negative space: a toggle that shades the space between each pair of letters and shows its area in mm², so the spacing can be balanced by eye.
+   - A slider for the datum offset. The datum line is kept wherever the stroke is wide enough and stops where it isn't.
+   - Panel width and height boxes.
+3. **3D view (later, not yet built).** A 3D view like Kiri:Moto, with orbit, pan and zoom. It shows the board both as machined (hairline, datum line and valley slit cut) and as finished (letters fully carved). A light can be swept from left to right to show how the incised letters take shadow.
+
 ## Technology and setup
 
 The tool is a browser app written in TypeScript, kept in a GitHub repository and published automatically to a web address with GitHub Pages. The carver opens it from a bookmark: no installing, no terminal, and it works the same on Ubuntu and Windows.
@@ -116,7 +131,7 @@ The tool is a browser app written in TypeScript, kept in a GitHub repository and
 - **Letter shapes** are read with an established font and SVG library.
 - **Outline geometry** such as offsets and clean joins uses an established clipping library.
 - **Valley lines** are written carefully in-house, built on a Voronoi or straight-skeleton method, because they are the heart of the tool.
-- **3D work** for the banner scroll stage uses three.js to load the scroll model and project lettering onto it.
+- **3D work** uses three.js: first for the 3D view of the board as machined and as finished, then for the banner scroll stage, to load the scroll model and project lettering onto it.
 
 TypeScript is chosen because it catches whole classes of mistakes before they reach the machine, which matters when the carver does not read the code. It is also the same family of language as Kiri:Moto and the kiri-bjm fork.
 
@@ -132,8 +147,16 @@ Claude Code builds the tool from this brief; the carver judges the results in th
 - First cuts are made in scrap or PIR before oak.
 
 * [ ] Carver reviews this brief and answers the open questions
-* [ ] Create the GitHub repository and switch on GitHub Pages
-* [ ] Stage 1, first step: load the stand-in alphabet and show one word with outlines and valley lines
+* [x] Create the GitHub repository and switch on GitHub Pages
+* [x] Stage 1, first step: load the stand-in alphabet and show one word with outlines and valley lines
+* [ ] Layout workspace (see Order of work)
+* [ ] 3D view (see Order of work)
+
+## Decisions
+
+Answers from the carver, recorded as they are given.
+
+- **Datum line on narrow strokes** (5 Oct 2026). Keep a datum line wherever the stroke is wide enough and stop it where it isn't. A stroke narrower than twice the datum offset gets no datum line along that stretch.
 
 ## Open questions
 
@@ -144,3 +167,5 @@ Claude Code builds the tool from this brief; the carver judges the results in th
 - Where thick and thin strokes cross, as in A or W, which valley wins at the crossing?
 - Is the printed sheet showing the layout and cutting order wanted?
 - Which stand-in Roman typeface is closest to the letters the carver intends to draw?
+- Should a kerning adjustment apply to every place a pair of letters occurs (all "AV"s together), or to each gap on its own? For now it applies to every place the pair occurs.
+- In the negative-space measure, how far into an open letter (the bays of E, the mouth of C, under the arm of T) should the space count? For now it runs right in to the ink between the cap line and the baseline.
