@@ -21,7 +21,8 @@ export function overviewSvg(layout: Layout, mode: OverviewMode, selectedLine: nu
   if (bm.scribes.length) out.push(`<path class="ov-scribe" d="${bm.scribes.map(contourToSvg).join('')}"/>`);
   if (bm.outline.length) out.push(`<path class="ov-ink" fill-rule="evenodd" d="${bm.outline.map(contourToSvg).join('')}"/>`);
   if (mode === 'letters') {
-    out.push(`<path class="ov-ink" d="${layout.letters.map((l) => l.outline.map(contourToSvg).join('')).join('')}"/>`);
+    const shapes = [...layout.letters, ...layout.stops].map((l) => l.outline.map(contourToSvg).join('')).join('');
+    out.push(`<path class="ov-ink" d="${shapes}"/>`);
   } else {
     for (const l of layout.lines) {
       if (!l.ink) continue;

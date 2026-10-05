@@ -1,6 +1,8 @@
 // Places the inscription on the panel, line by line.
 
+import { datumLines } from './datum';
 import type { Contour } from './geometry';
+import { defaultGroups, groupPairKey, type KernGroups } from './groups';
 import type { Box, LetterStore } from './letters';
 import type { ValleyLine } from './valley';
 
@@ -30,10 +32,20 @@ export interface Project {
   /** …but never closer to the outline than this, mm. */
   datumMinimum: number;
   /**
-   * Hand kerning in mm, keyed by the letter pair (e.g. "AV"). Applies to
-   * every place that pair occurs, on top of the alphabet's own kerning.
+   * Hand kerning in mm for an exact letter pair (e.g. "AV"), wherever it
+   * occurs. Overrides the pair's group kerning. Saved with the alphabet, so
+   * it applies in every job.
    */
   kerning: Record<string, number>;
+  /** Hand kerning in mm by kerning group, keyed "right group|left group". Saved with the alphabet. */
+  groupKerning: Record<string, number>;
+  /** Which letters share a side shape, for group kerning. Saved with the alphabet. */
+  groups: KernGroups;
+  /** Even-up spacing settings. Saved with the alphabet. */
+  evenUp: EvenUpSettings;
+  /** Extra spacing per line from fitting it to a width, mm, keyed by line number. */
+  lineExtras: Record<string, LineExtra>;
+  wordStops: WordStops;
   /**
    * Hand kerning for one gap only, mm, added on top of the pair's kerning.
    * Keyed by gap (see gapKey); the pair is kept so that if the text is edited
@@ -79,11 +91,60 @@ export const defaultProject: Project = {
   datumPercent: 20,
   datumMinimum: 0.2,
   kerning: {},
+  groupKerning: {},
+  groups: defaultGroups,
+  evenUp: { reference: 'HH', round: 1, straight: 1, diagonal: 1 },
+  lineExtras: {},
+  wordStops: { on: false, size: 22, height: 45, point: 'down' },
   gapKerning: {},
   spaceDepth: 6,
   guides: { x: [], y: [] },
   lines: {},
 };
+
+export interface EvenUpSettings {
+  /** The pair set by eye, whose space every other pair is matched to. */
+  reference: string;
+  /** How much space a round, straight or diagonal side wants, relative to the reference. */
+  round: number;
+  straight: number;
+  diagonal: number;
+}
+
+/** Extra spacing on one line, from fitting it to a width. */
+export interface LineExtra {
+  /** Added between every pair of characters on the line, mm. */
+  letter: number;
+  /** Added to every word space on the line, mm. */
+  word: number;
+}
+
+export interface WordStops {
+  on: boolean;
+  /** Side of the triangle, % of cap height. */
+  size: number;
+  /** Height of its centre above the baseline, % of cap height. */
+  height: number;
+  point: 'up' | 'down';
+}
+
+/** A word stop: a small incised triangle between two words. */
+export interface PlacedStop {
+  line: number;
+  outline: Contour[];
+  valleys: ValleyLine[];
+  datum: Contour[];
+}
+
+/** The pair kerning for a pair: its exact value if set, else its groups' value. */
+export function pairKerning(p: Project, a: string, b: string): { mm: number; from: 'pair' | 'group' | 'none'; groupMm: number } {
+  const gk = groupPairKey(p.groups, a, b);
+  const groupMm = gk ? (p.groupKerning[gk] ?? 0) : 0;
+  const exact = p.kerning[a + b];
+  if (exact !== undefined) return { mm: exact, from: 'pair', groupMm };
+  if (gk && p.groupKerning[gk] !== undefined) return { mm: groupMm, from: 'group', groupMm };
+  return { mm: 0, from: 'none', groupMm };
+}
 
 export interface Margins {
   top: number;
@@ -164,8 +225,14 @@ export interface Gap {
   right: PlacedLetter;
   /** Identifies this gap for one-gap kerning. */
   key: string;
-  /** Hand kerning for this pair wherever it occurs, mm. */
+  /** Hand kerning for this pair wherever it occurs (exact pair, else its groups), mm. */
   pairKern: number;
+  /** Where pairKern comes from. */
+  pairFrom: 'pair' | 'group' | 'none';
+  /** The groups' kerning for this pair (overridden if the exact pair is set), mm. */
+  groupKern: number;
+  /** "right group|left group" for this pair, or null if a letter has no group. */
+  groupKey: string | null;
   /** Extra hand kerning for this gap only, mm. */
   gapKern: number;
   /** Total hand kerning at this gap, mm. */
@@ -198,6 +265,7 @@ export interface Layout {
   overflow: { wide: boolean; tall: boolean };
   /** Some datum lines were left off in a quick layout. */
   datumPending: boolean;
+  stops: PlacedStop[];
 }
 
 /**
@@ -215,6 +283,7 @@ export function layoutPanel(store: LetterStore, p: Project, quick = false): Layo
   const firstBaseline = box.y0 + (box.y1 - box.y0 - blockHeight) / 2 + k;
 
   const letters: PlacedLetter[] = [];
+  const stops: PlacedStop[] = [];
   const gaps: Gap[] = [];
   const lines: PlacedLine[] = [];
   let wide = false;
@@ -229,12 +298,14 @@ export function layoutPanel(store: LetterStore, p: Project, quick = false): Layo
       const g = p.gapKerning[gapKey(li, i)];
       return g && g.pair === chars[i - 1] + chars[i] ? g.mm : 0;
     };
+    const extra = p.lineExtras[String(li)] ?? { letter: 0, word: 0 };
     chars.forEach((ch, i) => {
       pens.push(pen);
       pen += (alphabet.letter(ch)?.advance ?? 0.3) * k;
+      if (/\s/.test(ch)) pen += extra.word;
       const next = chars[i + 1];
       if (next !== undefined) {
-        pen += alphabet.kerning(ch, next) * k + (p.kerning[ch + next] ?? 0) + gapKern(i + 1) + p.letterSpacing;
+        pen += alphabet.kerning(ch, next) * k + pairKerning(p, ch, next).mm + gapKern(i + 1) + p.letterSpacing + extra.letter;
       }
     });
     const width = pen;
@@ -263,10 +334,13 @@ export function layoutPanel(store: LetterStore, p: Project, quick = false): Layo
     lines.push(line);
 
     let prev: PlacedLetter | null = null;
+    let lastInk: PlacedLetter | null = null;
+    let spaceSince = false;
     chars.forEach((ch, i) => {
       const m = store.marks(ch, k, { percent: p.datumPercent, minimum: p.datumMinimum }, quick);
       if (!m) {
         prev = null; // a space breaks the run: no gap to kern across it
+        if (/\s/.test(ch)) spaceSince = true;
         return;
       }
       const dx = x0 + pens[i];
@@ -281,6 +355,12 @@ export function layoutPanel(store: LetterStore, p: Project, quick = false): Layo
         box: { x0: m.box.x0 + dx, x1: m.box.x1 + dx, y0: m.box.y0 + dy, y1: m.box.y1 + dy },
       };
       letters.push(L);
+      // A word stop goes in the middle of each word space, between the letters either side.
+      if (p.wordStops.on && spaceSince && lastInk) {
+        stops.push(wordStop((lastInk.box.x1 + L.box.x0) / 2, baselineY, li, p));
+      }
+      lastInk = L;
+      spaceSince = false;
       line.ink = line.ink
         ? { x0: Math.min(line.ink.x0, L.box.x0), x1: Math.max(line.ink.x1, L.box.x1) }
         : { x0: L.box.x0, x1: L.box.x1 };
@@ -288,7 +368,8 @@ export function layoutPanel(store: LetterStore, p: Project, quick = false): Layo
       if (L.box.x0 < box.x0 - 0.01 || L.box.x1 > box.x1 + 0.01) wide = true;
       if (prev) {
         const pair = prev.char + ch;
-        const pairKern = p.kerning[pair] ?? 0;
+        const pk = pairKerning(p, prev.char, ch);
+        const pairKern = pk.mm;
         const own = gapKern(i);
         gaps.push({
           pair,
@@ -297,6 +378,9 @@ export function layoutPanel(store: LetterStore, p: Project, quick = false): Layo
           left: prev,
           right: L,
           pairKern,
+          pairFrom: pk.from,
+          groupKern: pk.groupMm,
+          groupKey: groupPairKey(p.groups, prev.char, ch),
           gapKern: own,
           kern: round1(pairKern + own),
           x: (prev.box.x1 + L.box.x0) / 2,
@@ -311,7 +395,35 @@ export function layoutPanel(store: LetterStore, p: Project, quick = false): Layo
   const bottom = Math.max(...inked.map((l) => l.baselineY));
   const tall = inked.length > 0 && (top < box.y0 - 0.01 || bottom > box.y1 + 0.01);
 
-  return { project: p, letters, gaps, lines, overflow: { wide, tall }, datumPending };
+  return { project: p, letters, gaps, lines, overflow: { wide, tall }, datumPending, stops };
+}
+
+/**
+ * A word stop centred at x, cut like a letter: an equilateral triangle whose
+ * valley runs from its centre out to each corner, with datum lines by the
+ * same rule as the letters.
+ */
+export function wordStop(x: number, baselineY: number, line: number, p: Project): PlacedStop {
+  const k = p.capHeight;
+  const side = (p.wordStops.size / 100) * k;
+  const h = (side * Math.sqrt(3)) / 2;
+  const cy = baselineY - (p.wordStops.height / 100) * k;
+  const s = p.wordStops.point === 'up' ? -1 : 1; // which way the point goes
+  // The centre sits a third of the way up from the flat side.
+  const tip = { x, y: cy + s * ((2 * h) / 3) };
+  const a = { x: x - side / 2, y: cy - s * (h / 3) };
+  const b = { x: x + side / 2, y: cy - s * (h / 3) };
+  const r = h / 3; // distance from the centre to each side
+  const valleys = [tip, a, b].map((c) => [
+    { x, y: cy, r },
+    { x: c.x, y: c.y, r: 0 },
+  ]);
+  return {
+    line,
+    outline: [[tip, b, a]],
+    valleys,
+    datum: datumLines(valleys, { percent: p.datumPercent, minimum: p.datumMinimum }),
+  };
 }
 
 function round1(v: number) {

@@ -129,6 +129,7 @@ What has been built so far. From here on, work follows the **Roadmap** below.
 4. **Done: Roadmap step 1, lines and layout** (5 Oct 2026).
 5. **Done: Roadmap step 2, panel and border** (5 Oct 2026).
 6. **Done: Roadmap step 3, right-hand inspection panel** (5 Oct 2026).
+7. **Done: Roadmap step 4, spacing intelligence** (5 Oct 2026).
 
 ## Roadmap
 
@@ -160,7 +161,7 @@ Agreed 5 Oct 2026. Build in this order, one step at a time.
    - Overview of the whole panel with the letters filled solid black, with a toggle to show plain line blocks instead. It doubles as a navigator.
    - Line list showing for each line: number, text, length in mm and as a % of panel width, cap height, position, colour (% of the line's area that is letter), auto or placed, and lock.
    - Balance figures: space at top, bottom, left and right; the top-to-bottom ratio; and the visual centre of the lettering against the panel centre.
-4. **Spacing intelligence.**
+4. **Spacing intelligence.** *Done 5 Oct 2026.* Kerning works at three levels: by group, by exact pair (overriding its groups), and for one gap. Group and pair kerning, the groups and the even-up settings are saved with the alphabet; one-gap kerning and fitting stay with the job. Even-up suggestions are only ever shown for the carver to accept, refuse or tweak (with an optional preview on the panel), never applied silently.
    - "Even up spacing" adjusts each pair until the measured spaces are optically equal. The changes are shown as suggestions to accept, refuse or tweak.
    - Even-up calibrated by eye: the carver sets one reference pair (such as H H) to look right, and every other pair is matched to its measured area, with separate factors for round, straight and diagonal letters.
    - Fit a line to a set width, or fit a line or block into a set box, filling spare width by word spacing or by letter spacing.
@@ -243,4 +244,6 @@ Answers from the carver, recorded as they are given.
 - Where thick and thin strokes cross, as in A or W, which valley wins at the crossing?
 - Is the printed sheet showing the layout and cutting order wanted?
 - Which stand-in Roman typeface is closest to the letters the carver intends to draw?
+- Even-up factors for round, straight and diagonal sides: they start at 1.0 (pure equal space). Measured with the 6 mm depth limit, round pairs such as H O come out with less space than H H, so at 1.0 the suggestions open them up; a round factor below 1 (try 0.8) brings them closer. What factors look right by eye?
+- Word stops start as triangles with sides 22% of the cap height, centred 45% up, pointing down. Is that the right size, height and direction?
 - The negative-space depth limit applies to every letter, so it also trims the space beside the slanting legs of A and V and under the arm of T, not only the bays of open letters. Is that wanted, or should those be left uncut?
