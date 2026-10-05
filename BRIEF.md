@@ -139,26 +139,35 @@ Agreed 5 Oct 2026. Build in this order, one step at a time.
    - A dragged line stops following the line-spacing slider until "Return to auto". "Re-flow all" resets every line.
    - Lock a line.
    - Undo and redo.
+   - Text stays editable after a line has been moved, and kerning survives text edits.
 2. **Panel and border.**
    - Panel size set by hand, or fitted to the inscription plus margins.
    - Border inset from the panel edge. Border styles: none, single scribed, double, or incised like the letters. Corner styles come later.
    - Margins set per side, measured from the border, or from the panel edge where there is no border.
    - Machine bed check.
+   - Background reference image: load a photo of an inscription, a rubbing, a drawing or an alphabet sheet behind the layout, scaled to true size and locked, to trace or match.
 3. **Right-hand inspection panel.**
    - Overview of the whole panel with the letters filled solid black, with a toggle to show plain line blocks instead. It doubles as a navigator.
    - Line list showing for each line: number, text, length in mm and as a % of panel width, cap height, position, colour (% of the line's area that is letter), auto or placed, and lock.
    - Balance figures: space at top, bottom, left and right; the top-to-bottom ratio; and the visual centre of the lettering against the panel centre.
 4. **Spacing intelligence.**
    - "Even up spacing" adjusts each pair until the measured spaces are optically equal. The changes are shown as suggestions to accept, refuse or tweak.
-   - Fit a line to a set width.
+   - Even-up calibrated by eye: the carver sets one reference pair (such as H H) to look right, and every other pair is matched to its measured area, with separate factors for round, straight and diagonal letters.
+   - Fit a line to a set width, or fit a line or block into a set box, filling spare width by word spacing or by letter spacing.
+   - Kerning saved as part of the alphabet: pairs the carver sets are applied automatically every time those letters are typed, in every job.
+   - Kerning groups: letters sharing a side shape (O C G Q, H I N M) are kerned together, with exceptions allowed.
    - Word stops: small incised triangles between words, cut like the letters.
 5. **Alphabet setting and alternates.**
    - A mode for alphabet stones: A–Z, ampersand and numerals in classic layouts (tapering triangle, even rows, alphabet with motto), drawing on the layout types of Gill, Kindersley and others.
    - Letters can have alternates (long-legged R, flourished ampersand, long-tailed Q), chosen per instance.
+   - Ligatures and alternates supported properly.
 6. **Working comfort.**
    - Save and open projects as files.
    - Save the carver's own presets.
+   - Saved styles, for consistent lettering across a set of pieces.
+   - A library of complete finished layouts, saved and reused (not empty templates).
    - Client proof: export the layout as a clean PDF or image for customer approval.
+   - Full-size printed template: print the layout at 1:1 across several sheets, for transfer or for checking against the wood.
 7. **3D view.**
    - Like Kiri:Moto: orbit, pan and zoom.
    - Set the stock size.
