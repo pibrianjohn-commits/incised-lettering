@@ -65,7 +65,7 @@ All measurements are metric, in millimetres and degrees.
 | Datum minimum | The datum line never comes closer to the outline than this | 0.2 mm |
 | Slit margin | How far the valley slit stops short of the true valley depth | 0.3 mm |
 | Safe floor | No cut comes closer to the back of the board than this | 3 mm |
-| Zero corner | The panel corner that is X0 Y0 on the machine | Bottom left (to be confirmed) |
+| Zero corner | The panel corner that is X0 Y0 on the machine | Front left |
 | Scribed border depth | Depth of a single or double border line | 0.2 mm, up to 1 mm |
 | Tool | The V-bit used for every pass | 30° V-groove, 6.35 mm diameter |
 
@@ -242,6 +242,7 @@ Answers from the carver, recorded as they are given.
 - **Incised border corners** (5 Oct 2026). On an incised border the valley forks only into the outer corners: these are hollows and need a stop cut. The inner corners are raised ridges, formed by paring both walls to meet, so they get no stop cut.
 - **G-code cutting order** (5 Oct 2026). Letter by letter in reading order, and within each letter thin strokes before thick, as built.
 - **Safe floor** (5 Oct 2026). 3 mm is right.
+- **Zero corner** (5 Oct 2026). X0 Y0 is the front left corner of the panel: the corner nearest the carver and to the left, with the board on the bed reading the right way up. That is the bottom left corner on screen. It is the starting setting, and the other corners can still be chosen per job.
 - **Scribed border depth** (5 Oct 2026). Single and double borders have their own depth setting, starting at 0.2 mm (a marking-out line) and allowed up to about 1 mm for a finished decorative line. They are cut in the hairline pass. An incised border's edges stay at the hairline depth.
 
 ## Open questions
@@ -255,6 +256,5 @@ Answers from the carver, recorded as they are given.
 - Which stand-in Roman typeface is closest to the letters the carver intends to draw?
 - Even-up factors for round, straight and diagonal sides: they start at 1.0 (pure equal space). Measured with the 6 mm depth limit, round pairs such as H O come out with less space than H H, so at 1.0 the suggestions open them up; a round factor below 1 (try 0.8) brings them closer. What factors look right by eye?
 - Word stops start as triangles with sides 22% of the cap height, centred 45% up, pointing down. Is that the right size, height and direction?
-- Zero corner: which corner of the panel should be X0 Y0 on the machine? The answer came back with the placeholder still in it ("[write your corner here, e.g. front left]"). It stays at bottom left (the corner nearest you and to the left, if the panel lies on the bed as it is drawn on screen) until confirmed.
 - The G-code is written for GRBL and still needs confirming against the machine and its sender before the first cut: run it in the air (Z raised) or in scrap first.
 - The negative-space depth limit applies to every letter, so it also trims the space beside the slanting legs of A and V and under the arm of T, not only the bays of open letters. Is that wanted, or should those be left uncut?

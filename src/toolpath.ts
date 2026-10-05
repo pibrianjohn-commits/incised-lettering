@@ -23,7 +23,11 @@ export interface MachineSettings {
   stockThickness: number;
   /** No cut may come closer to the back of the board than this, mm. */
   safeFloor: number;
-  /** The panel corner that is X0 Y0 on the machine. */
+  /**
+   * The panel corner that is X0 Y0 on the machine. "Bottom" is the bottom
+   * edge on screen, which is the front of the bed (nearest the carver) with
+   * the board reading the right way up.
+   */
   zeroCorner: 'bottom-left' | 'top-left' | 'top-right' | 'bottom-right';
   /** Included angle of the finished V-section, degrees: sets the valley depth. */
   chiselAngle: number;
@@ -54,7 +58,7 @@ export interface MachineSettings {
 export const defaultMachine: MachineSettings = {
   stockThickness: 0,
   safeFloor: 3,
-  zeroCorner: 'bottom-left',
+  zeroCorner: 'bottom-left', // front left (BRIEF.md, Decisions)
   chiselAngle: 60,
   slitMargin: 0.3,
   toolAngle: 30,
@@ -70,6 +74,14 @@ export const defaultMachine: MachineSettings = {
   feedPlunge: 250,
   safeZ: 3,
   passes: { hairline: true, datum: true, slit: true },
+};
+
+/** The workshop name for each zero corner: front is the edge nearest the carver. */
+export const CORNER_NAMES: Record<MachineSettings['zeroCorner'], string> = {
+  'bottom-left': 'front left',
+  'bottom-right': 'front right',
+  'top-left': 'back left',
+  'top-right': 'back right',
 };
 
 export type PassName = 'hairline' | 'datum' | 'slit';

@@ -196,6 +196,14 @@ describe('G-code', () => {
     for (const pt of cut.points) expect(near(pt)).toBeLessThan(1e-9); // every point kept is a point of the outline
   });
 
+  it('starts with X0 Y0 at the front left corner (BRIEF.md, Decisions)', () => {
+    expect(defaultMachine.zeroCorner).toBe('bottom-left');
+    // The panel's front-left corner (bottom left on screen) is X0 Y0; the back edge is +Y.
+    expect(toMachine(0, 60, 150, 60, defaultMachine.zeroCorner)).toEqual({ X: 0, Y: 0 });
+    expect(toMachine(0, 0, 150, 60, defaultMachine.zeroCorner)).toEqual({ X: 0, Y: 60 });
+    expect(g).toContain('X0 Y0 at the front left corner');
+  });
+
   it('zero corners', () => {
     expect(toMachine(0, 60, 150, 60, 'bottom-left')).toEqual({ X: 0, Y: 0 });
     expect(toMachine(0, 0, 150, 60, 'top-left')).toEqual({ X: 0, Y: -0 });
