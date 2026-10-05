@@ -22,6 +22,8 @@ import { BED, BED_EXTENDED, bedFit, fitToLettering } from './panel';
 import { defaultGroups, type Side } from './groups';
 import { defaultBox, evenUp, fitBlock, fitLine, type EvenUp, type FitBy } from './spacing';
 import { toGcode } from './gcode';
+import { finishedRelief, machinedRelief } from './relief';
+import type { Board3D, Colouring } from './view3d';
 import { buildPasses, checkPasses, CORNER_NAMES, MAX_SCRIBE_DEPTH, type Check, type MachineSettings, type Pass, type PassName } from './toolpath';
 import { LetterStore } from './letters';
 import { negativeSpace } from './negativeSpace';
@@ -65,6 +67,17 @@ let cam: {
   viewed: Set<PassName>;
   show: PassName | 'all';
 } | null = null;
+/** The 3D view: open or not, what it shows, and the light. */
+const v3d = {
+  open: false,
+  board: null as Board3D | null,
+  state: 'marked' as 'marked' | 'finished',
+  colour: 'wood' as Colouring,
+  across: -45,
+  height: 25,
+  sweep: 0,
+  rebuild: 0,
+};
 /** The alphabet's own settings are saved under its name. */
 let alphabetName = '';
 /** The gap under the pointer, for keyboard kerning without clicking first. */
@@ -176,6 +189,7 @@ function buildControls() {
   wirePanel();
   wireSpacing();
   wireMachine();
+  wire3d();
 
   for (const layer of LAYERS) {
     const cb = $<HTMLInputElement>(`show-${layer}`);
@@ -444,6 +458,7 @@ function draw() {
   // The toolpath preview, on top of everything.
   if (cam && cam.project !== project) closeCam('The layout changed, so the preview was closed. Preview the passes again before saving.');
   if (cam) out.push(toolpathSvg());
+  if (v3d.open) schedule3d();
 
   world.innerHTML = out.join('');
   labelData = { spaces, gaps: L.gaps };
@@ -635,6 +650,14 @@ function onKey(e: KeyboardEvent) {
   const target = e.target as HTMLElement;
   // Typing boxes keep their keys; tick boxes, sliders and buttons don't need them.
   const inField = target.closest('textarea, select, input:not([type=checkbox]):not([type=range]):not([type=radio])');
+  // While the 3D view is open, only Esc and 5 (to close it) apply.
+  if (v3d.open) {
+    if (!inField && (e.key === 'Escape' || e.key === '5')) {
+      close3d();
+      e.preventDefault();
+    }
+    return;
+  }
   // Undo and redo work everywhere, typing included, so every change is covered.
   if ((e.ctrlKey || e.metaKey) && !e.altKey) {
     const k = e.key.toLowerCase();
@@ -650,7 +673,9 @@ function onKey(e: KeyboardEvent) {
   }
   if (inField) return;
 
-  if (!e.altKey && /^[1-4]$/.test(e.key)) {
+  if (!e.altKey && e.key === '5') {
+    open3d();
+  } else if (!e.altKey && /^[1-4]$/.test(e.key)) {
     applyPreset(PRESET_KEYS[Number(e.key) - 1]);
   } else if (!e.altKey && (e.key === 'i' || e.key === 'I')) {
     setInspect(!inspectOpen);
@@ -1940,6 +1965,141 @@ function saveGcode() {
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
   $('cam-viewed').textContent = `Saved as ${name}. Check it in your sender's preview too before running it.`;
+}
+
+// ---------------------------------------------------------------- 3D view
+
+function wire3d() {
+  $('v3d-open').addEventListener('click', open3d);
+  $('v3d-close').addEventListener('click', close3d);
+  // Keep the workspace's own pan and zoom out of the 3D view.
+  for (const ev of ['pointerdown', 'wheel'] as const) $('v3d').addEventListener(ev, (e) => e.stopPropagation());
+  $('v3d').addEventListener('contextmenu', (e) => e.preventDefault());
+  $('v3d-state').addEventListener('click', (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLElement>('[data-state]');
+    if (!b) return;
+    v3d.state = b.dataset.state as 'marked' | 'finished';
+    sync3d();
+    build3d();
+  });
+  $('v3d-colour').addEventListener('click', (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLElement>('[data-colour]');
+    if (!b) return;
+    v3d.colour = b.dataset.colour as Colouring;
+    v3d.board?.setColouring(v3d.colour);
+    sync3d();
+    if (v3d.colour === 'depth') build3d(); // to show the depth scale
+  });
+  $('v3d-bar').addEventListener('click', (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLElement>('[data-view]');
+    if (b) v3d.board?.view(b.dataset.view as 'fit' | 'top' | 'front');
+  });
+  const across = $<HTMLInputElement>('v3d-across');
+  const height = $<HTMLInputElement>('v3d-height');
+  across.addEventListener('input', () => {
+    stopSweep();
+    v3d.across = Number(across.value);
+    v3d.board?.setLight(v3d.across, v3d.height);
+  });
+  height.addEventListener('input', () => {
+    v3d.height = Number(height.value);
+    v3d.board?.setLight(v3d.across, v3d.height);
+  });
+  $('v3d-sweep').addEventListener('click', () => (v3d.sweep ? stopSweep() : startSweep()));
+  new ResizeObserver(() => v3d.board?.resize()).observe($('v3d'));
+}
+
+async function open3d() {
+  if (v3d.open || !store) return;
+  if (cam) closeCam();
+  v3d.open = true;
+  $('v3d').hidden = false;
+  $('v3d-open').classList.add('on');
+  sync3d();
+  if (!v3d.board) {
+    // three.js is only fetched the first time the 3D view is opened.
+    const { Board3D } = await import('./view3d');
+    v3d.board = new Board3D($('v3d-canvas'));
+  }
+  v3d.board.setLight(v3d.across, v3d.height);
+  v3d.board.setColouring(v3d.colour);
+  build3d();
+}
+
+function close3d() {
+  stopSweep();
+  v3d.open = false;
+  $('v3d').hidden = true;
+  $('v3d-open').classList.remove('on');
+}
+
+function schedule3d() {
+  clearTimeout(v3d.rebuild);
+  v3d.rebuild = window.setTimeout(build3d, 400);
+}
+
+/** Work out the board's surface for what's chosen, and show it. */
+function build3d() {
+  if (!v3d.open || !v3d.board || !store) return;
+  $('v3d-working').hidden = false;
+  // Let the "working" note show before the sums start.
+  setTimeout(() => {
+    if (!v3d.open || !v3d.board || !store) return;
+    const p = project;
+    const m = p.machine;
+    const l = layoutPanel(store, p);
+    const relief = v3d.state === 'marked' ? machinedRelief(buildPasses(l, m), p.panelWidth, p.panelHeight, m) : finishedRelief(l, m);
+    const thickness = m.stockThickness > 0 ? m.stockThickness : 20;
+    v3d.board.setBoard(relief, p.panelWidth, p.panelHeight, thickness);
+    v3d.board.setColouring(v3d.colour);
+    v3d.board.setLight(v3d.across, v3d.height);
+    $('v3d-working').hidden = true;
+    const passes = (['hairline', 'datum', 'slit'] as const).filter((k) => m.passes[k]);
+    const names = { hairline: 'hairline', datum: 'datum line', slit: 'valley slit and forks' };
+    $('v3d-note').textContent =
+      (v3d.state === 'marked'
+        ? `As the ${m.toolAngle}° bit leaves it: exactly the cuts in the G-code (${passes.map((k) => names[k]).join(', ') || 'no passes chosen'}).`
+        : `Finished: every letter carved to ${m.chiselAngle}°, as the chisel leaves it.`) +
+      ` Board ${p.panelWidth} × ${p.panelHeight} mm, ${thickness} mm thick${m.stockThickness > 0 ? '' : ' (stock thickness not entered yet: shown as 20 mm)'}. Deepest ${relief.maxDepth.toFixed(2)} mm. Surface detail every ${relief.res.toFixed(2)} mm.`;
+    $('v3d-legend').innerHTML =
+      v3d.colour === 'depth' ? `<span class="v3d-ramp"></span><small>0 → ${relief.maxDepth.toFixed(1)} mm deep</small>` : '';
+  }, 30);
+}
+
+function sync3d() {
+  $('v3d-state')
+    .querySelectorAll<HTMLElement>('[data-state]')
+    .forEach((b) => b.classList.toggle('on', b.dataset.state === v3d.state));
+  $('v3d-colour')
+    .querySelectorAll<HTMLElement>('[data-colour]')
+    .forEach((b) => b.classList.toggle('on', b.dataset.colour === v3d.colour));
+  $<HTMLInputElement>('v3d-across').value = String(v3d.across);
+  $<HTMLInputElement>('v3d-height').value = String(v3d.height);
+  $('v3d-sweep').textContent = v3d.sweep ? 'Stop ■' : 'Sweep ▶';
+  $('v3d-sweep').classList.toggle('on', !!v3d.sweep);
+  if (v3d.colour === 'wood') $('v3d-legend').innerHTML = '';
+}
+
+/** Sweep the light slowly from left to right and back. */
+function startSweep() {
+  const start = performance.now();
+  const from = v3d.across;
+  const step = (now: number) => {
+    // From where it is, across and back, about 8 seconds each way.
+    const phase = ((now - start) / 8000 + (from + 90) / 180) % 2;
+    v3d.across = phase < 1 ? -90 + 180 * phase : 90 - 180 * (phase - 1);
+    v3d.board?.setLight(v3d.across, v3d.height);
+    $<HTMLInputElement>('v3d-across').value = String(Math.round(v3d.across));
+    v3d.sweep = requestAnimationFrame(step);
+  };
+  v3d.sweep = requestAnimationFrame(step);
+  sync3d();
+}
+
+function stopSweep() {
+  if (v3d.sweep) cancelAnimationFrame(v3d.sweep);
+  v3d.sweep = 0;
+  sync3d();
 }
 
 // ---------------------------------------------------------------- helpers
