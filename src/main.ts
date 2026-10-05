@@ -21,6 +21,8 @@ import { balanceHtml, lineListHtml, overviewSvg, overviewViewBox, type OverviewM
 import { BED, BED_EXTENDED, bedFit, fitToLettering } from './panel';
 import { defaultGroups, type Side } from './groups';
 import { defaultBox, evenUp, fitBlock, fitLine, type EvenUp, type FitBy } from './spacing';
+import { toGcode } from './gcode';
+import { buildPasses, checkPasses, type Check, type MachineSettings, type Pass, type PassName } from './toolpath';
 import { LetterStore } from './letters';
 import { negativeSpace } from './negativeSpace';
 import { History } from './history';
@@ -50,6 +52,19 @@ let tweaks: Record<string, number> = {};
 let previewSuggest = false;
 /** Fitting settings (not part of the job). */
 let fitBy: FitBy = 'letter';
+/**
+ * The toolpath preview: the passes worked out for one exact state of the
+ * project, which ones the carver has looked at, and which is showing. Any
+ * change to the project closes it, so what is saved is what was checked.
+ */
+let cam: {
+  project: Project;
+  layout: Layout;
+  passes: Pass[];
+  checks: Check[];
+  viewed: Set<PassName>;
+  show: PassName | 'all';
+} | null = null;
 /** The alphabet's own settings are saved under its name. */
 let alphabetName = '';
 /** The gap under the pointer, for keyboard kerning without clicking first. */
@@ -160,6 +175,7 @@ function buildControls() {
   }
   wirePanel();
   wireSpacing();
+  wireMachine();
 
   for (const layer of LAYERS) {
     const cb = $<HTMLInputElement>(`show-${layer}`);
@@ -248,6 +264,7 @@ function syncControls(source?: Element) {
   }
   syncPanelControls(source);
   syncSpacingControls(source);
+  syncMachineControls(source);
   $('align')
     .querySelectorAll('button')
     .forEach((b) => b.classList.toggle('on', b.dataset.align === project.align));
@@ -335,11 +352,14 @@ function draw() {
   const L = layout;
   const out: string[] = [];
 
-  // The machine bed, drawn from the panel's top-left corner (the G-code zero), the same way round as the panel.
+  // The machine bed, drawn from the panel corner that is the G-code zero, the same way round as the panel.
   const fit = bedFit(p.panelWidth, p.panelHeight);
   const bed = fit === 'standard' ? BED : BED_EXTENDED;
   const [bw, bh] = p.panelWidth >= p.panelHeight ? [bed.width, bed.height] : [bed.height, bed.width];
-  out.push(`<g class="bed"><rect x="0" y="0" width="${bw}" height="${bh}"/></g>`);
+  const corner = p.machine.zeroCorner;
+  const bx = corner.endsWith('left') ? 0 : p.panelWidth - bw;
+  const by = corner.startsWith('top') ? 0 : p.panelHeight - bh;
+  out.push(`<g class="bed"><rect x="${bx}" y="${by}" width="${bw}" height="${bh}"/></g>`);
 
   out.push(`<rect class="panel" x="0" y="0" width="${p.panelWidth}" height="${p.panelHeight}"/>`);
   const ri = p.refImage;
@@ -421,6 +441,10 @@ function draw() {
     );
   }
 
+  // The toolpath preview, on top of everything.
+  if (cam && cam.project !== project) closeCam('The layout changed, so the preview was closed. Preview the passes again before saving.');
+  if (cam) out.push(toolpathSvg());
+
   world.innerHTML = out.join('');
   labelData = { spaces, gaps: L.gaps };
   showWarnings();
@@ -485,6 +509,7 @@ function applyView() {
         `<text x="${(numX - w / 2).toFixed(1)}" y="${(y + 4).toFixed(1)}">${line.index + 1}${mark}</text></g>`,
     );
   }
+  if (cam) out.push(camLabels(sx, sy));
   labels.innerHTML = out.join('');
 
   // Kerning box sits above the selected gap.
@@ -648,6 +673,7 @@ function onKey(e: KeyboardEvent) {
     if (!gapAt(selected)) return;
     nudge(e.key === 'ArrowLeft' ? -1 : 1, e.shiftKey ? 1 : 0.1);
   } else if (e.key === 'Escape') {
+    if (cam) closeCam();
     if (measuring) setMeasuring(false);
     if (scaling) {
       scaling = null;
@@ -1690,6 +1716,213 @@ function drawReferenceSample() {
     `<path class="eu-space" d="${contourToSvg(sp.shape)}"/>` +
     `<path class="eu-ink" d="${l.letters.map((t) => t.outline.map(contourToSvg).join('')).join('')}"/>`;
   $('eu-ref-read').textContent = `${signed(g.pairKern)} mm · ${Math.round(sp.area)} mm²`;
+}
+
+// ---------------------------------------------------------------- machine and G-code
+
+const PASS_COLOURS: Record<PassName, string> = { hairline: 'tp-hair', datum: 'tp-datum', slit: 'tp-slit' };
+
+function wireMachine() {
+  const sec = $('machine');
+  sec.addEventListener('input', (e) => {
+    const t = e.target as HTMLInputElement;
+    const key = t.dataset.mc as keyof MachineSettings | undefined;
+    if (!key) return;
+    const v = Number(t.value);
+    if (t.value === '' && key === 'stockThickness') return update({ machine: { ...project.machine, stockThickness: 0 } }, t, 'mc-stock');
+    if (t.value === '' || !Number.isFinite(v) || v < 0) return;
+    update({ machine: { ...project.machine, [key]: v } }, t, `mc-${key}`);
+  });
+  sec.addEventListener('change', (e) => {
+    const t = e.target as HTMLInputElement;
+    const pass = t.dataset.mcPass as PassName | undefined;
+    if (pass) update({ machine: { ...project.machine, passes: { ...project.machine.passes, [pass]: t.checked } } });
+  });
+  $('mc-corner').addEventListener('click', (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLElement>('[data-corner]');
+    if (b) update({ machine: { ...project.machine, zeroCorner: b.dataset.corner as MachineSettings['zeroCorner'] } });
+  });
+  $('mc-preview').addEventListener('click', openCam);
+  $('cam-close').addEventListener('click', () => closeCam());
+  $('cam-bar').addEventListener('pointerdown', (e) => e.stopPropagation());
+  $('cam-tabs').addEventListener('click', (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLElement>('[data-pass]');
+    if (!b || !cam) return;
+    cam.show = b.dataset.pass as PassName | 'all';
+    if (cam.show !== 'all') cam.viewed.add(cam.show);
+    showCam();
+    draw();
+  });
+  $('cam-save').addEventListener('click', saveGcode);
+}
+
+function syncMachineControls(source?: Element) {
+  const m = project.machine;
+  for (const input of $('machine').querySelectorAll<HTMLInputElement>('[data-mc]')) {
+    if (input === source) continue;
+    const v = m[input.dataset.mc as keyof MachineSettings] as number;
+    input.value = input.dataset.mc === 'stockThickness' && !v ? '' : String(v);
+  }
+  for (const cb of $('machine').querySelectorAll<HTMLInputElement>('[data-mc-pass]')) cb.checked = m.passes[cb.dataset.mcPass as PassName];
+  $('mc-corner')
+    .querySelectorAll<HTMLElement>('[data-corner]')
+    .forEach((b) => b.classList.toggle('on', b.dataset.corner === m.zeroCorner));
+}
+
+function openCam() {
+  if (!store) return;
+  // Work everything out in full (datum lines included) for exactly the project as it is now.
+  const l = layoutPanel(store, project);
+  const passes = buildPasses(l, project.machine);
+  const checks = checkPasses(l, passes, project.machine, bedFit(project.panelWidth, project.panelHeight));
+  cam = { project, layout: l, passes, checks, viewed: new Set(), show: passes[0]?.name ?? 'all' };
+  if (cam.show !== 'all') cam.viewed.add(cam.show);
+  selected = null;
+  selectedLine = null;
+  $('mc-note').textContent = 'The G-code can only be saved from the preview, once every pass has been looked at and every check is passed.';
+  work.classList.add('cam');
+  $('cam-bar').hidden = false;
+  showCam();
+  draw();
+}
+
+function closeCam(note?: string) {
+  if (!cam) return;
+  cam = null;
+  work.classList.remove('cam');
+  $('cam-bar').hidden = true;
+  if (note) $('mc-note').textContent = note;
+}
+
+const minutes = (m: number) => (m < 1 ? `${Math.round(m * 60)} s` : `${Math.floor(m)} min ${Math.round((m % 1) * 60)} s`);
+
+function showCam() {
+  if (!cam) return;
+  const c = cam;
+  $('cam-tabs').innerHTML =
+    c.passes
+      .map(
+        (p, i) =>
+          `<button data-pass="${p.name}" class="${c.show === p.name ? 'on' : ''}">${c.viewed.has(p.name) ? '✓ ' : ''}${i + 1} ${esc(p.title)}</button>`,
+      )
+      .join('') + `<button data-pass="all" class="${c.show === 'all' ? 'on' : ''}">All</button>`;
+  const m = c.project.machine;
+  const shown = c.show === 'all' ? c.passes : c.passes.filter((p) => p.name === c.show);
+  const total = c.passes.reduce((s, p) => s + p.minutes, 0);
+  const feed = (p: Pass) => (p.name === 'hairline' ? m.feedHairline : p.name === 'datum' ? m.feedDatum : m.feedSlit);
+  const what: Record<PassName, string> = {
+    hairline: `a ${m.hairlineDepth} mm deep line on the true outline of every letter${c.project.border.style !== 'none' ? ' and the border' : ''}`,
+    datum: `a ${m.datumDepth} mm deep line on every datum line`,
+    slit: `down every valley line to the true depth less ${m.slitMargin} mm, at most ${m.slitStep} mm per pass, rising to nothing at the corners. Numbers show the order within each letter: thin strokes first`,
+  };
+  $('cam-info').innerHTML = shown
+    .map(
+      (p) => `<p><b>${esc(p.title)}:</b> ${what[p.name]}. ${p.cuts.length} cuts, ${(p.cutLength / 1000).toFixed(2)} m cut,
+      deepest ${p.deepest.toFixed(2)} mm, feed ${feed(p)} mm/min, about ${minutes(p.minutes)}.</p>`,
+    )
+    .join('') + `<p class="hint small">All passes: about ${minutes(total)} on the machine. Spindle ${m.spindle} rpm. X0 Y0 at the ${m.zeroCorner.replace('-', ' ')} corner, Z0 on the top surface.</p>`;
+  $('cam-checks').innerHTML = c.checks
+    .map((k) => `<li class="${k.ok ? 'ok' : k.blocking ? 'bad' : 'warn'}">${k.ok ? '✓' : k.blocking ? '✗' : '!'} ${esc(k.text)}</li>`)
+    .join('');
+  const unseen = c.passes.filter((p) => !c.viewed.has(p.name));
+  const blocked = c.checks.some((k) => k.blocking && !k.ok);
+  $<HTMLButtonElement>('cam-save').disabled = !!unseen.length || blocked || !c.passes.length;
+  $('cam-viewed').textContent = blocked
+    ? 'Put right the ✗ items before the G-code can be saved.'
+    : unseen.length
+      ? `Look at ${unseen.map((p) => p.title.toLowerCase()).join(' and ')} before saving.`
+      : 'Every pass checked.';
+}
+
+/** The passes being previewed, drawn at true size in panel millimetres. */
+function toolpathSvg(): string {
+  if (!cam) return '';
+  const c = cam;
+  const m = c.project.machine;
+  const half = Math.tan(((m.toolAngle / 2) * Math.PI) / 180);
+  const out: string[] = ['<g class="tp">'];
+  const shown = c.show === 'all' ? c.passes : c.passes.filter((p) => p.name === c.show);
+  for (const pass of shown) {
+    // Travel between cuts, lifted clear of the wood.
+    const rapids: string[] = [];
+    pass.cuts.forEach((cut, i) => {
+      if (i) {
+        const a = pass.cuts[i - 1].points.at(-1)!;
+        const b = cut.points[0];
+        rapids.push(`M${fmt(a.x)} ${fmt(a.y)}L${fmt(b.x)} ${fmt(b.y)}`);
+      }
+    });
+    if (rapids.length && c.show !== 'all') out.push(`<path class="tp-rapid" d="${rapids.join('')}"/>`);
+    if (pass.name === 'slit') {
+      // The slit as the bit leaves it: its true width at the surface, from its depth.
+      const bands: string[] = [];
+      for (const cut of pass.cuts) {
+        for (let i = 1; i < cut.points.length; i++) {
+          const a = cut.points[i - 1];
+          const b = cut.points[i];
+          if (a.x === b.x && a.y === b.y) continue;
+          const w = Math.max(-a.z, -b.z) * 2 * half;
+          if (w <= 0) continue;
+          bands.push(`<line x1="${fmt(a.x)}" y1="${fmt(a.y)}" x2="${fmt(b.x)}" y2="${fmt(b.y)}" stroke-width="${fmt(w)}"/>`);
+        }
+      }
+      out.push(`<g class="tp-slit-band">${bands.join('')}</g>`);
+    }
+    const d = pass.cuts.map((cut) => cut.points.map((p, i) => `${i ? 'L' : 'M'}${fmt(p.x)} ${fmt(p.y)}`).join('')).join('');
+    out.push(`<path class="${PASS_COLOURS[pass.name]}" d="${d}"/>`);
+  }
+  out.push('</g>');
+  return out.join('');
+}
+
+/** Stroke numbers (cutting order within each letter) and the zero corner, in screen pixels. */
+function camLabels(sx: (x: number) => number, sy: (y: number) => number): string {
+  if (!cam) return '';
+  const c = cam;
+  const out: string[] = [];
+  const slit = c.passes.find((p) => p.name === 'slit');
+  if (slit && (c.show === 'slit' || c.show === 'all') && view.v.scale > 2) {
+    for (const cut of slit.cuts) {
+      // Number at the middle of the stroke's first run.
+      const step = cut.points.findIndex((p, i) => i > 0 && p.x === cut.points[i - 1].x && p.y === cut.points[i - 1].y);
+      const run = step === -1 ? cut.points : cut.points.slice(0, step);
+      const mid = run[Math.floor(run.length / 2)];
+      out.push(`<text class="stroke-num" x="${sx(mid.x).toFixed(1)}" y="${(sy(mid.y) + 4).toFixed(1)}">${cut.stroke}</text>`);
+    }
+  }
+  // X0 Y0, with the directions X and Y run from it.
+  const p = c.project;
+  const corner = p.machine.zeroCorner;
+  const cx = corner.endsWith('left') ? 0 : p.panelWidth;
+  const cy = corner.startsWith('top') ? 0 : p.panelHeight;
+  const X = sx(cx);
+  const Y = sy(cy);
+  const ax = corner.endsWith('left') ? 40 : -40; // X runs to the right, so it points into the panel only from a left corner
+  out.push(
+    `<g class="zero"><circle cx="${X}" cy="${Y}" r="4"/>` +
+      `<line x1="${X}" y1="${Y}" x2="${X + 40}" y2="${Y}"/><text x="${X + 44}" y="${Y + 4}" text-anchor="start">X</text>` +
+      `<line x1="${X}" y1="${Y}" x2="${X}" y2="${Y - 40}"/><text x="${X}" y="${Y - 46}">Y</text>` +
+      `<text class="zero-label" x="${X + (ax > 0 ? -8 : 8)}" y="${Y + 18}" text-anchor="${ax > 0 ? 'end' : 'start'}">X0 Y0</text></g>`,
+  );
+  return out.join('');
+}
+
+function saveGcode() {
+  if (!cam) return;
+  const c = cam;
+  if (c.passes.some((p) => !c.viewed.has(p.name)) || c.checks.some((k) => k.blocking && !k.ok)) return;
+  const title = c.project.text.replace(/\s+/g, ' ').trim() || 'lettering';
+  const g = toGcode(c.passes, c.project.machine, { title, panelWidth: c.project.panelWidth, panelHeight: c.project.panelHeight });
+  const name = `${title.replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'lettering'}.nc`;
+  const url = URL.createObjectURL(new Blob([g], { type: 'text/plain' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  $('cam-viewed').textContent = `Saved as ${name}. Check it in your sender's preview too before running it.`;
 }
 
 // ---------------------------------------------------------------- helpers
