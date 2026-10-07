@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { alphabetFromFont } from '../src/alphabet';
-import { toGcode, toMachine } from '../src/gcode';
+import { AIR_GAP, toGcode, toMachine } from '../src/gcode';
 import { defaultProject, layoutPanel, type Project } from '../src/layout';
 import { LetterStore } from '../src/letters';
 import { buildPasses, checkPasses, defaultMachine, slitDepth, valleyDepth, type MachineSettings } from '../src/toolpath';
@@ -152,10 +152,32 @@ describe('G-code', () => {
   const g = toGcode(passes, m, { title: 'OAK', panelWidth: 150, panelHeight: 60 }, new Date('2026-10-05T12:00:00Z'));
   const visits = simulate(g);
 
-  it('millimetres, absolute, spindle on and off, ends cleanly', () => {
+  /** The working lines of a file, comments taken out. */
+  const code = (text: string) =>
+    text
+      .split('\n')
+      .map((l) => l.replace(/\(.*?\)/g, '').trim())
+      .filter(Boolean);
+
+  it('millimetres, absolute, ends cleanly', () => {
     expect(g).toContain('G21 G90');
-    expect(g).toMatch(/M3 S12000/);
-    expect(g.trim().split('\n').slice(-3)).toEqual(['M5', 'G0 X0 Y0', 'M30']);
+    expect(code(g).slice(-3)).toEqual([`G0 Z${m.safeZ.toFixed(3)}`, 'G0 X0 Y0', 'M30']);
+    expect(g).toMatch(/\(MSG,Finished\. Stop the spindle by hand\)\nM30/);
+  });
+
+  it('never switches the spindle or sets its speed: it is run by hand (BRIEF.md, Decisions)', () => {
+    for (const line of code(g)) expect(line).not.toMatch(/\b(M0?[345]|S\d+)\b/);
+  });
+
+  it('starts by raising the bit, then pauses for the spindle to be started by hand', () => {
+    const lines = code(g);
+    expect(lines[0]).toBe('G21 G90 G17 G94'); // settings only, no movement
+    expect(lines[1]).toBe(`G0 Z${m.safeZ.toFixed(3)}`); // the first move: straight up, nothing sideways
+    expect(lines[2]).toBe('M0'); // then wait
+    const pause = g.split('\n').find((l) => l.startsWith('M0'))!;
+    expect(pause).toBe('M0 (Start the spindle by hand at 12000 rpm, then press Resume)');
+    expect(g).toContain('(MSG,Start the spindle by hand at 12000 rpm, then press Resume)\nM0');
+    expect(code(g).filter((l) => l.startsWith('M0'))).toHaveLength(1); // one pause, at the start
   });
 
   it('only plain ASCII, as GRBL wants', () => {
@@ -210,5 +232,59 @@ describe('G-code', () => {
     expect(toMachine(150, 0, 150, 60, 'top-right')).toEqual({ X: 0, Y: -0 });
     expect(toMachine(150, 60, 150, 60, 'bottom-right')).toEqual({ X: 0, Y: 0 });
     expect(toMachine(10, 20, 150, 60, 'top-right')).toEqual({ X: -140, Y: -20 });
+  });
+});
+
+describe('air cut', () => {
+  const layout = lay();
+  const passes = buildPasses(layout, m);
+  const date = new Date('2026-10-05T12:00:00Z');
+  const info = { title: 'OAK', panelWidth: 150, panelHeight: 60 };
+  const real = toGcode(passes, m, info, date);
+  const air = toGcode(passes, m, { ...info, airCut: true }, date);
+  const realVisits = simulate(real);
+  const airVisits = simulate(air);
+
+  it('every move stays 5 mm or more above the board, the deepest point exactly 5 mm', () => {
+    expect(AIR_GAP).toBe(5);
+    const lowest = Math.min(...airVisits.map((v) => v.z));
+    expect(lowest).toBeCloseTo(5, 3);
+    for (const v of airVisits) expect(v.z).toBeGreaterThanOrEqual(5 - 1e-9);
+  });
+
+  it('is the same file otherwise: the same moves in the same order, each lifted by the same amount', () => {
+    expect(airVisits.length).toBe(realVisits.length);
+    const lift = passes[2].deepest + AIR_GAP;
+    airVisits.forEach((v, i) => {
+      const r = realVisits[i];
+      expect(v.x).toBe(r.x);
+      expect(v.y).toBe(r.y);
+      expect(Math.abs(v.z - (r.z + lift))).toBeLessThanOrEqual(0.001); // each height is written to 0.001 mm
+      expect(v.rapid).toBe(r.rapid);
+    });
+  });
+
+  it('says plainly that it is an air cut, at the top of the file and in the pause message', () => {
+    expect(air.split('\n')[0]).toMatch(/^\(AIR CUT - DRY RUN\./);
+    expect(air).toContain('M0 (AIR CUT - the bit stays 5 mm or more above the board. Start the spindle by hand at 12000 rpm, then press Resume)');
+    expect(real).not.toContain('AIR CUT');
+  });
+
+  it('still starts by raising the bit and pausing, with no spindle commands', () => {
+    const lines = air
+      .split('\n')
+      .map((l) => l.replace(/\(.*?\)/g, '').trim())
+      .filter(Boolean);
+    expect(lines.slice(0, 3)).toEqual(['G21 G90 G17 G94', `G0 Z${(m.safeZ + passes[2].deepest + AIR_GAP).toFixed(3)}`, 'M0']);
+    for (const line of lines) expect(line).not.toMatch(/\b(M0?[345]|S\d+)\b/);
+  });
+
+  it('a deep job is lifted further, so even its deepest point stays 5 mm clear', () => {
+    const big = { ...m, stockThickness: 30 };
+    const l = lay({ capHeight: 60, panelWidth: 300, panelHeight: 120, text: 'O' });
+    const ps = buildPasses(l, big);
+    expect(Math.max(...ps.map((p) => p.deepest))).toBeGreaterThan(AIR_GAP); // deeper than the gap itself
+    const v = simulate(toGcode(ps, big, { title: 'O', panelWidth: 300, panelHeight: 120, airCut: true }));
+    expect(Math.min(...v.map((p) => p.z))).toBeCloseTo(AIR_GAP, 3);
   });
 });

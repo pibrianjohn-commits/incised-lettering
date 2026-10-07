@@ -21,7 +21,7 @@ import { balanceHtml, lineListHtml, overviewSvg, overviewViewBox, type OverviewM
 import { BED, BED_EXTENDED, bedFit, fitToLettering } from './panel';
 import { defaultGroups, type Side } from './groups';
 import { defaultBox, evenUp, fitBlock, fitLine, type EvenUp, type FitBy } from './spacing';
-import { toGcode } from './gcode';
+import { AIR_GAP, toGcode } from './gcode';
 import { finishedRelief, machinedRelief } from './relief';
 import type { Board3D, Colouring } from './view3d';
 import { buildPasses, checkPasses, CORNER_NAMES, MAX_SCRIBE_DEPTH, type Check, type MachineSettings, type Pass, type PassName } from './toolpath';
@@ -1789,7 +1789,8 @@ function wireMachine() {
     showCam();
     draw();
   });
-  $('cam-save').addEventListener('click', saveGcode);
+  $('cam-save').addEventListener('click', () => saveGcode(false));
+  $('cam-air').addEventListener('click', () => saveGcode(true));
 }
 
 function syncMachineControls(source?: Element) {
@@ -1862,13 +1863,15 @@ function showCam() {
       (p) => `<p><b>${esc(p.title)}:</b> ${what[p.name]}. ${p.cuts.length} cuts, ${(p.cutLength / 1000).toFixed(2)} m cut,
       deepest ${p.deepest.toFixed(2)} mm, feed ${feed(p)} mm/min, about ${minutes(p.minutes)}.</p>`,
     )
-    .join('') + `<p class="hint small">All passes: about ${minutes(total)} on the machine. Spindle ${m.spindle} rpm. X0 Y0 at the ${CORNER_NAMES[m.zeroCorner]} corner, Z0 on the top surface.</p>`;
+    .join('') + `<p class="hint small">All passes: about ${minutes(total)} on the machine. Start the spindle by hand at ${m.spindle} rpm when the file pauses. X0 Y0 at the ${CORNER_NAMES[m.zeroCorner]} corner, Z0 on the top surface.</p>`;
   $('cam-checks').innerHTML = c.checks
     .map((k) => `<li class="${k.ok ? 'ok' : k.blocking ? 'bad' : 'warn'}">${k.ok ? '✓' : k.blocking ? '✗' : '!'} ${esc(k.text)}</li>`)
     .join('');
   const unseen = c.passes.filter((p) => !c.viewed.has(p.name));
   const blocked = c.checks.some((k) => k.blocking && !k.ok);
-  $<HTMLButtonElement>('cam-save').disabled = !!unseen.length || blocked || !c.passes.length;
+  const locked = !!unseen.length || blocked || !c.passes.length;
+  $<HTMLButtonElement>('cam-save').disabled = locked;
+  $<HTMLButtonElement>('cam-air').disabled = locked;
   $('cam-viewed').textContent = blocked
     ? 'Put right the ✗ items before the G-code can be saved.'
     : unseen.length
@@ -1949,13 +1952,14 @@ function camLabels(sx: (x: number) => number, sy: (y: number) => number): string
   return out.join('');
 }
 
-function saveGcode() {
+/** Save the G-code, or with airCut the same file lifted clear of the board for a dry run. */
+function saveGcode(airCut: boolean) {
   if (!cam) return;
   const c = cam;
-  if (c.passes.some((p) => !c.viewed.has(p.name)) || c.checks.some((k) => k.blocking && !k.ok)) return;
+  if (!c.passes.length || c.passes.some((p) => !c.viewed.has(p.name)) || c.checks.some((k) => k.blocking && !k.ok)) return;
   const title = c.project.text.replace(/\s+/g, ' ').trim() || 'lettering';
-  const g = toGcode(c.passes, c.project.machine, { title, panelWidth: c.project.panelWidth, panelHeight: c.project.panelHeight });
-  const name = `${title.replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'lettering'}.nc`;
+  const g = toGcode(c.passes, c.project.machine, { title, panelWidth: c.project.panelWidth, panelHeight: c.project.panelHeight, airCut });
+  const name = `${title.replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'lettering'}${airCut ? '-AIR-CUT' : ''}.nc`;
   const url = URL.createObjectURL(new Blob([g], { type: 'text/plain' }));
   const a = document.createElement('a');
   a.href = url;
@@ -1964,7 +1968,9 @@ function saveGcode() {
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
-  $('cam-viewed').textContent = `Saved as ${name}. Check it in your sender's preview too before running it.`;
+  $('cam-viewed').textContent = airCut
+    ? `Saved as ${name}: a dry run that stays ${AIR_GAP} mm or more above the board. Check it in your sender's preview too.`
+    : `Saved as ${name}. Check it in your sender's preview too before running it.`;
 }
 
 // ---------------------------------------------------------------- 3D view
