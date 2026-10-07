@@ -10,7 +10,7 @@ import type { ValleyLine } from '../src/valley';
 const buf = readFileSync(new URL('../public/fonts/Cinzel-Regular.woff', import.meta.url));
 const store = new LetterStore(alphabetFromFont(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength), 'OFL'));
 const machine = { ...defaultMachine, stockThickness: 20 };
-const letters = layoutPanel(store, { ...defaultProject, machine, text: 'ABDEHIKMNOQRSTWXY', panelWidth: 600 }).letters;
+const letters = layoutPanel(store, { ...defaultProject, machine, text: 'ABDEHIKMNOQRSTUWXY', panelWidth: 600 }).letters;
 const valleysOf = (ch: string) => letters.find((l) => l.char === ch)!.valleys;
 
 /** Distance from a point to the nearest point of a path, mm. */
@@ -22,8 +22,8 @@ const run = (ax: number, ay: number, bx: number, by: number, r: number): ValleyL
 
 describe('strokes at a junction (BRIEF.md, Decisions)', () => {
   it('each letter has the strokes a carver counts', () => {
-    const counts = Object.fromEntries('ABDEHIKMNOQRSTWXY'.split('').map((ch) => [ch, strokesOf(valleysOf(ch)).length]));
-    expect(counts).toEqual({ A: 3, B: 3, D: 2, E: 4, H: 3, I: 1, K: 3, M: 4, N: 3, O: 1, Q: 2, R: 3, S: 1, T: 2, W: 4, X: 2, Y: 3 });
+    const counts = Object.fromEntries('ABDEHIKMNOQRSTUWXY'.split('').map((ch) => [ch, strokesOf(valleysOf(ch)).length]));
+    expect(counts).toEqual({ A: 3, B: 3, D: 2, E: 4, H: 3, I: 1, K: 3, M: 4, N: 3, O: 1, Q: 2, R: 3, S: 1, T: 2, U: 1, W: 4, X: 2, Y: 3 });
   });
 
   it('A: crossbar, then thin left leg, then the thick right leg straight through in one cut', () => {
@@ -57,6 +57,24 @@ describe('strokes at a junction (BRIEF.md, Decisions)', () => {
       const inner = Math.min(near(part[0], thick.parts[0]), near(part[part.length - 1], thick.parts[0]));
       expect(inner).toBeLessThan(0.01);
     }
+  });
+
+  it('U is one stroke, like O and S: its valley runs on round the bottom with no junction (BRIEF.md, Decisions)', () => {
+    for (const ch of 'UOS') {
+      const [only] = strokesOf(valleysOf(ch));
+      expect(strokesOf(valleysOf(ch)), ch).toHaveLength(1);
+      expect(only.parts, ch).toHaveLength(1); // one cut
+    }
+  });
+
+  it('equal-width strokes are cut left to right, then top to bottom (BRIEF.md, Decisions)', () => {
+    // Two equal uprights side by side, given right one first: the left one is still cut first.
+    const [first, second] = strokesOf([run(20, 0, 20, 25, 1), run(0, 0, 0, 25, 1)]);
+    expect(first.parts[0][0].x).toBe(0);
+    expect(second.parts[0][0].x).toBe(20);
+    // Two equal bars one above the other, given lower one first: the upper one is cut first.
+    const [upper] = strokesOf([run(0, 20, 25, 20, 1), run(0, 0, 25, 0, 1)]);
+    expect(upper.parts[0][0].y).toBe(0);
   });
 
   it('where strokes are equal width, the one cut second is continuous', () => {

@@ -261,9 +261,11 @@ Answers from the carver, recorded as they are given.
   - A stroke carries on through a junction where its valley goes on nearly straight on the other side (turning no more than 25°). Where more than one could, the thicker goes through.
   - A thin stroke crossed by a thicker one (the thin diagonal of X) is still one stroke, cut in two parts, each stopping at the thick stroke's valley line.
   - Where the thicker stroke ends at the junction rather than passing through it, as the stem of T meets its bar, it stops at the thinner stroke's valley line and the thinner one runs on: T is two strokes.
-  - Strokes count as equal width when their average widths are within 3%. Equal strokes are cut left to right, then top to bottom (see Open questions), so where they cross, the right-hand or lower one is continuous.
+  - Strokes count as equal width when their average widths are within 3%. Equal strokes are cut left to right, then top to bottom (see "Equal-width strokes" below), so where they cross, the right-hand or lower one is continuous.
   - Each stroke's forks into its corners and serifs are cut straight after the stroke, carrying its number but not labelled.
-  - With the stand-in alphabet this gives: A 3, B 3, D 2, E 4, H 3, I 1, K 3, M 4, N 3, O 1, Q 2, R 3, S 1, T 2, W 4, X 2, Y 3. U comes out as one stroke: its thick left side curves round into the thin right side with no junction between them (see Open questions).
+  - With the stand-in alphabet this gives: A 3, B 3, D 2, E 4, H 3, I 1, K 3, M 4, N 3, O 1, Q 2, R 3, S 1, T 2, W 4, X 2, Y 3. U is one stroke: its thick left side curves round into the thin right side with no junction between them (see "U" below).
+- **Equal-width strokes** (7 Oct 2026). They stay as built: cut left to right, then top to bottom. So where two strokes of equal width meet, the right-hand or lower one, cut second, is continuous.
+- **U** (7 Oct 2026). U stays as one stroke, like O and S: a continuous valley with no junction.
 
 ## Open questions
 
@@ -271,8 +273,6 @@ Answers from the carver, recorded as they are given.
 - What datum set-in, datum minimum and slit margin suit the carver's hand? Starting at 20%, 0.2 mm and 0.3 mm.
 - What is the spindle's actual top speed?
 - How should serifs and bracketing be handled at terminations, beyond the plain fork into the corners?
-- Strokes of equal width: which is cut first? For now, left to right, then top to bottom, so the right-hand or lower one runs through where they cross.
-- U: one stroke, as now (the thick side curves round into the thin side with no junction), or two, split where the thin stroke begins?
 - Which stand-in Roman typeface is closest to the letters the carver intends to draw?
 - Even-up factors for round, straight and diagonal sides: they start at 1.0 (pure equal space). Measured with the 6 mm depth limit, round pairs such as H O come out with less space than H H, so at 1.0 the suggestions open them up; a round factor below 1 (try 0.8) brings them closer. What factors look right by eye?
 - Word stops start as triangles with sides 22% of the cap height, centred 45% up, pointing down. Is that the right size, height and direction?
