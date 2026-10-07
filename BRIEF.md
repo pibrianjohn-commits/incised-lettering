@@ -73,7 +73,7 @@ The carver's own letters will arrive later as drawn vector files (SVG) or a font
 
 ## Machine and G-code
 
-The G-code targets the Genmitsu 3020-PRO Ultra with its 500 W ER11 spindle, cutting oak. The controller dialect is GRBL, to be confirmed against the machine before the first cut.
+The G-code targets the Genmitsu 3020-PRO Ultra with its 500 W ER11 spindle, cutting oak. The controller dialect is GRBL, to be confirmed against the machine before the first cut. The spindle is run by hand from its own manual speed governor and is not controlled by GRBL (see Decisions), so the G-code never switches it on or off or sets its speed.
 
 The G-code is written in millimetres and absolute coordinates, with zero at the top surface of the stock and a corner of the panel the carver chooses. One 30° V-bit does every pass, with no tool change:
 
@@ -93,9 +93,9 @@ The carver then works each letter by hand, thin strokes first and thick strokes 
 
 The chosen bit is the [Amana Tool 45634-K](https://www.amanatool.com/products/inch/signmaking-engraving-cnc-router-bits-from-amana-tool/solid-carbide-spektratm-extreme-tool-life-coated-v-groove-signmaking-lettering-router-bits/45634-k-solid-carbide-v-groove-30-deg-x-1-4-dia-x-1-8-x-5-8-inch-shank-spektra-coated-router-bit.): solid carbide, 3 flutes, coated, 6.35 mm diameter, about 10.7 mm cutting depth and a 1/4" shank. That depth covers strokes up to about 12 mm wide. It needs a 1/4" (6.35 mm) ER11 collet, not 6 mm.
 
-Starting settings for oak, to be fine-tuned by test cuts. The spindle's top speed is assumed at about 12,000 rpm and should be checked.
+Starting settings for oak, to be fine-tuned by test cuts. The spindle's top speed is assumed at about 12,000 rpm and should be checked. The spindle speed is set by hand on the governor; the G-code only states it in its pause message.
 
-| Pass | Spindle | Feed | Depth per pass |
+| Pass | Spindle (set by hand) | Feed | Depth per pass |
 | --- | --- | --- | --- |
 | Hairline | 12,000 rpm | 900 mm/min | 0.2 mm, single pass |
 | Datum line | 12,000 rpm | 900 mm/min | 0.3 mm, single pass |
@@ -104,7 +104,7 @@ Starting settings for oak, to be fine-tuned by test cuts. The spindle's top spee
 
 Machine time is roughly 1.5 minutes per letter at 40 mm cap height, about 30 minutes for a 20-letter inscription.
 
-Safety and accuracy rules are built in. No pass may go below the stock thickness less a safe floor. The board's top surface must be flat and the Z zero exact, because the slit depth is measured from it; an unflat board can be faced on the machine first. The slit margin protects the valley line from small depth errors, so the chisel makes the final meeting at the bottom. Workholding stays as usual: Mitre Fix and decorator's tape.
+Safety and accuracy rules are built in. Every file begins by raising the bit to the safe height, then pauses (M0) with a plain message to start the spindle by hand at the set speed, and goes on only when Resume is pressed. It ends with the bit raised, back at X0 Y0, and a message to stop the spindle by hand. An Air cut saves the same file lifted clear of the board, the deepest point 5 mm above it, for a dry run. No pass may go below the stock thickness less a safe floor. The board's top surface must be flat and the Z zero exact, because the slit depth is measured from it; an unflat board can be faced on the machine first. The slit margin protects the valley line from small depth errors, so the chisel makes the final meeting at the bottom. Workholding stays as usual: Mitre Fix and decorator's tape.
 
 ## Stages
 
@@ -191,7 +191,7 @@ Agreed 5 Oct 2026. Build in this order, one step at a time.
    - Set the stock size.
    - Show the board as the 30° bit marks it out (hairline, datum, valley slit and fork stop cuts at true depth) and as the finished incised letter.
    - A light that can be swept left to right to show the shadows.
-8. **G-code.** *Done 5 Oct 2026.* Generate the marking-out passes for the Genmitsu 3020-PRO Ultra as set out under Machine and G-code, taking the strokes within each pass in cutting order: thin strokes first, then thick. Every pass is shown on screen (the slit at its true cut width, strokes numbered in cutting order, travel moves dashed, X0 Y0 marked), with safety checks; the G-code can be saved only after every pass has been looked at and every blocking check is passed, and any change to the layout closes the preview.
+8. **G-code.** *Done 5 Oct 2026.* Generate the marking-out passes for the Genmitsu 3020-PRO Ultra as set out under Machine and G-code, taking the strokes within each pass in cutting order: thin strokes first, then thick. Every pass is shown on screen (the slit at its true cut width, strokes numbered in cutting order, travel moves dashed, X0 Y0 marked), with safety checks; the G-code can be saved only after every pass has been looked at and every blocking check is passed, and any change to the layout closes the preview. Each file starts with the bit raised and a pause to start the spindle by hand; an Air cut option saves the same file lifted 5 mm clear of the board for a dry run (added 7 Oct 2026).
 
 **Later, not yet scheduled:**
 - Per-line cap height and scaling.
@@ -206,7 +206,7 @@ Agreed 5 Oct 2026. Build in this order, one step at a time.
 The tool is a browser app written in TypeScript, kept in a GitHub repository and published automatically to a web address with GitHub Pages. The carver opens it from a bookmark: no installing, no terminal, and it works the same on Ubuntu and Windows.
 
 - **Projects** save as files on the laptop, so designs stay with the carver.
-- **G-code** downloads as a file, ready for the machine's sender program.
+- **G-code** downloads as a file, ready for the machine's sender program. An air-cut copy, lifted clear of the board, can be saved alongside it for a dry run.
 - **Letter shapes** are read with an established font and SVG library.
 - **Outline geometry** such as offsets and clean joins uses an established clipping library.
 - **Valley lines** are written carefully in-house, built on a Voronoi or straight-skeleton method, because they are the heart of the tool.
@@ -245,6 +245,7 @@ Answers from the carver, recorded as they are given.
 - **Safe floor** (5 Oct 2026). 3 mm is right.
 - **Zero corner** (5 Oct 2026). X0 Y0 is the front left corner of the panel: the corner nearest the carver and to the left, with the board on the bed reading the right way up. That is the bottom left corner on screen. It is the starting setting, and the other corners can still be chosen per job.
 - **Scribed border depth** (5 Oct 2026). Single and double borders have their own depth setting, starting at 0.2 mm (a marking-out line) and allowed up to about 1 mm for a finished decorative line. They are cut in the hairline pass. An incised border's edges stay at the hairline depth.
+- **Spindle run by hand; start pause and air cut** (7 Oct 2026). Safety, before the first cut. The spindle is run by hand from its manual speed governor and is not controlled by GRBL, so the G-code never switches it on or off or sets its speed (no M3, M5 or S words). Every G-code file begins with the bit raised to a safe height (the lift between cuts), then an M0 pause with a plain message telling the carver to start the spindle at the set speed; the machine only continues when Resume is pressed. The file ends with the bit raised, back at X0 Y0, and a message to stop the spindle by hand. An "Air cut" option saves the same file with every Z raised to 5 mm or more above the board, for a safe dry run: the whole job is lifted by the deepest cut plus 5 mm, so even the bottom of the deepest slit passes 5 mm clear of the surface, and every move is otherwise identical.
 
 ## Open questions
 
@@ -257,5 +258,6 @@ Answers from the carver, recorded as they are given.
 - Which stand-in Roman typeface is closest to the letters the carver intends to draw?
 - Even-up factors for round, straight and diagonal sides: they start at 1.0 (pure equal space). Measured with the 6 mm depth limit, round pairs such as H O come out with less space than H H, so at 1.0 the suggestions open them up; a round factor below 1 (try 0.8) brings them closer. What factors look right by eye?
 - Word stops start as triangles with sides 22% of the cap height, centred 45% up, pointing down. Is that the right size, height and direction?
-- The G-code is written for GRBL and still needs confirming against the machine and its sender before the first cut: run it in the air (Z raised) or in scrap first.
+- The G-code is written for GRBL and still needs confirming against the machine and its sender before the first cut: run the air cut first, then the real file in scrap.
+- Does the sender show the pause message on screen? The file sends it two ways (a GRBL message and a comment on the pause line); the pause itself happens either way.
 - The negative-space depth limit applies to every letter, so it also trims the space beside the slanting legs of A and V and under the arm of T, not only the bays of open letters. Is that wanted, or should those be left uncut?

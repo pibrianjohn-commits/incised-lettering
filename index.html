@@ -218,7 +218,7 @@
           <div class="boxes">
             <label>Bit angle <span><input type="number" data-mc="toolAngle" min="10" max="90" step="1" /> °</span></label>
             <label>Bit cutting depth <span><input type="number" data-mc="toolCutDepth" min="1" step="0.1" /> mm</span></label>
-            <label>Spindle <span><input type="number" data-mc="spindle" min="1000" step="500" /> rpm</span></label>
+            <label>Spindle speed, set by hand <span><input type="number" data-mc="spindle" min="1000" step="500" /> rpm</span></label>
             <label>Hairline depth <span><input type="number" data-mc="hairlineDepth" min="0.05" step="0.05" /> mm</span></label>
             <label>Hairline feed <span><input type="number" data-mc="feedHairline" min="50" step="50" /> mm/min</span></label>
             <label>Datum depth <span><input type="number" data-mc="datumDepth" min="0.05" step="0.05" /> mm</span></label>
@@ -228,10 +228,11 @@
             <label>Plunge feed <span><input type="number" data-mc="feedPlunge" min="20" step="10" /> mm/min</span></label>
             <label>Lift between cuts <span><input type="number" data-mc="safeZ" min="1" step="0.5" /> mm</span></label>
           </div>
-          <p class="hint small">Starting values for oak from the brief, to be fine-tuned by test cuts.</p>
+          <p class="hint small">Starting values for oak from the brief, to be fine-tuned by test cuts. The spindle is run by hand on its own speed governor; the file never switches it on or off.</p>
         </details>
         <button id="mc-preview" class="primary">Preview the passes…</button>
         <p class="hint small" id="mc-note">The G-code can only be saved from the preview, once every pass has been looked at and every check is passed.</p>
+        <p class="hint small">Every file starts by raising the bit, then pauses with a message to start the spindle by hand. Nothing moves until you press Resume. An air cut is the same file run clear of the board, the deepest point 5 mm above it, for a dry run.</p>
       </section>
 
       <section>
@@ -355,6 +356,7 @@
         <ul id="cam-checks"></ul>
         <div class="cam-save">
           <span id="cam-viewed"></span>
+          <button id="cam-air" disabled title="The same file with the whole job lifted clear of the board: the deepest point stays 5 mm above it. For a dry run.">Save air cut</button>
           <button id="cam-save" class="primary" disabled>Save G-code</button>
         </div>
       </div>
