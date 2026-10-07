@@ -7,7 +7,7 @@ import { borderMarks } from './border';
 import { contourToSvg, polylineToSvg } from './geometry';
 import { contentBox, type Layout, type Project } from './layout';
 import { BED, BED_EXTENDED, bedFit } from './panel';
-import { CORNER_NAMES, MAX_SCRIBE_DEPTH, type Check, type Pass } from './toolpath';
+import { CORNER_NAMES, MAX_SCRIBE_DEPTH, type Check, type Cut, type Pass } from './toolpath';
 
 export interface SheetInput {
   project: Project;
@@ -55,24 +55,47 @@ export function scaleName(s: number): string {
 }
 
 /**
- * The strokes of each letter numbered in cutting order, thin first: the
- * valley slit's cuts less the forks (the stop cuts for the terminations, which
- * are pared to at the end rather than cut as strokes). Each number sits at
- * the middle of its stroke's first run along the valley.
+ * One label for each stroke of each letter, numbered in cutting order, thin
+ * first (strokes.ts). Forks carry their stroke's number but no label. A
+ * stroke cut in two parts (crossed by a thicker one) has one label, on its
+ * longer part. Each label sits halfway along that part's first run down the
+ * valley. `cuts` are all the stroke's cuts, forks included.
  */
-export function strokeLabels(pass: Pass | null): { x: number; y: number; n: number; item: string; cut: Pass['cuts'][number] }[] {
+export function strokeLabels(pass: Pass | null): { x: number; y: number; n: number; item: string; cuts: Cut[] }[] {
   if (!pass) return [];
-  const counts = new Map<string, number>();
-  return pass.cuts
-    .filter((c) => c.stroke !== undefined && !c.fork)
-    .map((cut) => {
-      const n = (counts.get(cut.item) ?? 0) + 1;
-      counts.set(cut.item, n);
-      const step = cut.points.findIndex((p, i) => i > 0 && p.x === cut.points[i - 1].x && p.y === cut.points[i - 1].y);
-      const run = step === -1 ? cut.points : cut.points.slice(0, step);
-      const mid = run[Math.floor(run.length / 2)];
-      return { x: mid.x, y: mid.y, n, item: cut.item, cut };
-    });
+  const byStroke = new Map<string, Cut[]>();
+  for (const c of pass.cuts) {
+    if (c.stroke === undefined) continue;
+    const k = `${c.item}\u0000${c.stroke}`;
+    byStroke.set(k, [...(byStroke.get(k) ?? []), c]);
+  }
+  const out: { x: number; y: number; n: number; item: string; cuts: Cut[] }[] = [];
+  for (const cuts of byStroke.values()) {
+    const parts = cuts.filter((c) => !c.fork);
+    if (!parts.length) continue; // only forks (a word stop): nothing to number
+    const firstRun = (c: Cut) => {
+      const step = c.points.findIndex((p, i) => i > 0 && p.x === c.points[i - 1].x && p.y === c.points[i - 1].y);
+      return step === -1 ? c.points : c.points.slice(0, step);
+    };
+    const runLength = (pts: { x: number; y: number }[]) => pts.reduce((s, p, i) => (i ? s + Math.hypot(p.x - pts[i - 1].x, p.y - pts[i - 1].y) : 0), 0);
+    const longest = parts.reduce((a, b) => (runLength(firstRun(b)) > runLength(firstRun(a)) ? b : a));
+    const run = firstRun(longest);
+    // Halfway along the run, by distance.
+    let left = runLength(run) / 2;
+    let mid = run[0];
+    for (let i = 1; i < run.length; i++) {
+      const step = Math.hypot(run[i].x - run[i - 1].x, run[i].y - run[i - 1].y);
+      if (step >= left && step > 0) {
+        const t = left / step;
+        mid = { ...run[i], x: run[i - 1].x + t * (run[i].x - run[i - 1].x), y: run[i - 1].y + t * (run[i].y - run[i - 1].y) };
+        break;
+      }
+      left -= step;
+      mid = run[i];
+    }
+    out.push({ x: mid.x, y: mid.y, n: longest.stroke!, item: longest.item, cuts });
+  }
+  return out;
 }
 
 /** "O (line 1)#0" → "O (line 1)". */
@@ -159,10 +182,15 @@ function cuttingOrder(input: SheetInput): string {
   const m = input.project.machine;
   // One block per letter, in reading order.
   const blocks: { id: string; rows: string[] }[] = [];
-  for (const { n, item, cut } of strokes) {
+  for (const { n, item, cuts } of strokes) {
     if (blocks.at(-1)?.id !== item) blocks.push({ id: item, rows: [] });
-    const slit = Math.max(0, ...cut.points.map((q) => -q.z));
-    blocks.at(-1)!.rows.push(`<tr><td>${n}</td><td>${(cut.width ?? 0).toFixed(1)}</td><td>${(slit + m.slitMargin).toFixed(1)}</td><td>${slit.toFixed(1)}</td></tr>`);
+    // The stroke itself, not its forks: its width, and the deepest the valley and the slit go.
+    const own = cuts.filter((c) => !c.fork);
+    const slit = Math.max(0, ...own.flatMap((c) => c.points.map((q) => -q.z)));
+    const parts = own.length > 1 ? ` <small>(${own.length} parts)</small>` : '';
+    blocks
+      .at(-1)!
+      .rows.push(`<tr><td>${n}${parts}</td><td>${(own[0].width ?? 0).toFixed(1)}</td><td>${(slit + m.slitMargin).toFixed(1)}</td><td>${slit.toFixed(1)}</td></tr>`);
   }
   const head = '<thead><tr><th>Stroke</th><th>Width</th><th>Valley</th><th>Slit</th></tr></thead>';
   return (
@@ -172,7 +200,7 @@ function cuttingOrder(input: SheetInput): string {
         return `<div class="sheet-letter"><h4>${i + 1}. <b>${esc(ch ?? '')}</b> <small>${esc(where ?? '')}</small></h4><table>${head}<tbody>${rows.join('')}</tbody></table></div>`;
       })
       .join('')}</div>` +
-    `<p class="sheet-small">Letters in reading order; strokes within each letter thin first. The forks into the corners are the stop cuts for the terminations, pared to last, and are not numbered. Width is the stroke's average width; valley is the deepest the finished V reaches at ${m.chiselAngle}°; slit is the deepest the machine cuts. All in mm.</p>`
+    `<p class="sheet-small">Letters in reading order; strokes within each letter thin first. At a junction the thicker stroke runs straight through and the thinner ends into it; a stroke crossed by a thicker one is cut in two parts. The forks into the corners are the stop cuts for the terminations, cut with their stroke, and are not numbered. Width is the stroke's average width; valley is the deepest the finished V reaches at ${m.chiselAngle}°; slit is the deepest the machine cuts. All in mm.</p>`
   );
 }
 

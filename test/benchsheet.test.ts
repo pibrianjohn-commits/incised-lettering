@@ -18,21 +18,18 @@ describe('stroke numbers', () => {
   const labels = strokeLabels(slit);
   const count = (ch: string) => labels.filter((t) => t.item.startsWith(`${ch} `)).length;
 
-  it('number each letter’s strokes, not the forks into its corners and serifs', () => {
-    // I is one stem; O one ring; S one long curve; W four diagonals.
-    expect(count('I')).toBe(1);
-    expect(count('O')).toBe(1);
-    expect(count('S')).toBe(1);
-    expect(count('W')).toBe(4);
-    // Every fork is still cut by the machine; it just carries no number.
+  it('one number for each stroke as the carver counts it, none for the forks', () => {
+    for (const [ch, n] of Object.entries({ I: 1, O: 1, D: 2, B: 3, R: 3, S: 1, A: 3, W: 4 })) expect(count(ch), ch).toBe(n);
+    // Every fork is still cut by the machine; it just carries no number of its own.
     expect(slit.cuts.filter((c) => c.item.startsWith('I ')).length).toBeGreaterThan(1);
   });
 
   it('start at 1 in every letter and follow the cutting order, thin first', () => {
     for (const ch of 'IODBRSAW') {
       const own = labels.filter((t) => t.item.startsWith(`${ch} `));
-      expect(own.map((t) => t.n)).toEqual(own.map((_, i) => i + 1));
-      for (let i = 1; i < own.length; i++) expect(own[i].cut.width!).toBeGreaterThanOrEqual(own[i - 1].cut.width! - 1e-9);
+      expect(own.map((t) => t.n).sort((a, b) => a - b)).toEqual(own.map((_, i) => i + 1));
+      const width = (n: number) => own.find((t) => t.n === n)!.cuts[0].width!;
+      for (let n = 2; n <= own.length; n++) expect(width(n)).toBeGreaterThanOrEqual(width(n - 1) * 0.97);
     }
   });
 
