@@ -1,4 +1,5 @@
 import { alphabetFromFont } from './alphabet';
+import { benchSheet, scaleName, strokeLabels } from './benchsheet';
 import { borderMarks } from './border';
 import { contourToSvg, polylineToSvg } from './geometry';
 import {
@@ -16,12 +17,19 @@ import {
   type PlacedLine,
   type Project,
 } from './layout';
+import { blobToDataUrl, chooseFile, dataUrlToBlob, download, saveFile, type FileHandle, type FileKind } from './files';
 import { loadImage, saveImage } from './imagestore';
 import { balanceHtml, lineListHtml, overviewSvg, overviewViewBox, type OverviewMode } from './inspector';
 import { BED, BED_EXTENDED, bedFit, fitToLettering } from './panel';
 import { defaultGroups, type Side } from './groups';
 import { defaultBox, evenUp, fitBlock, fitLine, type EvenUp, type FitBy } from './spacing';
 import { AIR_GAP, toGcode } from './gcode';
+import { openPalette, type Command } from './palette';
+import { layoutProblems, machineProblems, problemSummary, type Problem, type Stage } from './problems';
+import { alphabetDifferences, FILE_EXTENSION, FILE_TYPE, fileNameFor, normaliseProject, projectFileText, readProjectFile } from './projectfile';
+import { onFileLaunch, startApp } from './pwa';
+import { enableScrub } from './scrub';
+import { SHORTCUTS } from './shortcuts';
 import { finishedRelief, machinedRelief } from './relief';
 import type { Board3D, Colouring } from './view3d';
 import { buildPasses, checkPasses, CORNER_NAMES, MAX_SCRIBE_DEPTH, type Check, type MachineSettings, type Pass, type PassName } from './toolpath';
@@ -94,7 +102,8 @@ let guideDrag: { axis: 'x' | 'y'; index: number; at: number | null } | null = nu
 let selectedLine: number | null = null;
 /** The inspection panel: shown or hidden, and how the overview draws the letters. */
 const INSPECT_KEY = 'incised.inspect';
-let inspectOpen = readNumber(INSPECT_KEY, 1, 0, 1) === 1;
+// Open to start with, except on a small screen, where it would cover the panel.
+let inspectOpen = readNumber(INSPECT_KEY, window.innerWidth >= 1100 ? 1 : 0, 0, 1) === 1;
 let ovMode: OverviewMode = 'letters';
 /** The reference picture, ready to show (an object URL), once loaded. */
 let refUrl: string | null = null;
@@ -102,6 +111,25 @@ let refUrl: string | null = null;
 let scaling: { a: { x: number; y: number } | null } | null = null;
 /** What a line being dragged has snapped to, to draw the snapping guides. */
 let lineSnaps: { x: Snap | null; y: Snap | null } | null = null;
+/** Stages of the job, in order, on keys 1 to 5 (BRIEF.md, Decisions: the interface). */
+const STAGES: Stage[] = ['write', 'space', 'panel', 'machine', '3d'];
+const STAGE_NAMES: Record<Stage, string> = { write: 'Write', space: 'Space', panel: 'Panel', machine: 'Machine', '3d': '3D' };
+const STAGE_KEY = 'incised.stage';
+let stage: Stage = 'write';
+/** The stage to go back to from the 3D view. */
+let lastFlatStage: Stage = 'write';
+/** Snapping while a line is dragged; S turns it on and off. */
+const SNAP_KEY = 'incised.snap';
+let snapping = readNumber(SNAP_KEY, 1, 0, 1) === 1;
+/** While a setting is dragged by its name, its changes gather into one step to undo. */
+let batch: { before: Project } | null = null;
+/** The project file: its name, its handle where the browser gives one, and the project as last saved or opened. */
+const FILE_KEY = 'incised.file';
+const PROJECT_FILE: FileKind = { description: 'Lettering project', type: FILE_TYPE, extension: FILE_EXTENSION };
+let file: { name: string; handle: FileHandle | null; saved: Project | null } | null = null;
+/** The G-code safety checks for the warnings badge, worked out a moment after things stop changing. */
+let machineChecks: { project: Project; problems: Problem[] } | null = null;
+let checkTimer = 0;
 
 const $ = <T extends Element = HTMLElement>(id: string) => document.getElementById(id) as unknown as T;
 const work = $('work');
@@ -109,6 +137,7 @@ const world = $<SVGGElement>('world');
 const labels = $<SVGGElement>('labels');
 const overlay = $<SVGGElement>('overlay');
 const pop = $('kern-pop');
+const linePop = $('line-pop');
 
 const view = new PanZoom(work, {
   changed: () => {
@@ -196,6 +225,7 @@ function buildControls() {
     cb.addEventListener('change', () => {
       setPreset(null); // fine control: no preset is exactly what's showing now
       syncLayers();
+      rememberView();
       draw();
     });
   }
@@ -206,7 +236,7 @@ function buildControls() {
   });
 
   // Kerning box.
-  for (const el of [pop, $('viewbar')]) el.addEventListener('pointerdown', (e) => e.stopPropagation());
+  for (const el of [pop, linePop, $('viewbar')]) el.addEventListener('pointerdown', (e) => e.stopPropagation());
   wireTools();
   pop.addEventListener('click', (e) => {
     const b = (e.target as HTMLElement).closest('button');
@@ -238,14 +268,7 @@ function buildControls() {
   $('cal-plus').addEventListener('click', () => setCalibration(calibration + 0.002));
   $('cal-reset').addEventListener('click', () => setCalibration(1));
 
-  $('reset-all').addEventListener('click', () => {
-    if (!confirm('Clear the inscription and settings and start again with OAK? The alphabet’s kerning is kept. (Undo brings it back.)')) return;
-    selected = null;
-    const { kerning, groupKerning, groups, evenUp } = project; // the alphabet's, kept
-    update({ ...structuredClone(defaultProject), kerning, groupKerning, groups, evenUp });
-    fitPanel();
-  });
-
+  wireChrome();
   new ResizeObserver(() => applyView()).observe(work);
 }
 
@@ -254,9 +277,10 @@ function buildControls() {
  * alone. Changes with the same `group` in quick succession undo as one step.
  */
 function update(change: Partial<Project>, source?: Element, group: string | null = null) {
-  history.record(project, group);
+  if (!batch) history.record(project, group);
   project = { ...project, ...change };
   refreshUndoButtons();
+  showFileName();
   syncControls(source);
   saveProject();
   relayout();
@@ -282,6 +306,7 @@ function syncControls(source?: Element) {
   $('align')
     .querySelectorAll('button')
     .forEach((b) => b.classList.toggle('on', b.dataset.align === project.align));
+  syncMore();
 }
 
 /** Move the selected gap's letters closer (dir -1) or apart (+1) by `step` mm; dir 0 puts it back. */
@@ -462,9 +487,10 @@ function draw() {
 
   world.innerHTML = out.join('');
   labelData = { spaces, gaps: L.gaps };
-  showWarnings();
+  showBedStatus();
+  refreshProblems();
   showKerningSummary();
-  showLineEditor();
+  showLinePop();
   drawInspector();
   applyView();
 }
@@ -527,7 +553,7 @@ function applyView() {
   if (cam) out.push(camLabels(sx, sy));
   labels.innerHTML = out.join('');
 
-  // Kerning box sits above the selected gap.
+  // The kerning box floats beside the selected gap.
   const g = selectedGap();
   if (g) {
     const base = layout!.lines[g.line].baselineY;
@@ -550,30 +576,50 @@ function applyView() {
       `total ${signed(g.kern)} mm`,
     ].filter(Boolean);
     pop.querySelector('.breakdown')!.textContent = parts.join(' · ');
-    const x = sx(g.x);
-    const y = sy(base - p.capHeight) - 28;
-    pop.style.left = `${Math.round(x)}px`;
-    pop.style.top = `${Math.round(y)}px`;
+    placeBeside(pop, sx(g.x), sy(base - p.capHeight), sy(base));
   } else {
     pop.hidden = true;
+  }
+  // The selected line's tools float beside it (a selected gap's box takes the place).
+  const sl = !g && !cam ? lineAtIndex(selectedLine) : null;
+  if (sl?.ink) {
+    linePop.hidden = false;
+    placeBeside(linePop, sx((sl.ink.x0 + sl.ink.x1) / 2), sy(sl.baselineY - p.capHeight), sy(sl.baselineY));
+  } else {
+    linePop.hidden = true;
   }
 
   drawOverlay();
   updateOverviewView();
   $('zoom-read').textContent = `${(v.scale / pxPerMm()).toFixed(2)} × true size`;
+  showCursor();
   $('ruler').style.width = `${100 * pxPerMm()}px`;
   $<HTMLInputElement>('cal').value = String(calibration);
 }
 
-function showWarnings() {
-  const p = project;
-  const w: string[] = [];
-  if (layout!.overflow.wide) w.push('The lettering runs past the side margins.');
-  if (layout!.overflow.tall) w.push('The lines run past the top or bottom margin.');
-  const box = contentBox(p);
-  if (box.x1 <= box.x0 || box.y1 <= box.y0) w.push('The border and margins leave no room for the lettering.');
-  $('warnings').innerHTML = w.map((t) => `<p class="warn">${t}</p>`).join('');
+/**
+ * Float a box over the workspace beside something on screen: above it (top
+ * and bottom are its upper and lower edges, px), or below if there is no room
+ * above, and always inside the workspace. A small pointer shows what it is for.
+ */
+function placeBeside(el: HTMLElement, cx: number, top: number, bottom: number) {
+  const r = work.getBoundingClientRect();
+  const w = el.offsetWidth;
+  const h = el.offsetHeight;
+  const gap = 12;
+  const clearTop = RULER + $('viewbar').offsetHeight + 12;
+  let y = top - gap - h;
+  const below = y < clearTop;
+  if (below) y = Math.min(bottom + gap, r.height - h - 8);
+  const left = Math.min(r.width - 8 - w, Math.max(RULER + 8, cx - w / 2));
+  el.style.left = `${Math.round(left)}px`;
+  el.style.top = `${Math.round(y)}px`;
+  el.classList.toggle('below', below);
+  el.style.setProperty('--point', `${Math.round(Math.min(w - 16, Math.max(16, cx - left)))}px`);
+}
 
+function showBedStatus() {
+  const p = project;
   // Machine bed check.
   const fit = bedFit(p.panelWidth, p.panelHeight);
   const status = $('bed-status');
@@ -628,10 +674,14 @@ function applyPreset(name: PresetName) {
   for (const layer of LAYERS) $<HTMLInputElement>(`show-${layer}`).checked = PRESETS[name].includes(layer);
   setPreset(name);
   syncLayers();
+  rememberView();
   draw();
 }
 
+let preset: PresetName | null = null;
+
 function setPreset(name: PresetName | null) {
+  preset = name;
   $('presets')
     .querySelectorAll<HTMLElement>('[data-preset]')
     .forEach((b) => b.classList.toggle('on', b.dataset.preset === name));
@@ -644,43 +694,87 @@ function syncLayers() {
   for (const layer of LAYERS) work.classList.toggle(`hide-${layer}`, !$<HTMLInputElement>(`show-${layer}`).checked);
 }
 
+/**
+ * What each stage shows when it is opened, until the carver changes it there
+ * (BRIEF.md, Decisions: the interface). Each stage then remembers its own.
+ */
+const STAGE_VIEWS: Record<Stage, { preset: PresetName | null; layers: Layer[] }> = {
+  write: { preset: null, layers: ['fill', 'guides'] }, // the letters, with the lines they sit on
+  space: { preset: 'spacing', layers: PRESETS.spacing },
+  panel: { preset: null, layers: ['fill', 'guides'] }, // the letters, with the margins
+  machine: { preset: 'setting', layers: PRESETS.setting },
+  '3d': { preset: null, layers: [] },
+};
+const VIEWS_KEY = 'incised.stageViews';
+let stageViews: Partial<Record<Stage, { preset: PresetName | null; layers: Layer[] }>> = readJson(VIEWS_KEY) ?? {};
+
+function rememberView() {
+  if (stage === '3d') return;
+  stageViews[stage] = { preset, layers: LAYERS.filter((l) => $<HTMLInputElement>(`show-${l}`).checked) };
+  writeJson(VIEWS_KEY, stageViews);
+}
+
+function showStageView(s: Stage) {
+  const v = stageViews[s] ?? STAGE_VIEWS[s];
+  for (const layer of LAYERS) $<HTMLInputElement>(`show-${layer}`).checked = v.layers.includes(layer);
+  setPreset(v.preset);
+  syncLayers();
+}
+
 // ---------------------------------------------------------------- keys, undo
 
 function onKey(e: KeyboardEvent) {
   const target = e.target as HTMLElement;
+  // Boxes over everything (search, shortcuts, bench sheet) look after their own keys.
+  if (document.querySelector('dialog[open]')) return;
   // Typing boxes keep their keys; tick boxes, sliders and buttons don't need them.
   const inField = target.closest('textarea, select, input:not([type=checkbox]):not([type=range]):not([type=radio])');
-  // While the 3D view is open, only Esc and 5 (to close it) apply.
-  if (v3d.open) {
-    if (!inField && (e.key === 'Escape' || e.key === '5')) {
-      close3d();
-      e.preventDefault();
-    }
-    return;
-  }
-  // Undo and redo work everywhere, typing included, so every change is covered.
+  // Undo, redo, files and search work everywhere, typing included.
   if ((e.ctrlKey || e.metaKey) && !e.altKey) {
     const k = e.key.toLowerCase();
     if (k === 'z') {
-      e.preventDefault();
       if (e.shiftKey) redo();
       else undo();
-    } else if (k === 'y') {
-      e.preventDefault();
-      redo();
-    }
+    } else if (k === 'y') redo();
+    else if (k === 'k') showPalette();
+    else if (k === 's') saveProjectFile(e.shiftKey);
+    else if (k === 'o') openProjectFile();
+    else if (k === 'p') showSheet();
+    else return;
+    e.preventDefault();
     return;
   }
   if (inField) return;
 
-  if (!e.altKey && e.key === '5') {
-    open3d();
-  } else if (!e.altKey && /^[1-4]$/.test(e.key)) {
-    applyPreset(PRESET_KEYS[Number(e.key) - 1]);
-  } else if (!e.altKey && (e.key === 'i' || e.key === 'I')) {
+  // 1 to 5: the stages. Shift with 1 to 4: the views.
+  const digit = /^Digit([1-5])$/.exec(e.code)?.[1] ?? (/^[1-5]$/.test(e.key) ? e.key : null);
+  if (digit && !e.altKey) {
+    const n = Number(digit);
+    if (!e.shiftKey) setStage(STAGES[n - 1]);
+    else if (n <= 4 && stage !== '3d') applyPreset(PRESET_KEYS[n - 1]);
+    e.preventDefault();
+    return;
+  }
+  if (e.key === '?') {
+    showKeys();
+    e.preventDefault();
+    return;
+  }
+  // In the 3D view the mouse turns the board; Esc goes back.
+  if (stage === '3d') {
+    if (e.key === 'Escape') {
+      setStage(lastFlatStage);
+      e.preventDefault();
+    }
+    return;
+  }
+
+  if (!e.altKey && (e.key === 'i' || e.key === 'I')) {
     setInspect(!inspectOpen);
   } else if (!e.altKey && (e.key === 'm' || e.key === 'M')) {
     setMeasuring(!measuring);
+  } else if (!e.altKey && (e.key === 's' || e.key === 'S')) {
+    setSnapping(!snapping);
   } else if (e.key === 'Tab' && (target === document.body || target.closest('#work'))) {
     // Step through the gaps in reading order.
     const cur = gapIndex(selected ?? hovered);
@@ -698,6 +792,7 @@ function onKey(e: KeyboardEvent) {
     if (!gapAt(selected)) return;
     nudge(e.key === 'ArrowLeft' ? -1 : 1, e.shiftKey ? 1 : 0.1);
   } else if (e.key === 'Escape') {
+    closeMenus();
     if (cam) closeCam();
     if (measuring) setMeasuring(false);
     if (scaling) {
@@ -728,6 +823,7 @@ function restore(p: Project) {
   syncControls();
   saveProject();
   refreshUndoButtons();
+  showFileName();
   relayout();
 }
 
@@ -772,7 +868,7 @@ function wireTools() {
     'pointerdown',
     (e) => {
       if (!measuring || e.button !== 0) return;
-      if ((e.target as Element).closest('#viewbar, #kern-pop, .ruler, #ruler-corner')) return;
+      if ((e.target as Element).closest('#viewbar, .ctx, .ruler, #ruler-corner, #cam-bar')) return;
       e.stopPropagation(); // don't pan
       const a = toMm(e.clientX, e.clientY);
       measure = { a, b: a };
@@ -794,13 +890,23 @@ function wireTools() {
     true,
   );
 
+  // A press on the workspace takes the cursor out of any settings box, so the keys work on the panel again.
+  work.addEventListener(
+    'pointerdown',
+    (e) => {
+      const active = document.activeElement as HTMLElement | null;
+      if (active && active !== document.body && !active.closest('#work') && !(e.target as Element).closest('.ctx')) active.blur();
+    },
+    true,
+  );
+
   // The reference picture: drag it while unlocked, or click two points to scale it.
   work.addEventListener('pointerdown', onPicturePress, true);
 
   // Press on a line (its letters, a gap, or its number in the margin):
   // a click selects, a drag moves the line.
   work.addEventListener('pointerdown', onLinePress, true);
-  wireLineEditor();
+  wireLinePop();
   wireInspector();
 
   // Track the pointer for the ruler markers and the gap under it.
@@ -810,11 +916,13 @@ function wireTools() {
     const g = (e.target as Element).closest('[data-gap]');
     hovered = g ? (([line, n]) => ({ line, n }))(g.getAttribute('data-gap')!.split(':').map(Number)) : null;
     drawRulers();
+    showCursor();
   });
   work.addEventListener('pointerleave', () => {
     pointer = null;
     hovered = null;
     drawRulers();
+    showCursor();
   });
 }
 
@@ -984,8 +1092,8 @@ function onLinePress(e: PointerEvent) {
     let dy = at.y - from.y;
     let sx: Snap | null = null;
     let sy: Snap | null = null;
-    if (!m.altKey) {
-      // Hold Alt to move freely, without snapping.
+    if (snapping && !m.altKey) {
+      // Hold Alt to move freely, without snapping (or turn snapping off with S).
       const tol = 8 / view.v.scale;
       sx = nearest(
         [
@@ -1042,59 +1150,39 @@ function onLinePress(e: PointerEvent) {
   work.addEventListener('pointercancel', up);
 }
 
-/** The side-panel box for the selected line. */
-function showLineEditor() {
-  const box = $('line-editor');
+/** The selected line's tools, floating beside it (placed by applyView). */
+function showLinePop() {
   const line = lineAtIndex(selectedLine);
-  if (!line || !line.ink) {
-    box.innerHTML = '';
-    box.dataset.line = '';
-    return;
-  }
+  if (!line || !line.ink) return;
   const values = {
     left: line.ink.x0,
     centre: (line.ink.x0 + line.ink.x1) / 2,
     baseline: line.baselineY,
   };
-  // Rebuild only when a different line is selected, so typing in a box isn't interrupted.
-  if (box.dataset.line !== String(line.index)) {
-    box.dataset.line = String(line.index);
-    box.innerHTML = `
-      <p class="line-title"><b>Line ${line.index + 1}</b> <span class="line-text"></span></p>
-      <p class="line-state"></p>
-      <div class="boxes">
-        <label>Left end <span><input type="number" step="0.1" data-pos="left" /> mm</span></label>
-        <label>Centre <span><input type="number" step="0.1" data-pos="centre" /> mm</span></label>
-        <label>Baseline <span><input type="number" step="0.1" data-pos="baseline" /> mm</span></label>
-      </div>
-      <p class="hint small">Measured from the panel's left edge and top edge, to the letters themselves.</p>
-      <div class="line-buttons">
-        <button data-act="auto">Return to auto</button>
-        <button data-act="lock"></button>
-      </div>`;
-  }
-  box.querySelector('.line-text')!.textContent = line.text.trim();
+  linePop.querySelector('.line-title')!.textContent = `Line ${line.index + 1}`;
+  linePop.querySelector('.line-text')!.textContent = line.text.trim();
   const ex = project.lineExtras[String(line.index)];
   const fitted = ex && (ex.letter || ex.word)
     ? ` Fitted: ${[ex.letter ? `letter spacing ${signed(ex.letter)} mm` : '', ex.word ? `word spacing ${signed(ex.word)} mm` : ''].filter(Boolean).join(', ')}.`
     : '';
-  box.querySelector('.line-state')!.textContent = (line.locked
+  linePop.querySelector('.line-state')!.textContent = (line.locked
     ? 'Locked: it will not move until unlocked.'
     : line.placed
       ? 'Placed by hand: it stays put when the line spacing or alignment changes.'
       : 'Auto: it follows the line spacing and alignment.') + fitted;
-  for (const input of box.querySelectorAll<HTMLInputElement>('[data-pos]')) {
+  for (const input of linePop.querySelectorAll<HTMLInputElement>('[data-pos]')) {
+    // Typing in a box isn't interrupted.
     if (document.activeElement !== input) input.value = values[input.dataset.pos as keyof typeof values].toFixed(1);
     input.disabled = line.locked;
+    input.title = 'mm from the panel\'s left and top edges, to the letters themselves';
   }
-  const auto = box.querySelector<HTMLButtonElement>('[data-act="auto"]')!;
-  auto.disabled = !line.placed || line.locked;
-  box.querySelector('[data-act="lock"]')!.textContent = line.locked ? 'Unlock' : 'Lock';
+  linePop.querySelector<HTMLButtonElement>('[data-act="auto"]')!.disabled = !line.placed || line.locked;
+  linePop.querySelector('[data-act="lock"]')!.textContent = line.locked ? 'Unlock' : 'Lock';
+  linePop.querySelector<HTMLButtonElement>('[data-act="fit"]')!.disabled = line.locked;
 }
 
-function wireLineEditor() {
-  const box = $('line-editor');
-  box.addEventListener('change', (e) => {
+function wireLinePop() {
+  linePop.addEventListener('change', (e) => {
     const input = (e.target as HTMLElement).closest<HTMLInputElement>('[data-pos]');
     const line = lineAtIndex(selectedLine);
     if (!input || !line?.ink || line.locked) return;
@@ -1102,18 +1190,23 @@ function wireLineEditor() {
     if (input.value === '' || !Number.isFinite(v)) return;
     const p0 = placementOf(line);
     const pos = input.dataset.pos;
-    if (pos === 'baseline') setPlacement(line.index, { ...p0, baseline: v });
+    if (pos === 'baseline') setPlacement(line.index, { ...p0, baseline: v }, `line-pos-${line.index}`);
     else {
       const now = pos === 'left' ? line.ink.x0 : (line.ink.x0 + line.ink.x1) / 2;
-      setPlacement(line.index, { ...p0, x: round(p0.x + v - now, 3) });
+      setPlacement(line.index, { ...p0, x: round(p0.x + v - now, 3) }, `line-pos-${line.index}`);
     }
   });
-  box.addEventListener('click', (e) => {
+  linePop.addEventListener('click', (e) => {
     const b = (e.target as HTMLElement).closest<HTMLElement>('[data-act]');
     const line = lineAtIndex(selectedLine);
     if (!b || !line) return;
+    if (b.dataset.act === 'close') {
+      selectedLine = null;
+      draw();
+    }
     if (b.dataset.act === 'auto') setPlacement(line.index, null);
     if (b.dataset.act === 'lock') setPlacement(line.index, { ...placementOf(line), locked: !line.locked });
+    if (b.dataset.act === 'fit') $('fit-line').click();
   });
   $('reflow').addEventListener('click', () => {
     // Every line back to auto, except locked ones, which stay where they are.
@@ -1303,7 +1396,7 @@ function onPicturePress(e: PointerEvent) {
   const ri = project.refImage;
   if (!ri || measuring || e.button !== 0) return;
   const t = e.target as Element;
-  if (t.closest('#viewbar, #kern-pop, .ruler, #ruler-corner')) return;
+  if (t.closest('#viewbar, .ctx, .ruler, #ruler-corner, #cam-bar')) return;
 
   // Scaling: two clicks on the picture, then the real distance between them.
   if (scaling) {
@@ -1633,6 +1726,7 @@ function wireSpacing() {
 
 function fitMessage(text: string) {
   $('fit-msg').textContent = text;
+  say(text);
 }
 
 function acceptSuggestions(pairs: string[]) {
@@ -1927,12 +2021,9 @@ function camLabels(sx: (x: number) => number, sy: (y: number) => number): string
   const out: string[] = [];
   const slit = c.passes.find((p) => p.name === 'slit');
   if (slit && (c.show === 'slit' || c.show === 'all') && view.v.scale > 2) {
-    for (const cut of slit.cuts) {
-      // Number at the middle of the stroke's first run.
-      const step = cut.points.findIndex((p, i) => i > 0 && p.x === cut.points[i - 1].x && p.y === cut.points[i - 1].y);
-      const run = step === -1 ? cut.points : cut.points.slice(0, step);
-      const mid = run[Math.floor(run.length / 2)];
-      out.push(`<text class="stroke-num" x="${sx(mid.x).toFixed(1)}" y="${(sy(mid.y) + 4).toFixed(1)}">${cut.stroke}</text>`);
+    // The same numbers as the bench sheet: strokes in cutting order, forks not numbered.
+    for (const t of strokeLabels(slit)) {
+      out.push(`<text class="stroke-num" x="${sx(t.x).toFixed(1)}" y="${(sy(t.y) + 4).toFixed(1)}">${t.n}</text>`);
     }
   }
   // X0 Y0, with the directions X and Y run from it.
@@ -1960,14 +2051,7 @@ function saveGcode(airCut: boolean) {
   const title = c.project.text.replace(/\s+/g, ' ').trim() || 'lettering';
   const g = toGcode(c.passes, c.project.machine, { title, panelWidth: c.project.panelWidth, panelHeight: c.project.panelHeight, airCut });
   const name = `${title.replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'lettering'}${airCut ? '-AIR-CUT' : ''}.nc`;
-  const url = URL.createObjectURL(new Blob([g], { type: 'text/plain' }));
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = name;
-  document.body.append(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  download(g, name);
   $('cam-viewed').textContent = airCut
     ? `Saved as ${name}: a dry run that stays ${AIR_GAP} mm or more above the board. Check it in your sender's preview too.`
     : `Saved as ${name}. Check it in your sender's preview too before running it.`;
@@ -1976,8 +2060,6 @@ function saveGcode(airCut: boolean) {
 // ---------------------------------------------------------------- 3D view
 
 function wire3d() {
-  $('v3d-open').addEventListener('click', open3d);
-  $('v3d-close').addEventListener('click', close3d);
   // Keep the workspace's own pan and zoom out of the 3D view.
   for (const ev of ['pointerdown', 'wheel'] as const) $('v3d').addEventListener(ev, (e) => e.stopPropagation());
   $('v3d').addEventListener('contextmenu', (e) => e.preventDefault());
@@ -1996,7 +2078,7 @@ function wire3d() {
     sync3d();
     if (v3d.colour === 'depth') build3d(); // to show the depth scale
   });
-  $('v3d-bar').addEventListener('click', (e) => {
+  $('v3d-views').addEventListener('click', (e) => {
     const b = (e.target as HTMLElement).closest<HTMLElement>('[data-view]');
     if (b) v3d.board?.view(b.dataset.view as 'fit' | 'top' | 'front');
   });
@@ -2020,7 +2102,6 @@ async function open3d() {
   if (cam) closeCam();
   v3d.open = true;
   $('v3d').hidden = false;
-  $('v3d-open').classList.add('on');
   sync3d();
   if (!v3d.board) {
     // three.js is only fetched the first time the 3D view is opened.
@@ -2036,7 +2117,6 @@ function close3d() {
   stopSweep();
   v3d.open = false;
   $('v3d').hidden = true;
-  $('v3d-open').classList.remove('on');
 }
 
 function schedule3d() {
@@ -2108,6 +2188,570 @@ function stopSweep() {
   sync3d();
 }
 
+// ---------------------------------------------------------------- stages, status bar, files, search
+
+const PRESET_TITLES: Record<PresetName, string> = { design: 'Design', spacing: 'Spacing', setting: 'Setting-out', proof: 'Proof' };
+const HINT = 'Drag to move · Scroll to zoom · Ctrl+K finds anything · ? lists the keys';
+let installApp: (() => Promise<void>) | null = null;
+
+function wireChrome() {
+  $('stages').addEventListener('click', (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLElement>('[data-stage]');
+    if (b) setStage(b.dataset.stage as Stage);
+  });
+
+  // Drop-down menus: File, and Layers. A press anywhere else closes them.
+  for (const [btn, list] of [
+    ['file-btn', 'file-menu'],
+    ['layers-btn', 'layers'],
+  ] as const) {
+    $(btn).addEventListener('click', () => {
+      const open = $(list).hidden;
+      closeMenus();
+      $(list).hidden = !open;
+      $(btn).setAttribute('aria-expanded', String(open));
+    });
+  }
+  document.addEventListener(
+    'pointerdown',
+    (e) => {
+      if (!(e.target as Element).closest('.menu, #warn-pop, #st-warn')) closeMenus();
+    },
+    true,
+  );
+  $('file-menu').addEventListener('click', (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLElement>('[data-file]');
+    if (!b) return;
+    closeMenus();
+    const act = b.dataset.file;
+    if (act === 'new') newProject();
+    else if (act === 'open') openProjectFile();
+    else if (act === 'save' || act === 'saveas') saveProjectFile(act === 'saveas');
+    else if (act === 'sheet') showSheet();
+  });
+
+  $('search-btn').addEventListener('click', showPalette);
+  $('keys-btn').addEventListener('click', showKeys);
+  for (const d of document.querySelectorAll('dialog')) {
+    d.addEventListener('click', (e) => {
+      if ((e.target as Element).closest('[data-close]')) d.close();
+    });
+  }
+  $('sheet-print').addEventListener('click', printSheet);
+  window.addEventListener('beforeprint', fillPrint);
+
+  // Status bar.
+  $('zoom-in').addEventListener('click', () => zoomBy(1.25));
+  $('zoom-out').addEventListener('click', () => zoomBy(0.8));
+  $('zoom-read').addEventListener('click', () => view.frame(project.panelWidth, project.panelHeight, pxPerMm()));
+  $('st-snap').addEventListener('click', () => setSnapping(!snapping));
+  setSnapping(snapping);
+  $('st-warn').addEventListener('click', () => {
+    const open = $('warn-pop').hidden;
+    closeMenus();
+    if (!open) return;
+    showProblemList();
+    $('warn-pop').hidden = false;
+    $('st-warn').setAttribute('aria-expanded', 'true');
+  });
+  $('warn-pop').addEventListener('click', (e) => {
+    const li = (e.target as HTMLElement).closest<HTMLElement>('[data-stage]');
+    if (!li) return;
+    closeMenus();
+    setStage(li.dataset.stage as Stage);
+  });
+  $('st-msg').textContent = HINT;
+
+  // Drag a setting's name to change it; the whole drag is one step to undo.
+  const hooks = {
+    begin: () => {
+      batch = { before: project };
+    },
+    end: () => {
+      if (batch && project !== batch.before) history.record(batch.before);
+      batch = null;
+      refreshUndoButtons();
+    },
+  };
+  enableScrub($('side'), hooks);
+  enableScrub(linePop, hooks);
+
+  // The "More" folds remember whether they were left open.
+  for (const d of document.querySelectorAll<HTMLDetailsElement>('details.more')) {
+    const key = `incised.more.${d.dataset.more}`;
+    d.open = readNumber(key, 0, 0, 1) === 1;
+    d.addEventListener('toggle', () => writeJson(key, d.open ? 1 : 0));
+  }
+
+  // The installed app: its button, and project files opened by double-clicking them.
+  startApp({
+    installable: (install) => {
+      installApp = install;
+      const b = $<HTMLButtonElement>('install');
+      b.hidden = !install;
+      b.onclick = install ? () => void install() : null;
+    },
+  });
+  onFileLaunch((f, handle) => void openFromFile(f, handle as FileHandle));
+}
+
+/** Show one stage of the job: its own tools in the side panel, and its own view of the panel. */
+function setStage(s: Stage, force = false) {
+  if (s === stage && !force) return;
+  stage = s;
+  if (s !== '3d') lastFlatStage = s;
+  document.body.dataset.stage = s;
+  try {
+    localStorage.setItem(STAGE_KEY, s);
+  } catch {
+    /* not remembered */
+  }
+  $('stages')
+    .querySelectorAll<HTMLElement>('[data-stage]')
+    .forEach((b) => {
+      b.classList.toggle('on', b.dataset.stage === s);
+      if (b.dataset.stage === s) b.setAttribute('aria-current', 'step');
+      else b.removeAttribute('aria-current');
+    });
+  document.querySelectorAll<HTMLElement>('.stage-panel').forEach((el) => (el.hidden = el.dataset.panel !== s));
+  $('side').scrollTop = 0;
+  closeMenus();
+  if (s !== 'machine' && cam) closeCam();
+  if (s === '3d') {
+    if (measuring) setMeasuring(false);
+    selected = null;
+    selectedLine = null;
+    void open3d();
+  } else {
+    if (v3d.open) close3d();
+    showStageView(s);
+  }
+  draw();
+  showCursor();
+}
+
+function closeMenus() {
+  for (const [btn, list] of [
+    ['file-btn', 'file-menu'],
+    ['layers-btn', 'layers'],
+    ['st-warn', 'warn-pop'],
+  ]) {
+    $(list).hidden = true;
+    $(btn).setAttribute('aria-expanded', 'false');
+  }
+}
+
+function zoomBy(f: number) {
+  const r = work.getBoundingClientRect();
+  view.zoomAt(f, r.width / 2, r.height / 2);
+}
+
+/** Where the pointer is on the panel, in the status bar. */
+function showCursor() {
+  const el = $('st-cursor');
+  if (!pointer || stage === '3d') {
+    el.textContent = 'across — · down — mm';
+    return;
+  }
+  const v = view.v;
+  el.textContent = `across ${((pointer.x - v.tx) / v.scale).toFixed(1)} · down ${((pointer.y - v.ty) / v.scale).toFixed(1)} mm`;
+}
+
+function setSnapping(on: boolean) {
+  snapping = on;
+  writeJson(SNAP_KEY, on ? 1 : 0);
+  const b = $('st-snap');
+  b.textContent = on ? 'Snapping on' : 'Snapping off';
+  b.classList.toggle('on', on);
+}
+
+/** A short message in the status bar, for a few seconds. */
+let sayTimer = 0;
+function say(text: string) {
+  const el = $('st-msg');
+  el.textContent = text;
+  el.classList.add('fresh');
+  clearTimeout(sayTimer);
+  sayTimer = window.setTimeout(() => {
+    el.textContent = HINT;
+    el.classList.remove('fresh');
+  }, 7000);
+}
+
+// ---------------------------------------------------------------- the warnings badge
+
+let problems: Problem[] = [];
+
+function refreshProblems() {
+  if (!layout || !store) return;
+  const alphabet = store.alphabet;
+  const list = layoutProblems(layout, (ch) => !!alphabet.letter(ch)?.contours.length);
+  if (project.refImage && !refUrl) {
+    list.push({ level: 'warn', stage: 'panel', text: 'The reference picture was not kept by this browser: load it again (Panel › More).' });
+  }
+  // The G-code checks take longer, so they follow a moment behind; the last ones stand till then.
+  if (machineChecks) list.push(...machineChecks.problems);
+  if (machineChecks?.project !== project) scheduleChecks();
+  problems = list;
+  const sum = problemSummary(list);
+  const b = $('st-warn');
+  b.textContent = sum.text;
+  b.className = `badge ${sum.level}`;
+  b.title = list.length ? 'Click to see every problem' : 'Nothing needs putting right';
+  if (!$('warn-pop').hidden) showProblemList();
+}
+
+function scheduleChecks() {
+  clearTimeout(checkTimer);
+  checkTimer = window.setTimeout(() => {
+    const p = project;
+    const run = () => {
+      if (p !== project || !store) return; // changed again: the next round will do it
+      const l = layoutPanel(store, p);
+      const checks = checkPasses(l, buildPasses(l, p.machine), p.machine, bedFit(p.panelWidth, p.panelHeight));
+      machineChecks = { project: p, problems: machineProblems(checks) };
+      refreshProblems();
+    };
+    if ('requestIdleCallback' in window) requestIdleCallback(run, { timeout: 2000 });
+    else run();
+  }, 500);
+}
+
+function showProblemList() {
+  $('warn-pop').querySelector('ul')!.innerHTML = problems.length
+    ? problems
+        .map(
+          (q) =>
+            `<li class="${q.level}" data-stage="${q.stage}" title="Go to ${STAGE_NAMES[q.stage]}"><b>${q.level === 'bad' ? '✗' : '!'}</b><span>${esc(q.text)}</span><small>${STAGE_NAMES[q.stage]}</small></li>`,
+        )
+        .join('')
+    : '<li class="ok"><b>✓</b><span>Nothing needs putting right.</span></li>';
+}
+
+// ---------------------------------------------------------------- "More" folds
+
+function pathGet(o: unknown, path: string): unknown {
+  return path.split('.').reduce<unknown>((v, k) => (v && typeof v === 'object' ? (v as Record<string, unknown>)[k] : undefined), o);
+}
+
+/** Each "More" fold says how many of its settings differ from the starting values, so nothing hidden is a surprise. */
+function syncMore() {
+  for (const d of document.querySelectorAll<HTMLDetailsElement>('details.more')) {
+    const keys = (d.dataset.keys ?? '').split(/\s+/).filter(Boolean);
+    const n = keys.filter((k) => stableJson(pathGet(project, k) ?? null) !== stableJson(pathGet(defaultProject, k) ?? null)).length;
+    const el = d.querySelector('summary .changed')!;
+    el.textContent = n ? `${n} changed from the starting values` : '';
+  }
+}
+
+function stableJson(v: unknown): string {
+  return JSON.stringify(v, (_k, val) =>
+    val && typeof val === 'object' && !Array.isArray(val) ? Object.fromEntries(Object.entries(val).sort(([a], [b]) => a.localeCompare(b))) : val,
+  );
+}
+
+// ---------------------------------------------------------------- project files
+
+function showFileName() {
+  const el = $('file-name');
+  if (!file) {
+    el.textContent = 'not saved to a file yet';
+    el.classList.remove('changed');
+    return;
+  }
+  const changed = file.saved !== project;
+  el.textContent = `${file.name}${changed ? ' · changed since saved' : ''}`;
+  el.classList.toggle('changed', changed);
+}
+
+function setFile(f: { name: string; handle: FileHandle | null; saved: Project } | null) {
+  file = f;
+  writeJson(FILE_KEY, f ? { name: f.name, saved: stableJson(f.saved) } : null);
+  showFileName();
+}
+
+/** After a reload: the file's name, and whether the job is still as it was saved. */
+function restoreFile() {
+  const f = readJson<{ name: string; saved: string }>(FILE_KEY);
+  file = f ? { name: f.name, handle: null, saved: f.saved === stableJson(project) ? project : null } : null;
+  showFileName();
+}
+
+function newProject() {
+  if (!confirm('Clear the inscription and settings and start again with OAK? The alphabet’s kerning is kept. (Undo brings it back.)')) return;
+  selected = null;
+  selectedLine = null;
+  const { kerning, groupKerning, groups, evenUp } = project; // the alphabet's, kept
+  update({ ...structuredClone(defaultProject), kerning, groupKerning, groups, evenUp });
+  setFile(null);
+  fitPanel();
+}
+
+async function saveProjectFile(asNew: boolean) {
+  if (!store) return;
+  const p = project;
+  const text = async () => {
+    const blob = p.refImage ? await loadImage() : null;
+    return projectFileText(p, alphabetName, blob ? await blobToDataUrl(blob) : null);
+  };
+  const res = await saveFile(text, {
+    ...PROJECT_FILE,
+    suggestedName: file?.name ?? fileNameFor(p),
+    handle: asNew ? null : (file?.handle ?? null),
+  });
+  if (!res) return;
+  setFile({ name: res.name, handle: res.handle, saved: p });
+  say(res.handle ? `Saved to ${res.name}.` : `Saved as ${res.name}, in the Downloads folder.`);
+}
+
+async function openProjectFile() {
+  const chosen = await chooseFile($<HTMLInputElement>('open-file'), PROJECT_FILE);
+  if (chosen) await openFromFile(chosen.file, chosen.handle);
+}
+
+async function openFromFile(f: File, handle: FileHandle | null) {
+  let opened;
+  try {
+    opened = readProjectFile(await f.text());
+  } catch (e) {
+    alert((e as Error).message);
+    return;
+  }
+  let next = opened.project;
+  // Pair and group kerning, the groups and even-up belong to the alphabet and are
+  // shared by every job, so the carver chooses which to keep (BRIEF.md, Decisions).
+  const diff = alphabetDifferences(next, project);
+  if (diff) {
+    const choice = await ask(
+      'Which spacing?',
+      `${f.name} was saved with spacing that differs from what the alphabet has now (${diff} difference${diff > 1 ? 's' : ''} in pair or group kerning, kerning groups or even-up settings). These are shared by every job set in this alphabet.`,
+      [
+        { value: 'file', label: 'Use the project’s spacing, as it was saved', hint: 'It becomes the alphabet’s spacing for every job from now on.' },
+        { value: 'alphabet', label: 'Keep the alphabet’s spacing as it is now', hint: 'The job may space a little differently from when it was saved.' },
+      ],
+    );
+    if (!choice) return;
+    if (choice === 'alphabet') {
+      const { kerning, groupKerning, groups, evenUp } = project;
+      next = { ...next, kerning, groupKerning, groups, evenUp };
+    }
+  }
+  // The reference picture travels inside the file.
+  if (opened.picture) {
+    const blob = await dataUrlToBlob(opened.picture);
+    await saveImage(blob);
+    if (refUrl) URL.revokeObjectURL(refUrl);
+    refUrl = URL.createObjectURL(blob);
+  } else if (next.refImage) next = { ...next, refImage: null };
+  if (cam) closeCam();
+  selected = null;
+  selectedLine = null;
+  suggest = null;
+  tweaks = {};
+  previewSuggest = false;
+  showSuggestions();
+  update(next); // one step to undo
+  setFile({ name: f.name, handle, saved: project });
+  requestAnimationFrame(fitPanel);
+  const other = opened.alphabet && opened.alphabet !== alphabetName ? ` It was set in ${opened.alphabet}; it is shown in ${alphabetName}.` : '';
+  say(`Opened ${f.name}.${other}`);
+}
+
+/** A question with a few clear answers. Resolves to the chosen value, or null if closed. */
+function ask(title: string, text: string, options: { value: string; label: string; hint?: string }[]): Promise<string | null> {
+  const d = $<HTMLDialogElement>('ask');
+  $('ask-title').textContent = title;
+  $('ask-text').textContent = text;
+  const box = d.querySelector<HTMLElement>('.ask-buttons')!;
+  box.innerHTML =
+    options
+      .map((o, i) => `<button value="${esc(o.value)}" class="${i === 0 ? 'primary' : ''}">${esc(o.label)}${o.hint ? `<small>${esc(o.hint)}</small>` : ''}</button>`)
+      .join('') + '<button value="" class="quiet">Cancel</button>';
+  return new Promise((resolve) => {
+    box.onclick = (e) => {
+      const b = (e.target as Element).closest('button');
+      if (!b) return;
+      resolve(b.value || null);
+      d.close();
+    };
+    d.onclose = () => resolve(null);
+    d.showModal();
+  });
+}
+
+// ---------------------------------------------------------------- bench sheet
+
+function makeSheet() {
+  if (!store) return null;
+  const p = project;
+  const l = layoutPanel(store, p);
+  const passes = buildPasses(l, p.machine);
+  // Stroke numbers come from the valley slit, even when it is not set to run.
+  const strokes =
+    passes.find((q) => q.name === 'slit') ?? buildPasses(l, { ...p.machine, passes: { hairline: false, datum: false, slit: true } })[0] ?? null;
+  const checks = checkPasses(l, passes, p.machine, bedFit(p.panelWidth, p.panelHeight));
+  return benchSheet({ project: p, layout: l, strokes, passes, checks, alphabet: alphabetName, fileName: file?.name ?? null, date: new Date() });
+}
+
+function showSheet() {
+  const sh = makeSheet();
+  if (!sh) return;
+  closeMenus();
+  $('sheet-paper').innerHTML = sh.html;
+  $('sheet-note').textContent = `A4 ${sh.orientation}, drawn ${scaleName(sh.scale)}. Print at 100% (not “fit to page”) so the scale is true.`;
+  $<HTMLDialogElement>('sheet-view').showModal();
+}
+
+/** Put the bench sheet where printing picks it up (it is the only thing printed). */
+function fillPrint() {
+  const sh = makeSheet();
+  if (!sh) return;
+  $('print-root').innerHTML = sh.html;
+  let style = document.getElementById('page-style');
+  if (!style) {
+    style = document.createElement('style');
+    style.id = 'page-style';
+    document.head.append(style);
+  }
+  style.textContent = `@page { size: A4 ${sh.orientation}; margin: 12mm; }`;
+}
+
+function printSheet() {
+  fillPrint();
+  window.print();
+}
+
+// ---------------------------------------------------------------- search (Ctrl+K) and the key list
+
+function showPalette() {
+  closeMenus();
+  openPalette($<HTMLDialogElement>('palette'), commands);
+}
+
+/** The heading a setting sits under, for telling apart settings with the same name. */
+function headingFor(el: Element): string {
+  let node: Element | null = el;
+  while (node && node.parentElement && !node.parentElement.matches('section, details, .stage-panel')) node = node.parentElement;
+  for (let sib = node?.previousElementSibling; sib; sib = sib.previousElementSibling) {
+    if (sib.matches('h2, h3')) return sib.textContent!.trim();
+  }
+  return node?.parentElement?.querySelector('h2')?.textContent?.trim() ?? '';
+}
+
+function commands(): Command[] {
+  const list: Command[] = [];
+  const add = (label: string, run: () => void, hint?: string, words?: string) => list.push({ label, run, hint, words });
+  STAGES.forEach((s, i) => add(`Go to ${STAGE_NAMES[s]}`, () => setStage(s), `key ${i + 1}`, 'stage tab'));
+  PRESET_KEYS.forEach((k, i) =>
+    add(
+      `View: ${PRESET_TITLES[k]}`,
+      () => {
+        if (stage === '3d') setStage(lastFlatStage);
+        applyPreset(k);
+      },
+      `Shift+${i + 1}`,
+      'preset',
+    ),
+  );
+  for (const layer of LAYERS) {
+    const cb = $<HTMLInputElement>(`show-${layer}`);
+    add(
+      `${cb.checked ? 'Hide' : 'Show'}: ${cb.closest('label')!.textContent!.trim()}`,
+      () => {
+        cb.checked = !cb.checked;
+        cb.dispatchEvent(new Event('change'));
+      },
+      'Layers',
+      'layer draw',
+    );
+  }
+  add('Undo', undo, 'Ctrl+Z');
+  add('Redo', redo, 'Ctrl+Shift+Z');
+  add('New: start again with OAK', newProject, 'File', 'clear reset');
+  add('Open project…', () => void openProjectFile(), 'Ctrl+O', 'file load');
+  add('Save project', () => void saveProjectFile(false), 'Ctrl+S', 'file');
+  add('Save project as…', () => void saveProjectFile(true), 'Ctrl+Shift+S', 'file copy');
+  add('Bench sheet, to print', showSheet, 'Ctrl+P', 'print cutting order stroke numbers');
+  add(measuring ? 'Stop measuring' : 'Measure between two points', () => setMeasuring(!measuring), 'M', 'ruler distance');
+  add(`${inspectOpen ? 'Hide' : 'Show'} the inspection panel`, () => setInspect(!inspectOpen), 'I', 'overview balance');
+  add(`Turn snapping ${snapping ? 'off' : 'on'}`, () => setSnapping(!snapping), 'S');
+  add('True size', () => view.frame(project.panelWidth, project.panelHeight, pxPerMm()), 'View', 'full size zoom');
+  add('Fit the panel on the screen', fitPanel, 'View', 'zoom');
+  add('Fit the panel to the lettering', fitPanelToLettering, 'Panel', 'size');
+  add('Re-flow all lines', () => $('reflow').click(), 'Write', 'lines auto');
+  add(
+    'Suggest spacing (even up)',
+    () => {
+      setStage('space');
+      $('eu-suggest').click();
+    },
+    'Space',
+    'kerning',
+  );
+  add(
+    'Preview the passes',
+    () => {
+      setStage('machine');
+      openCam();
+    },
+    'Machine',
+    'G-code toolpath save',
+  );
+  add('Keyboard shortcuts', showKeys, '?', 'help keys');
+  if (installApp) add('Install the app on this computer', () => void installApp?.(), 'App', 'offline window');
+
+  // Every setting, by name: going to it opens its stage (and its "More" fold).
+  const found: { name: string; el: HTMLElement; where: string; heading: string }[] = [];
+  for (const label of $('side').querySelectorAll<HTMLLabelElement>('label')) {
+    if (label.closest('[hidden]:not(.stage-panel)')) continue; // doesn't apply now (a border setting for another style)
+    const input = label.htmlFor ? document.getElementById(label.htmlFor) : label.querySelector('input, textarea');
+    if (!input) continue;
+    const c = label.cloneNode(true) as HTMLElement;
+    c.querySelectorAll('small, span, i, input').forEach((n) => n.remove());
+    const name = (label.dataset.find ?? c.textContent ?? '').replace(/\s+/g, ' ').trim();
+    if (!name) continue;
+    const panel = label.closest<HTMLElement>('.stage-panel');
+    const s = (panel?.dataset.panel ?? 'write') as Stage;
+    found.push({ name, el: input as HTMLElement, where: `${STAGE_NAMES[s]}${label.closest('details.more') ? ' › More' : ''}`, heading: headingFor(label) });
+  }
+  for (const f of found) {
+    const twin = found.filter((g) => g.name === f.name).length > 1;
+    add(twin && f.heading ? `${f.name} (${f.heading})` : f.name, () => goToSetting(f.el), f.where, `setting ${f.heading}`);
+  }
+  return list;
+}
+
+/** Open the stage a setting is in, unfold it if need be, and put the cursor in it. */
+function goToSetting(el: HTMLElement) {
+  const panel = el.closest<HTMLElement>('.stage-panel');
+  if (panel) setStage(panel.dataset.panel as Stage);
+  const more = el.closest('details');
+  if (more) more.open = true;
+  el.scrollIntoView({ block: 'center' });
+  el.focus();
+  const row = el.closest('.slider, label') ?? el;
+  row.classList.remove('flash');
+  void (row as HTMLElement).offsetWidth; // restart the highlight
+  row.classList.add('flash');
+}
+
+function showKeys() {
+  closeMenus();
+  const keyName = /^(Ctrl|Shift|Alt|Tab|Esc|Enter)$/;
+  const keys = (k: string) =>
+    k
+      .split(' ')
+      .map((t) => {
+        const bare = t.replace(/,$/, '');
+        return /^[+/–]$|^or$/.test(t) || (/[a-z]/.test(bare) && !keyName.test(bare)) ? esc(t) : `<kbd>${esc(bare)}</kbd>${t.endsWith(',') ? ',' : ''}`;
+      })
+      .join(' ');
+  $('keys-list').innerHTML = SHORTCUTS.map(
+    (g) => `<section><h3>${esc(g.group)}</h3><dl>${g.items.map(([k, v]) => `<dt>${keys(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl></section>`,
+  ).join('');
+  $<HTMLDialogElement>('keys').showModal();
+}
+
 // ---------------------------------------------------------------- helpers
 
 function pxPerMm() {
@@ -2127,20 +2771,28 @@ function setCalibration(v: number) {
 function loadProject(): Project {
   try {
     const raw = localStorage.getItem(PROJECT_KEY);
-    if (raw) {
-      const saved = JSON.parse(raw);
-      // Older saves had one margin for all four sides.
-      if (typeof saved.margin === 'number' && !saved.margins) {
-        const m = saved.margin;
-        saved.margins = { top: m, right: m, bottom: m, left: m };
-      }
-      delete saved.margin;
-      return { ...structuredClone(defaultProject), ...saved };
-    }
+    if (raw) return normaliseProject(JSON.parse(raw));
   } catch {
     /* fall through to the default */
   }
   return structuredClone(defaultProject);
+}
+
+function readJson<T>(key: string): T | null {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeJson(key: string, value: unknown) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    /* not remembered */
+  }
 }
 
 let saveTimer = 0;
@@ -2194,6 +2846,7 @@ async function start() {
   alphabetName = alphabet.name;
   loadAlphabetSettings();
   syncControls();
+  restoreFile();
   $('credit').innerHTML =
     `Stand-in alphabet: <b>${esc(alphabet.name)}</b> by Natanael Gama, ${alphabet.licence} ` +
     `(<a href="./fonts/OFL.txt">licence</a>).`;
@@ -2204,6 +2857,9 @@ async function start() {
     syncPanelControls();
   }
   $('loading').hidden = true;
+  // Back to the stage last worked in (but not straight into 3D, which takes a moment to build).
+  const last = localStorage.getItem(STAGE_KEY) as Stage | null;
+  setStage(last && STAGES.includes(last) && last !== '3d' ? last : 'write', true);
   fitPanel();
   draw();
 }

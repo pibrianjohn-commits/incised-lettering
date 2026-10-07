@@ -40,7 +40,7 @@ The carver types the inscription, sees it laid out on the stock, checks it, then
 6. It numbers the strokes in cutting order, thin first.
 7. Preview on screen: outlines, valleys, depth shading and stroke numbers, at true scale on the stock.
 8. Choose the tool and which passes to run.
-9. Save the G-code and an optional printed sheet showing the layout and cutting order (thin strokes first).
+9. Save the G-code, and print a bench sheet showing the layout, the strokes numbered in cutting order (thin strokes first) and the settings used.
 
 Nothing goes to the machine until the carver has checked the preview by eye.
 
@@ -135,6 +135,7 @@ What has been built so far. From here on, work follows the **Roadmap** below.
 7. **Done: Roadmap step 4, spacing intelligence** (5 Oct 2026).
 8. **Done: Roadmap step 8, G-code** (5 Oct 2026), brought forward so the method can be tested in wood.
 9. **Done: Roadmap step 7, 3D view** (5 Oct 2026).
+10. **Done: simpler, modern interface** (7 Oct 2026): stage tabs, context tools, "More" folds, status bar with a warnings badge, drag-to-change, Ctrl+K search and a ? key list, installable offline app, project files and the bench sheet. See Decisions, "The interface".
 
 ## Roadmap
 
@@ -143,7 +144,7 @@ Agreed 5 Oct 2026. Build in this order, one step at a time.
 **Change of order** (5 Oct 2026): step 8 (G-code) is built next, before steps 5, 6 and 7, so the method can be tested in wood as soon as the 30° bit arrives. The order from here is 8, then 5, 6, 7.
 
 **Workspace tools** (added and built 5 Oct 2026, ahead of step 1):
-- View presets, each on a number key: **Design (1)** letters filled solid dark, nothing else; **Spacing (2)** letters plus the shaded spaces and their areas; **Setting-out (3)** hairline, datum and valley lines only; **Proof (4)** clean letters with the border, as a client would see them. The individual tick boxes stay for fine control.
+- View presets: **Design** letters filled solid dark, nothing else; **Spacing** letters plus the shaded spaces and their areas; **Setting-out** hairline, datum and valley lines only; **Proof** clean letters with the border, as a client would see them. The individual tick boxes stay for fine control, under Layers. (From 7 Oct 2026 the number keys 1–5 choose the stages of the job, and the presets are on Shift+1 to Shift+4; see Decisions, "The interface".)
 - Keyboard kerning: with the cursor in a gap, Alt+arrow keys close or open it 0.1 mm, Alt+Shift+arrow 1 mm; Tab and Shift+Tab move to the next or previous gap. A toggle shows every kerning value as a small number under its gap.
 - Undo and redo (Ctrl+Z, Ctrl+Shift+Z) for every change.
 - Rulers in mm along the top and left of the workspace; guides dragged out of the rulers; a measure tool that reads the distance in mm between two points.
@@ -180,13 +181,13 @@ Agreed 5 Oct 2026. Build in this order, one step at a time.
    - Letters can have alternates (long-legged R, flourished ampersand, long-tailed Q), chosen per instance.
    - Ligatures and alternates supported properly.
 6. **Working comfort.**
-   - Save and open projects as files.
+   - Save and open projects as files. *Done 7 Oct 2026, with the interface (see Decisions).*
    - Save the carver's own presets.
    - Saved styles, for consistent lettering across a set of pieces.
    - A library of complete finished layouts, saved and reused (not empty templates).
    - Client proof: export the layout as a clean PDF or image for customer approval.
    - Full-size printed template: print the layout at 1:1 across several sheets, for transfer or for checking against the wood.
-7. **3D view.** *Done 5 Oct 2026.* The board at its panel size and real stock thickness; "Marked out by the bit" is stamped from exactly the cuts in the G-code, and "Finished letters" carves every letter to the chisel angle; wood or depth colours; a light swept from the left, over the top of the panel, to the right, and raised or lowered, with shadows traced across the cuts. Opened with the 3D view button or key 5.
+7. **3D view.** *Done 5 Oct 2026.* The board at its panel size and real stock thickness; "Marked out by the bit" is stamped from exactly the cuts in the G-code, and "Finished letters" carves every letter to the chisel angle; wood or depth colours; a light swept from the left, over the top of the panel, to the right, and raised or lowered, with shadows traced across the cuts. Opened with the 3D tab or key 5.
    - Like Kiri:Moto: orbit, pan and zoom.
    - Set the stock size.
    - Show the board as the 30° bit marks it out (hairline, datum, valley slit and fork stop cuts at true depth) and as the finished incised letter.
@@ -203,9 +204,9 @@ Agreed 5 Oct 2026. Build in this order, one step at a time.
 
 ## Technology and setup
 
-The tool is a browser app written in TypeScript, kept in a GitHub repository and published automatically to a web address with GitHub Pages. The carver opens it from a bookmark: no installing, no terminal, and it works the same on Ubuntu and Windows.
+The tool is a browser app written in TypeScript, kept in a GitHub repository and published automatically to a web address with GitHub Pages. The carver opens it from a bookmark, or installs it from the browser (Chrome or Edge) as an app with its own window and icon that works without the internet. No terminal, and it works the same on Ubuntu and Windows.
 
-- **Projects** save as files on the laptop, so designs stay with the carver.
+- **Projects** save as files on the laptop (`.lettering`), so designs stay with the carver.
 - **G-code** downloads as a file, ready for the machine's sender program. An air-cut copy, lifted clear of the board, can be saved alongside it for a dry run.
 - **Letter shapes** are read with an established font and SVG library.
 - **Outline geometry** such as offsets and clean joins uses an established clipping library.
@@ -246,6 +247,16 @@ Answers from the carver, recorded as they are given.
 - **Zero corner** (5 Oct 2026). X0 Y0 is the front left corner of the panel: the corner nearest the carver and to the left, with the board on the bed reading the right way up. That is the bottom left corner on screen. It is the starting setting, and the other corners can still be chosen per job.
 - **Scribed border depth** (5 Oct 2026). Single and double borders have their own depth setting, starting at 0.2 mm (a marking-out line) and allowed up to about 1 mm for a finished decorative line. They are cut in the hairline pass. An incised border's edges stay at the hairline depth.
 - **Spindle run by hand; start pause and air cut** (7 Oct 2026). Safety, before the first cut. The spindle is run by hand from its manual speed governor and is not controlled by GRBL, so the G-code never switches it on or off or sets its speed (no M3, M5 or S words). Every G-code file begins with the bit raised to a safe height (the lift between cuts), then an M0 pause with a plain message telling the carver to start the spindle at the set speed; the machine only continues when Resume is pressed. The file ends with the bit raised, back at X0 Y0, and a message to stop the spindle by hand. An "Air cut" option saves the same file with every Z raised to 5 mm or more above the board, for a safe dry run: the whole job is lifted by the deepest cut plus 5 mm, so even the bottom of the deepest slit passes 5 mm clear of the surface, and every move is otherwise identical.
+- **The interface** (7 Oct 2026). Simplified and modernised, keeping everything that worked:
+  1. **Stage tabs** across the top in job order: **Write, Space, Panel, Machine, 3D**, on keys 1 to 5. Each shows only its own tools in the side panel. Write: the inscription, cap height, letter and line spacing, alignment, lines (word stops under More). Space: kerning, even-up spacing (measuring depth, fit to a width and kerning groups under More). Panel: size, border, margins (reference picture and the screen-scale check under More). Machine: stock thickness, the passes, the preview and the G-code (safe floor, chisel angle, slit margin, zero corner, datum line, and the bit, speeds and depths under More). 3D: the board, the light and the views, with the 3D view filling the workspace; Esc goes back. Each stage opens with its own view (Write and Panel: the letters solid with their lines and margins; Space: Spacing; Machine: Setting-out) and remembers any change made there. The view presets stay as buttons above the panel, now on Shift+1 to Shift+4, and the tick boxes under Layers. Leaving Machine closes the toolpath preview.
+  2. **Context tools.** Clicking a line shows its tools floating beside it: left end, centre and baseline, return to auto, lock, and fit to width. Clicking a gap shows its kerning controls floating beside it. Each box sits above what it belongs to, or below if there is no room, with a small pointer to it.
+  3. **More.** Rarely used settings are folded under "More" at the foot of each stage, keeping their starting values. A fold says how many of its settings differ from the starting values, so nothing hidden is a surprise. Search (Ctrl+K) opens the fold when it goes to a setting inside one.
+  4. **Status bar** along the bottom: the pointer's position in mm (from the panel's top-left corner, like the rulers), the zoom (click for true size, − and + to zoom), snapping on or off (also key S), short messages, and one warnings badge. The badge lists every problem when clicked: letters not in the alphabet, lines running into each other, lettering past the margins or off the panel, a panel too big for the bed or needing the extended bed, the reference picture missing, and every G-code safety check that fails. Clicking a problem goes to the stage where it is put right. A missing stock thickness counts as a warning, not a fault, until the G-code is wanted.
+  5. **Drag to change.** Dragging sideways on a setting's name changes its value: right to increase, left to decrease, one step of the setting every few pixels, ten with Shift, held within its limits. A plain click still goes to the box for typing, and the whole drag is one step to undo.
+  6. **Ctrl+K** finds any command or setting by name and does it or goes to it. **?** lists every key and mouse action.
+  7. **Installable and offline.** In Chrome or Edge, "Install app" (top right, when offered) installs the tool with its own window and icon. Every file is kept on the laptop, so it opens and works with no internet; when online it always loads the newest published version. Double-clicking a project file opens it in the installed app.
+  8. **Project files.** File › Save and Open (Ctrl+S, Ctrl+O) save the whole job as a `.lettering` file, with the reference picture inside it. In Chrome and Edge, Save asks where once and then saves back to the same file; elsewhere each save goes to the Downloads folder. The top bar shows the file's name and whether the job has changed since it was saved. Pair and group kerning, the groups and the even-up settings belong to the alphabet and are shared by every job, so if an opened file's differ from the alphabet's, the carver is asked which to keep: the file's (which then become the alphabet's) or the alphabet's current ones. Opening a file is one step to undo. File › New starts again with OAK, as "Start again" did.
+  9. **Bench sheet** (File › Bench sheet, or Ctrl+P; it opens on screen with a Print button, and printing from the browser's own menu prints it too): the layout drawn to scale, full size when it fits on A4 (otherwise 1 : 1.33, 1 : 2 and so on, with a scale bar to check the print against a rule), with the hairline, datum and valley lines, every stroke numbered in cutting order and X0 Y0 marked; the cutting order letter by letter, each stroke's width, valley depth and slit depth; every setting used; the safety checks; and ruled lines for notes. Print at 100%, not "fit to page", for the scale to be true. Stroke numbers count each letter's strokes, thin first: the forks running out to the corners and serifs are the stop cuts for the terminations, pared to last, so they are cut by the machine but not numbered. The toolpath preview uses the same numbers. Where another stroke joins a stroke part way along (the bar of A, the bowls of B), the valley is cut, and numbered, in two runs either side of the join; see Open questions.
 
 ## Open questions
 
@@ -253,8 +264,7 @@ Answers from the carver, recorded as they are given.
 - What datum set-in, datum minimum and slit margin suit the carver's hand? Starting at 20%, 0.2 mm and 0.3 mm.
 - What is the spindle's actual top speed?
 - How should serifs and bracketing be handled at terminations, beyond the plain fork into the corners?
-- Where thick and thin strokes cross, as in A or W, which valley wins at the crossing?
-- Is the printed sheet showing the layout and cutting order wanted?
+- Where thick and thin strokes cross, as in A or W, which valley wins at the crossing? With that answered, a stroke that another joins part way along (the legs of A, the bowls of B) could be numbered as one stroke on the bench sheet instead of two runs.
 - Which stand-in Roman typeface is closest to the letters the carver intends to draw?
 - Even-up factors for round, straight and diagonal sides: they start at 1.0 (pure equal space). Measured with the 6 mm depth limit, round pairs such as H O come out with less space than H H, so at 1.0 the suggestions open them up; a round factor below 1 (try 0.8) brings them closer. What factors look right by eye?
 - Word stops start as triangles with sides 22% of the cap height, centred 45% up, pointing down. Is that the right size, height and direction?
