@@ -50,5 +50,7 @@ export default defineConfig({
   base: './',
   // three.js (the 3D view) is one large piece, loaded only when the 3D view is opened.
   build: { chunkSizeWarningLimit: 700 },
+  // The 3D view's sums run in a worker (src/relief.worker.ts), built as a module like the page.
+  worker: { format: 'es' },
   plugins: [offlineWorker()],
 });

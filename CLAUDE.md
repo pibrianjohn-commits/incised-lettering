@@ -30,5 +30,6 @@ A standing rule for every task, from 7 Oct 2026.
   - its keyboard shortcut (and its entry in Ctrl+K search and the ? key list);
   - its behaviour in every other tab, view and size.
 - Before finishing, use the feature as a letterer would. Try the awkward cases: blank lines, huge or tiny panels, letters off the board, panels too big for the machine. Fix anything illogical you find.
+- Test every heavy feature with the browser's CPU slowed 4×, as Brian's laptop is an ordinary one, not a fast development machine (added 7 Oct 2026). Heavy work goes off the page into a worker, with a progress bar and Esc to cancel, so the page never freezes. The 3D view's check is `npm run test:browser` (browser-tests/perf3d.mjs).
 - Only ask Brian about craft decisions, never about obvious usability.
 

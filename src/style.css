@@ -857,4 +857,15 @@ button.primary:disabled { background: var(--card); color: var(--muted); border-c
 #v3d-legend { display: flex; align-items: center; gap: 6px; margin: 8px 0 0; font-size: 12px; }
 .v3d-ramp { display: inline-block; width: 110px; height: 10px; border-radius: 3px; background: linear-gradient(to right, #fae68c, #f59433, #cc2e2e, #591a73); }
 #v3d-note { margin: 12px 0 0; }
-#v3d-working { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); color: var(--ink); font-size: 15px; margin: 0; }
+/* Working out the board: a card at the top, over the board shown until the new one is ready. */
+#v3d-working { position: absolute; left: 50%; top: 14px; transform: translateX(-50%); z-index: 2; width: min(360px, calc(100% - 32px)); padding: 10px 14px; color: var(--ink); background: var(--card); border: 1px solid var(--rule); border-radius: 10px; box-shadow: var(--shadow-2); font-size: 13px; }
+#v3d-working p { margin: 0; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+#v3d-working .v3d-pct { font-variant-numeric: tabular-nums; }
+.v3d-bar { height: 6px; margin: 8px 0; border-radius: 3px; background: var(--rule); overflow: hidden; }
+.v3d-bar i { display: block; height: 100%; width: 0; background: var(--accent); }
+#v3d-working .v3d-foot { color: var(--muted); font-size: 12px; }
+#v3d-working .v3d-foot button { margin: 0; flex: none; }
+#v3d-working.idle .v3d-bar { display: none; }
+#v3d-sharper { margin-top: 8px; }
+#v3d-detail { margin: 6px 0 0; }
+#v3d-detail:empty { display: none; }

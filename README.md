@@ -14,7 +14,11 @@ npm install
 npm run dev     # local preview
 npm test        # geometry checks
 npm run build   # static site in dist/
+npm run test:browser   # 3D view speed, CPU slowed 4× (needs Playwright and a build)
 ```
+
+`test:browser` (browser-tests/perf3d.mjs) is not part of `npm install`: it
+uses an installed Playwright, found as `playwright` or at `$PLAYWRIGHT`.
 
 The build also writes `dist/sw.js`, the offline worker (from `pwa/sw.js`), with
 the list of every file the installed app keeps for working without the internet.

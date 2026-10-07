@@ -35,7 +35,8 @@ import { alphabetDifferences, FILE_EXTENSION, FILE_TYPE, fileNameFor, normaliseP
 import { onFileLaunch, startApp } from './pwa';
 import { enableScrub } from './scrub';
 import { SHORTCUTS } from './shortcuts';
-import { finishedRelief, machinedRelief } from './relief';
+import { chooseRes, finishedInput, packCuts, packShapes, type Area } from './relief';
+import type { ReliefJob, ReliefResult } from './relief-job';
 import type { Board3D, Colouring } from './view3d';
 import { buildPasses, checkPasses, CORNER_NAMES, MAX_SCRIBE_DEPTH, type Check, type MachineSettings, type Pass, type PassName } from './toolpath';
 import { LetterStore } from './letters';
@@ -86,11 +87,18 @@ const v3d = {
   open: false,
   board: null as Board3D | null,
   state: 'marked' as 'marked' | 'finished',
-  colour: 'wood' as Colouring,
+  colour: 'plain' as Colouring,
   across: -45,
   height: 25,
   sweep: 0,
   rebuild: 0,
+  /** The worker doing the sums (relief.worker.ts), made when first needed and again after a cancel. */
+  worker: null as Worker | null,
+  /** The piece of work under way, if any: the whole board, or a sharper area of it. */
+  job: null as { id: number; area: Area | null; project: Project; state: 'marked' | 'finished' } | null,
+  lastId: 0,
+  /** What the board on show was worked out for, and its cell size. */
+  shown: null as { project: Project; state: 'marked' | 'finished'; res: number; maxDepth: number } | null,
 };
 /** The alphabet's own settings are saved under its name. */
 let alphabetName = '';
@@ -136,7 +144,8 @@ const FILE_KEY = 'incised.file';
 const PROJECT_FILE: FileKind = { description: 'Lettering project', type: FILE_TYPE, extension: FILE_EXTENSION };
 let file: { name: string; handle: FileHandle | null; saved: Project | null } | null = null;
 /** The G-code safety checks for the warnings badge, worked out a moment after things stop changing. */
-let machineChecks: { project: Project; problems: Problem[] } | null = null;
+/** The G-code checks for a project, and its passes (the 3D view uses them too). */
+let machineChecks: { project: Project; problems: Problem[]; passes: Pass[] } | null = null;
 let checkTimer = 0;
 
 const $ = <T extends Element = HTMLElement>(id: string) => document.getElementById(id) as unknown as T;
@@ -849,7 +858,11 @@ function onKey(e: KeyboardEvent) {
   // In the 3D view the mouse turns the board; Esc goes back.
   if (stage === '3d') {
     if (e.key === 'Escape') {
-      setStage(lastFlatStage);
+      // Esc stops the board being worked out; with nothing under way, it goes back.
+      if (!cancel3d()) setStage(lastFlatStage);
+      e.preventDefault();
+    } else if (!e.altKey && e.key.toLowerCase() === 'd') {
+      sharpen3d();
       e.preventDefault();
     }
     return;
@@ -2423,7 +2436,6 @@ function wire3d() {
     v3d.colour = b.dataset.colour as Colouring;
     v3d.board?.setColouring(v3d.colour);
     sync3d();
-    if (v3d.colour === 'depth') build3d(); // to show the depth scale
   });
   $('v3d-views').addEventListener('click', (e) => {
     const b = (e.target as HTMLElement).closest<HTMLElement>('[data-view]');
@@ -2441,6 +2453,12 @@ function wire3d() {
     v3d.board?.setLight(v3d.across, v3d.height);
   });
   $('v3d-sweep').addEventListener('click', () => (v3d.sweep ? stopSweep() : startSweep()));
+  $('v3d-sharper').addEventListener('click', sharpen3d);
+  $('v3d-working').addEventListener('click', (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLElement>('[data-v3d]');
+    if (b?.dataset.v3d === 'cancel') cancel3d();
+    if (b?.dataset.v3d === 'again') startJob(null);
+  });
   new ResizeObserver(() => v3d.board?.resize()).observe($('v3d'));
 }
 
@@ -2450,18 +2468,27 @@ async function open3d() {
   v3d.open = true;
   $('v3d').hidden = false;
   sync3d();
-  if (!v3d.board) {
-    // three.js is only fetched the first time the 3D view is opened.
-    const { Board3D } = await import('./view3d');
-    v3d.board = new Board3D($('v3d-canvas'));
-  }
-  v3d.board.setLight(v3d.across, v3d.height);
-  v3d.board.setColouring(v3d.colour);
+  // Start the sums at once, while three.js is fetched (the first time only).
   build3d();
+  if (!v3d.board) {
+    const { Board3D } = await import('./view3d');
+    if (v3d.board) return;
+    v3d.board = new Board3D($('v3d-canvas'));
+    v3d.board.setLight(v3d.across, v3d.height);
+    v3d.board.setColouring(v3d.colour);
+    await new Promise((r) => setTimeout(r)); // let the page breathe between the two
+    await v3d.board.prepare();
+    if (pendingBoard) {
+      const r = pendingBoard;
+      pendingBoard = null;
+      showBoard(r);
+    }
+  }
 }
 
 function close3d() {
   stopSweep();
+  cancel3d(true);
   v3d.open = false;
   $('v3d').hidden = true;
 }
@@ -2471,32 +2498,160 @@ function schedule3d() {
   v3d.rebuild = window.setTimeout(build3d, 400);
 }
 
-/** Work out the board's surface for what's chosen, and show it. */
+/** A board worked out before three.js had arrived, to show once it has. */
+let pendingBoard: { result: ReliefResult; job: NonNullable<typeof v3d.job> } | null = null;
+
+/** The worker, made when first needed. */
+function reliefWorker(): Worker {
+  if (v3d.worker) return v3d.worker;
+  const w = new Worker(new URL('./relief.worker.ts', import.meta.url), { type: 'module' });
+  w.onmessage = (e: MessageEvent<{ id?: number; progress?: number; error?: string; result?: ReliefResult }>) => {
+    const msg = e.data;
+    const job = v3d.job;
+    const id = msg.result?.id ?? msg.id;
+    if (!job || id !== job.id) return; // an answer to work since replaced
+    if (msg.progress !== undefined) return showWorking(msg.progress);
+    v3d.job = null;
+    if (msg.error) {
+      showWorking(null);
+      return say(`The board could not be worked out: ${msg.error}`);
+    }
+    showBoard({ result: msg.result!, job });
+  };
+  w.onerror = () => {
+    w.terminate();
+    if (v3d.worker !== w) return;
+    v3d.job = null;
+    v3d.worker = null;
+    showWorking(null);
+    say('The board could not be worked out. Change a setting to try again.');
+  };
+  v3d.worker = w;
+  return w;
+}
+
+/**
+ * Work out the board (area null) or a sharper area of it, away from the page.
+ * Anything already under way is stopped first: only the newest is wanted.
+ */
+function startJob(area: Area | null) {
+  if (!store) return;
+  cancel3d(true);
+  const p = project;
+  // The layout as drawn, if it is complete and current; it is worked out afresh otherwise.
+  const l = layout && layout.project === p && !layout.datumPending ? layout : layoutPanel(store, p);
+  const job: ReliefJob = { id: ++v3d.lastId, state: v3d.state, width: p.panelWidth, height: p.panelHeight, machine: p.machine, area };
+  if (v3d.state === 'marked') {
+    // The passes the G-code checks worked out, if they are for this very job; else the worker works them out.
+    if (machineChecks?.project === p) job.cuts = packCuts(machineChecks.passes);
+    else job.layout = { ...l, gaps: [] };
+  } else {
+    const f = finishedInput(l);
+    Object.assign(job, { shapes: packShapes(f.shapes), border: f.border, datum: f.datum, widest: f.widest });
+  }
+  v3d.job = { id: job.id, area, project: p, state: v3d.state };
+  reliefWorker().postMessage(job, [job.cuts?.buffer, job.shapes?.buffer].filter((b): b is ArrayBuffer => !!b));
+  showWorking(0);
+}
+
+/** Stop the work under way; the board shown stays as it was. */
+function cancel3d(quiet = false): boolean {
+  if (!v3d.job) return false;
+  v3d.worker?.terminate();
+  v3d.worker = null;
+  const wasDetail = !!v3d.job.area;
+  v3d.job = null;
+  showWorking(null);
+  if (!quiet) {
+    if (v3d.shown) say(wasDetail ? 'Cancelled: the board is shown as it was.' : 'Cancelled: the board shown is from before the last change.');
+    else showWorking('cancelled');
+  }
+  return true;
+}
+
+/** The progress card: how far through (0 to 1), cancelled (with a button to start again), or hidden (null). */
+function showWorking(done: number | 'cancelled' | null) {
+  const card = $('v3d-working');
+  card.hidden = done === null;
+  if (done === null) return;
+  const cancelled = done === 'cancelled';
+  card.classList.toggle('idle', cancelled);
+  card.querySelector('.v3d-what')!.textContent = cancelled
+    ? 'Cancelled.'
+    : v3d.job?.area
+      ? 'Working out the detail…'
+      : 'Working out the board…';
+  card.querySelector('.v3d-pct')!.textContent = cancelled ? '' : `${Math.round(done * 100)}%`;
+  card.querySelector<HTMLElement>('.v3d-bar i')!.style.width = cancelled ? '0' : `${(done * 100).toFixed(1)}%`;
+  card.querySelector('.v3d-foot span')!.textContent = cancelled
+    ? 'Nothing to show yet.'
+    : v3d.shown
+      ? 'The board shown stays until the new one is ready.'
+      : 'This takes a moment the first time.';
+  card.querySelector<HTMLElement>('[data-v3d="cancel"]')!.hidden = cancelled;
+  card.querySelector<HTMLElement>('[data-v3d="again"]')!.hidden = !cancelled;
+}
+
+/** Put a finished piece of work on show. */
+function showBoard({ result, job }: { result: ReliefResult; job: NonNullable<typeof v3d.job> }) {
+  if (!v3d.board) {
+    pendingBoard = { result, job };
+    return; // three.js is still on its way
+  }
+  showWorking(null);
+  const p = job.project;
+  const m = p.machine;
+  if (job.area) {
+    v3d.board.setDetail(result, job.area);
+    $('v3d-detail').textContent = `Sharper: detail every ${result.res.toFixed(2)} mm over ${(job.area.x1 - job.area.x0).toFixed(0)} × ${(job.area.y1 - job.area.y0).toFixed(0)} mm. Any change to the board drops it; press Sharper again.`;
+    return;
+  }
+  const thickness = m.stockThickness > 0 ? m.stockThickness : 20;
+  // For the browser tests: the number of the board on show, once it has been drawn.
+  v3d.board.setBoard(result, p.panelWidth, p.panelHeight, thickness, () => (document.body.dataset.board3d = String(job.id)));
+  v3d.board.setColouring(v3d.colour);
+  v3d.board.setLight(v3d.across, v3d.height);
+  v3d.shown = { project: p, state: job.state, res: result.res, maxDepth: result.maxDepth };
+  $('v3d-detail').textContent = '';
+  const passes = (['hairline', 'datum', 'slit'] as const).filter((k) => m.passes[k]);
+  const names = { hairline: 'hairline', datum: 'datum line', slit: 'valley slit and forks' };
+  $('v3d-note').textContent =
+    (job.state === 'marked'
+      ? `As the ${m.toolAngle}° bit leaves it: exactly the cuts in the G-code (${passes.map((k) => names[k]).join(', ') || 'no passes chosen'}).`
+      : `Finished: every letter carved to ${m.chiselAngle}°, as the chisel leaves it.`) +
+    ` Board ${p.panelWidth} × ${p.panelHeight} mm, ${thickness} mm thick${m.stockThickness > 0 ? '' : ' (stock thickness not entered yet: shown as 20 mm)'}. Deepest ${result.maxDepth.toFixed(2)} mm. Surface detail every ${result.res.toFixed(2)} mm.`;
+  syncLegend();
+}
+
+/** Work out the board's surface for what's chosen, and show it once ready. */
 function build3d() {
-  if (!v3d.open || !v3d.board || !store) return;
-  $('v3d-working').hidden = false;
-  // Let the "working" note show before the sums start.
-  setTimeout(() => {
-    if (!v3d.open || !v3d.board || !store) return;
-    const p = project;
-    const m = p.machine;
-    const l = layoutPanel(store, p);
-    const relief = v3d.state === 'marked' ? machinedRelief(buildPasses(l, m), p.panelWidth, p.panelHeight, m) : finishedRelief(l, m);
-    const thickness = m.stockThickness > 0 ? m.stockThickness : 20;
-    v3d.board.setBoard(relief, p.panelWidth, p.panelHeight, thickness);
-    v3d.board.setColouring(v3d.colour);
-    v3d.board.setLight(v3d.across, v3d.height);
-    $('v3d-working').hidden = true;
-    const passes = (['hairline', 'datum', 'slit'] as const).filter((k) => m.passes[k]);
-    const names = { hairline: 'hairline', datum: 'datum line', slit: 'valley slit and forks' };
-    $('v3d-note').textContent =
-      (v3d.state === 'marked'
-        ? `As the ${m.toolAngle}° bit leaves it: exactly the cuts in the G-code (${passes.map((k) => names[k]).join(', ') || 'no passes chosen'}).`
-        : `Finished: every letter carved to ${m.chiselAngle}°, as the chisel leaves it.`) +
-      ` Board ${p.panelWidth} × ${p.panelHeight} mm, ${thickness} mm thick${m.stockThickness > 0 ? '' : ' (stock thickness not entered yet: shown as 20 mm)'}. Deepest ${relief.maxDepth.toFixed(2)} mm. Surface detail every ${relief.res.toFixed(2)} mm.`;
-    $('v3d-legend').innerHTML =
-      v3d.colour === 'depth' ? `<span class="v3d-ramp"></span><small>0 → ${relief.maxDepth.toFixed(1)} mm deep</small>` : '';
-  }, 30);
+  if (!v3d.open || !store) return;
+  // Already on show (perhaps being made sharper), or under way: nothing to do.
+  if (v3d.shown?.project === project && v3d.shown.state === v3d.state && (!v3d.job || v3d.job.area)) return;
+  if (v3d.job && !v3d.job.area && v3d.job.project === project && v3d.job.state === v3d.state) return;
+  startJob(null);
+}
+
+/** Work out the part of the board in view at full detail, for a close look. */
+function sharpen3d() {
+  const area = v3d.board?.areaInView();
+  if (!v3d.board?.ready || !v3d.shown) return say('Wait for the board to be worked out first.');
+  if (!area) return say('Turn the view towards the board first.');
+  if (v3d.shown.project !== project || v3d.shown.state !== v3d.state) return say('Wait for the board to be worked out first.');
+  const res = chooseRes(area.x1 - area.x0, area.y1 - area.y0);
+  if (res > v3d.shown.res * 0.8) {
+    return say(
+      res >= v3d.shown.res
+        ? 'Move in closer first: the whole board is in view, and it is already shown at the most detail it can be.'
+        : 'Move in closer first: there is little more detail to show for this much of the board.',
+    );
+  }
+  startJob(area);
+}
+
+function syncLegend() {
+  $('v3d-legend').innerHTML =
+    v3d.colour === 'depth' && v3d.shown ? `<span class="v3d-ramp"></span><small>0 → ${v3d.shown.maxDepth.toFixed(1)} mm deep</small>` : '';
 }
 
 function sync3d() {
@@ -2510,7 +2665,7 @@ function sync3d() {
   $<HTMLInputElement>('v3d-height').value = String(v3d.height);
   $('v3d-sweep').textContent = v3d.sweep ? 'Stop ■' : 'Sweep ▶';
   $('v3d-sweep').classList.toggle('on', !!v3d.sweep);
-  if (v3d.colour === 'wood') $('v3d-legend').innerHTML = '';
+  syncLegend();
 }
 
 /** Sweep the light slowly from left to right and back. */
@@ -2677,7 +2832,8 @@ function setStage(s: Stage, force = false) {
     if (v3d.open) close3d();
     showStageView(s);
   }
-  draw();
+  // The flat drawing is hidden under the 3D view: no need to draw it again just to show the board.
+  if (s !== '3d') draw();
   showCursor();
 }
 
@@ -2774,7 +2930,7 @@ function scheduleChecks() {
       const l = layoutPanel(store, p);
       const passes = buildPasses(l, p.machine);
       const checks = checkPasses(l, passes, p.machine, bedFit(p.panelWidth, p.panelHeight));
-      machineChecks = { project: p, problems: machineProblems(checks, passDepths(passes), p.machine, p.capHeight) };
+      machineChecks = { project: p, problems: machineProblems(checks, passDepths(passes), p.machine, p.capHeight), passes };
       refreshProblems();
     };
     if ('requestIdleCallback' in window) requestIdleCallback(run, { timeout: 2000 });
@@ -3163,6 +3319,15 @@ function commands(): Command[] {
   add('Zoom to panel', fitPanel, 'Z', 'whole panel screen view');
   add('Fit the panel to the lettering', fitPanelToLettering, 'Shift+F', 'size board');
   add('Fit the lettering to the panel', () => fitLettering('both'), 'F', 'scale size fill');
+  add(
+    '3D: sharper detail for the part in view',
+    () => {
+      if (stage !== '3d') setStage('3d');
+      else sharpen3d();
+    },
+    'D, in 3D',
+    'detail close look zoom fine',
+  );
   add("Spread the selected line's letters", () => spreadLine(1, 0.1), ']', 'letter spacing wider line open');
   add("Close up the selected line's letters", () => spreadLine(-1, 0.1), '[', 'letter spacing tighter line narrower');
   add(
@@ -3364,6 +3529,12 @@ async function start() {
   setStage(last && STAGES.includes(last) && last !== '3d' ? last : 'write', true);
   fitPanel();
   draw();
+  // Fetch the 3D view's parts while nothing else is happening, so it opens quickly when wanted.
+  const idle = (f: () => void) => ('requestIdleCallback' in window ? requestIdleCallback(f, { timeout: 8000 }) : setTimeout(f, 3000));
+  setTimeout(() => idle(() => {
+    reliefWorker();
+    void import('./view3d').catch(() => {});
+  }), 3000);
 }
 
 start().catch((err) => {
