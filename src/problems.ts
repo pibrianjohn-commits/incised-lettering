@@ -2,7 +2,7 @@
 // the status bar. Each says which stage of the job it is put right in, and
 // offers one-click fixes (carried out by main.ts, each one step to undo).
 
-import { contentBox, isBlank, type Layout } from './layout';
+import { contentBox, isBlank, lineNumber, type Layout } from './layout';
 import { BED, BED_EXTENDED, bedFit, bedScale, letteringBox, shrinkToFit } from './panel';
 import type { Check, MachineSettings, Pass } from './toolpath';
 
@@ -35,7 +35,10 @@ const SIDES: Side[] = ['left', 'right', 'top', 'bottom'];
 const mm = (v: number) => (v < 0.05 ? 'less than 0.1 mm' : `${v.toFixed(1)} mm`);
 
 /** "1", "1 and 3", "1, 3 and 4". */
-const listed = (n: number[]) => (n.length < 2 ? `${n[0]}` : `${n.slice(0, -1).join(', ')} and ${n[n.length - 1]}`);
+const listed = (n: (number | string)[]) => (n.length < 2 ? `${n[0]}` : `${n.slice(0, -1).join(', ')} and ${n[n.length - 1]}`);
+
+/** The fix that takes every one of a character out of the text. */
+const removeChar = (ch: string): Fix => ({ id: `remove-char:${ch}`, label: `Take “${ch}” out of the text` });
 
 /** "the right by 2.0 mm", or "the left, right and top, by up to 4.5 mm", with `noun` after the sides. */
 function sidesPhrase(amounts: Partial<Record<Side, number>>, upTo: boolean, noun: [string, string]): string {
@@ -70,6 +73,19 @@ export function layoutProblems(layout: Layout, hasLetter: (ch: string) => boolea
       kind: 'letters',
       text: `Not in the alphabet, so left as a space: ${missing.join(' ')}`,
       fixes,
+    });
+  }
+
+  // Letters that could not be worked out at all: left as spaces, the rest carries on.
+  if (layout.failed?.length) {
+    const named = layout.failed.map((f) => `“${f.char}” on line ${lineNumber(layout, f.line)}`);
+    const chars = [...new Set(layout.failed.map((f) => f.char))];
+    out.push({
+      level: 'bad',
+      stage: 'write',
+      kind: 'letters',
+      text: `${listed(named)} could not be worked out, so ${named.length > 1 ? 'they are' : 'it is'} left as a space.`,
+      fixes: chars.map((ch) => removeChar(ch)),
     });
   }
 
@@ -241,10 +257,12 @@ export interface Depths {
   letters: number;
   border: number;
   fixed: number;
+  /** Letters (item ids) whose cuts could not be worked out and are left out. */
+  failed: string[];
 }
 
 export function passDepths(passes: Pass[]): Depths {
-  const d: Depths = { letters: 0, border: 0, fixed: 0 };
+  const d: Depths = { letters: 0, border: 0, fixed: 0, failed: [...new Set(passes.flatMap((q) => q.failed ?? []))] };
   for (const pass of passes)
     for (const cut of pass.cuts) {
       const deepest = Math.max(0, ...cut.points.map((q) => -q.z));
@@ -284,6 +302,19 @@ export function checkFixes(c: Check, depths: Depths, m: MachineSettings, capHeig
       return [{ id: 'go-bit-angle', label: 'Change the bit' }];
     case 'passes':
       return [{ id: 'all-passes', label: 'Run every pass' }];
+    case 'failed': {
+      // Take the character out, turn word stops off, or change the border: whichever is to blame.
+      const fixes = new Map<string, Fix>();
+      for (const id of depths.failed) {
+        if (id === 'border') fixes.set('go-border', { id: 'go-border', label: 'Change the border' });
+        else if (id.startsWith('word stop')) fixes.set('word-stops-off', { id: 'word-stops-off', label: 'Turn word stops off' });
+        else {
+          const ch = /^(.*) \(line \d+\)#\d+$/.exec(id)?.[1];
+          if (ch) fixes.set(`remove-char:${ch}`, removeChar(ch));
+        }
+      }
+      return [...fixes.values()];
+    }
     default:
       return [];
   }

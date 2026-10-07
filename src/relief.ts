@@ -141,6 +141,8 @@ export function machinedReliefPacked(cuts: Float32Array, toolAngle: number, area
   let n = 0;
   while (k < cuts.length) {
     const count = cuts[k++];
+    // A cut of one point is a single plunge (a dot).
+    if (count === 1) stampSegment(r, cuts[k], cuts[k + 1], cuts[k + 2], cuts[k], cuts[k + 1], cuts[k + 2], tanHalf);
     for (let i = 1; i < count; i++) {
       const a = k + 3 * (i - 1);
       stampSegment(r, cuts[a], cuts[a + 1], cuts[a + 2], cuts[a + 3], cuts[a + 4], cuts[a + 5], tanHalf);

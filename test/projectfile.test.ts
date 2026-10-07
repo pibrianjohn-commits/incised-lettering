@@ -101,7 +101,7 @@ describe('the warnings badge', () => {
       { id: 'margins', ok: false, blocking: false, text: 'Past the margins.' },
       { id: 'angle', ok: true, blocking: true, text: 'Fine.' },
     ];
-    const list = machineProblems(checks, { letters: 3, border: 0, fixed: 0.3 }, defaultProject.machine, 25);
+    const list = machineProblems(checks, { letters: 3, border: 0, fixed: 0.3, failed: [] }, defaultProject.machine, 25);
     expect(list.map((q) => q.level)).toEqual(['warn', 'bad']);
     expect(list.every((q) => q.stage === 'machine')).toBe(true);
   });
@@ -121,6 +121,7 @@ describe('the warnings badge', () => {
       overflow: { wide: false, tall: false },
       datumPending: false,
       stops: [],
+      failed: [],
     };
     const texts = layoutProblems(layout, (ch) => ch !== 'é').map((q) => q.text);
     expect(texts).toContain('Not in the alphabet, so left as a space: é');

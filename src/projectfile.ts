@@ -7,6 +7,9 @@
 
 import { defaultProject, KERN_CAP, type Project } from './layout';
 
+/** A problem put in plain words for the carver, fit to show as it is. */
+export class PlainError extends Error {}
+
 export const FILE_FORMAT = 'incised-lettering-project';
 /** Bumped only if the file layout changes in a way older apps could not read. */
 export const FILE_VERSION = 1;
@@ -101,13 +104,13 @@ export function readProjectFile(text: string): OpenedProject {
   try {
     data = JSON.parse(text);
   } catch {
-    throw new Error('That file is not a lettering project: it could not be read.');
+    throw new PlainError('That file is not a lettering project: it could not be read.');
   }
   if (!isObject(data) || data.format !== FILE_FORMAT || !isObject(data.project)) {
-    throw new Error('That file is not a lettering project.');
+    throw new PlainError('That file is not a lettering project.');
   }
   if (typeof data.version === 'number' && data.version > FILE_VERSION) {
-    throw new Error('That project was saved by a newer version of the app. Reload the app to bring it up to date, then open the file again.');
+    throw new PlainError('That project was saved by a newer version of the app. Reload the app to bring it up to date, then open the file again.');
   }
   const picture = typeof data.picture === 'string' && data.picture.startsWith('data:image/') ? data.picture : null;
   const saved = typeof data.saved === 'string' && !Number.isNaN(Date.parse(data.saved)) ? new Date(data.saved) : null;

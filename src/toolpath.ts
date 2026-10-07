@@ -124,11 +124,13 @@ export interface Pass {
   cutLength: number;
   travel: number;
   minutes: number;
+  /** Letters (item ids) whose cuts in this pass could not be worked out, and are left out. */
+  failed: string[];
 }
 
 export interface Check {
   /** Which check this is, so the warnings list can tell them apart. */
-  id: 'stock' | 'floor' | 'bit-depth' | 'angle' | 'bed' | 'margins' | 'panel' | 'passes' | 'pending';
+  id: 'stock' | 'floor' | 'bit-depth' | 'angle' | 'bed' | 'margins' | 'panel' | 'passes' | 'pending' | 'failed';
   ok: boolean;
   text: string;
   /** A failed check that must stop the G-code being saved. */
@@ -241,14 +243,44 @@ function stats(cuts: Cut[], m: MachineSettings) {
   return { cutLength, travel, minutes, deepest };
 }
 
+/**
+ * A letter, word stop or the border, in words: "“A” on line 2", "the word
+ * stop on line 1", "the border".
+ */
+export function itemWords(id: string): string {
+  if (id === 'border') return 'the border';
+  const [, what, line] = /^(.*) \(line (\d+)\)#\d+$/.exec(id) ?? [];
+  if (!what) return id.split('#')[0];
+  return what === 'word stop' ? `the word stop on line ${line}` : `“${what}” on line ${line}`;
+}
+
+/**
+ * Each letter's cuts are worked out on their own: should one fail, it is left
+ * out and named in the pass's `failed`, and the rest of the job carries on.
+ */
+function each(list: Item[], failed: string[], work: (it: Item) => void, undo: () => void) {
+  for (const it of list) {
+    try {
+      work(it);
+    } catch (err) {
+      undo();
+      if (!failed.includes(it.id)) failed.push(it.id);
+      console.error(`Could not work out the cuts for ${itemWords(it.id)}:`, err);
+    }
+  }
+}
+
 export function buildPasses(layout: Layout, m: MachineSettings): Pass[] {
   const list = items(layout);
   const passes: Pass[] = [];
 
   if (m.passes.hairline) {
     const cuts: Cut[] = [];
+    const failed: string[] = [];
     let at: Pt = { x: 0, y: 0 };
-    for (const it of list) {
+    let mark = 0;
+    each(list, failed, (it) => {
+      mark = cuts.length;
       for (const c of nearestOrder(it.outline, at)) {
         cuts.push({ item: it.id, feed: m.feedHairline, points: close(c).map((p) => ({ ...p, z: -m.hairlineDepth })) });
         at = c[0];
@@ -259,25 +291,30 @@ export function buildPasses(layout: Layout, m: MachineSettings): Pass[] {
         cuts.push({ item: it.id, feed: m.feedHairline, points: close(c).map((p) => ({ ...p, z: scribeZ })) });
         at = c[0];
       }
-    }
-    passes.push({ name: 'hairline', title: 'Hairline', cuts, ...stats(cuts, m) });
+    }, () => cuts.splice(mark));
+    passes.push({ name: 'hairline', title: 'Hairline', cuts, ...stats(cuts, m), failed });
   }
 
   if (m.passes.datum) {
     const cuts: Cut[] = [];
+    const failed: string[] = [];
     let at: Pt = { x: 0, y: 0 };
-    for (const it of list) {
+    let mark = 0;
+    each(list, failed, (it) => {
+      mark = cuts.length;
       for (const c of nearestOrder(it.datum, at)) {
         cuts.push({ item: it.id, feed: m.feedDatum, points: close(c).map((p) => ({ ...p, z: -m.datumDepth })) });
         at = c[0];
       }
-    }
-    passes.push({ name: 'datum', title: 'Datum line', cuts, ...stats(cuts, m) });
+    }, () => cuts.splice(mark));
+    passes.push({ name: 'datum', title: 'Datum line', cuts, ...stats(cuts, m), failed });
   }
 
   if (m.passes.slit) {
     const cuts: Cut[] = [];
+    const failed: string[] = [];
     let at: Pt = { x: 0, y: 0 };
+    let mark = 0;
     /** Cut one run of valley line down to its depth, in steps. False if it is too shallow to cut at all. */
     const slit = (v: ValleyLine, item: string, stroke: number, width: number, fork: boolean) => {
       // Start from whichever end is nearer.
@@ -313,15 +350,16 @@ export function buildPasses(layout: Layout, m: MachineSettings): Pass[] {
         each(left.splice(best, 1)[0]);
       }
     };
-    for (const it of list) {
+    each(list, failed, (it) => {
+      mark = cuts.length;
       // The letter's strokes, thin first, each straight through its junctions where
       // it is the thicker, then its forks (BRIEF.md, Decisions: strokes at a junction).
       strokesOf(it.valleys).forEach((s, si) => {
         nearestFirst(s.parts, (v) => slit(v, it.id, si + 1, s.width, false));
         nearestFirst(s.extras, (v) => slit(v, it.id, si + 1, s.width, true));
       });
-    }
-    passes.push({ name: 'slit', title: 'Valley slit', cuts, ...stats(cuts, m) });
+    }, () => cuts.splice(mark));
+    passes.push({ name: 'slit', title: 'Valley slit', cuts, ...stats(cuts, m), failed });
   }
   return passes;
 }
@@ -385,6 +423,13 @@ export function checkPasses(layout: Layout, passes: Pass[], m: MachineSettings, 
     blocking: true,
     text: offPanel ? 'Some cuts fall outside the panel.' : 'Every cut is on the panel.',
   });
+  // Any letter whose cuts could not be worked out is left out: the G-code would be short of it.
+  const failed = [...new Set(passes.flatMap((q) => q.failed ?? []))];
+  if (failed.length) {
+    const names = failed.map(itemWords);
+    const listed = names.length < 2 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+    checks.push({ id: 'failed', ok: false, blocking: true, text: `The cuts for ${listed} could not be worked out, so ${failed.length > 1 ? 'they are' : 'it is'} left out of the marking-out.` });
+  }
   if (!passes.length) checks.push({ id: 'passes', ok: false, blocking: true, text: 'Choose at least one pass to run.' });
   if (layout.datumPending) checks.push({ id: 'pending', ok: false, blocking: true, text: 'Still working out the datum lines; a moment…' });
   return checks;
