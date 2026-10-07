@@ -35,6 +35,7 @@ import type { Board3D, Colouring } from './view3d';
 import { buildPasses, checkPasses, CORNER_NAMES, MAX_SCRIBE_DEPTH, type Check, type MachineSettings, type Pass, type PassName } from './toolpath';
 import { LetterStore } from './letters';
 import { negativeSpace } from './negativeSpace';
+import { oakUrl } from './oak';
 import { History } from './history';
 import { remapForEdit } from './remap';
 import { RULER, rulerSvg } from './rulers';
@@ -400,7 +401,11 @@ function draw() {
   const by = corner.startsWith('top') ? 0 : p.panelHeight - bh;
   out.push(`<g class="bed"><rect x="${bx}" y="${by}" width="${bw}" height="${bh}"/></g>`);
 
+  // The board: a plain light surface while designing, realistic oak in Proof (BRIEF.md, Decisions: "The look").
   out.push(`<rect class="panel" x="0" y="0" width="${p.panelWidth}" height="${p.panelHeight}"/>`);
+  const oak = preset === 'proof' ? oakUrl(p.panelWidth, p.panelHeight, draw) : null;
+  if (oak) out.push(`<image class="oak" href="${oak}" x="0" y="0" width="${p.panelWidth}" height="${p.panelHeight}" preserveAspectRatio="none"/>`);
+  out.push(`<rect class="panel-edge" x="0" y="0" width="${p.panelWidth}" height="${p.panelHeight}"/>`);
   const ri = p.refImage;
   if (ri && refUrl && ri.visible) {
     out.push(
@@ -2849,7 +2854,8 @@ async function start() {
   restoreFile();
   $('credit').innerHTML =
     `Stand-in alphabet: <b>${esc(alphabet.name)}</b> by Natanael Gama, ${alphabet.licence} ` +
-    `(<a href="./fonts/OFL.txt">licence</a>).`;
+    `(<a href="./fonts/OFL.txt">licence</a>). Interface type: <b>Inter</b> by Rasmus Andersson, SIL Open Font License 1.1 ` +
+    `(<a href="./fonts/Inter-OFL.txt">licence</a>).`;
   layout = layoutPanel(store, project);
   if (project.refImage) {
     const blob = await loadImage();

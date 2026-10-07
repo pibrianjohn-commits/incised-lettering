@@ -266,6 +266,13 @@ Answers from the carver, recorded as they are given.
   - With the stand-in alphabet this gives: A 3, B 3, D 2, E 4, H 3, I 1, K 3, M 4, N 3, O 1, Q 2, R 3, S 1, T 2, W 4, X 2, Y 3. U is one stroke: its thick left side curves round into the thin right side with no junction between them (see "U" below).
 - **Equal-width strokes** (7 Oct 2026). They stay as built: cut left to right, then top to bottom. So where two strokes of equal width meet, the right-hand or lower one, cut second, is continuous.
 - **U** (7 Oct 2026). U stays as one stroke, like O and S: a continuous valley with no junction.
+- **The look** (7 Oct 2026). The whole app restyled to look modern, with nothing else changed:
+  - It follows the computer's own light or dark setting: a clean light theme, or a neutral graphite dark theme.
+  - Modern type: Inter for the interface, kept with the app so it works offline. The inscription itself is still shown in the alphabet (Cinzel).
+  - One accent colour, deep blue, for selection and active controls: the chosen stage, view and setting, the selected line or gap, and the main button of each step. There is no beige or brown anywhere in the interface; the app's icon is graphite too.
+  - The board is a plain light surface while designing, in both themes. Realistic oak appears only in the Proof view and the 3D view, both showing the same figure: plain-sawn oak with cathedral arches, uneven growth rings and open pores along the grain.
+  - The marking lines keep the same clear, distinct colours in both themes, because they always sit on the light board: hairline near-black, datum line violet and dashed, valley line red, space between letters green, margins, baselines and the machine bed grey and dashed, kerning values orange, ruler guides cyan, and measuring and snapping pink. The datum line moved from blue to violet so that blue means selection only. The bench sheet uses the same colours. In the dark theme, letters and hairlines running off the board have a faint light edge, so they still show against the graphite.
+  - The problems badge is green when all is well, amber for warnings and red for faults.
 
 ## Open questions
 
