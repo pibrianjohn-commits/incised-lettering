@@ -16,5 +16,8 @@ npm test        # geometry checks
 npm run build   # static site in dist/
 ```
 
+The build also writes `dist/sw.js`, the offline worker (from `pwa/sw.js`), with
+the list of every file the installed app keeps for working without the internet.
+
 Stand-in alphabet: Cinzel by Natanael Gama, SIL Open Font License 1.1
 (`public/fonts/OFL.txt`).

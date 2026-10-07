@@ -99,6 +99,27 @@ export interface Cut {
   stroke?: number;
   /** Average stroke width, mm (slit only). */
   width?: number;
+  /**
+   * A short branch from a stroke out to a corner of its termination (or a
+   * serif): the stop cut for the termination, pared to by hand, rather than a
+   * stroke of its own. Not given a stroke number on the bench sheet or in the
+   * preview (slit only).
+   */
+  fork?: boolean;
+}
+
+/**
+ * Whether a run of valley line is a fork: it runs out towards a corner or a
+ * serif tip (one end has narrowed to under a third of its widest) and it is
+ * short for its width (under three times as long as it is wide). A stroke's
+ * own valley stays wide to both ends, where it meets its forks or other
+ * strokes; one that tapers away to a point is long for its width.
+ */
+export function isFork(v: ValleyLine): boolean {
+  if (v.length < 2) return true;
+  const maxR = Math.max(...v.map((p) => p.r));
+  const endR = Math.min(v[0].r, v[v.length - 1].r);
+  return endR < 0.3 * maxR && pathLength(v) < 3 * (2 * maxR);
 }
 
 export interface Pass {
@@ -114,6 +135,8 @@ export interface Pass {
 }
 
 export interface Check {
+  /** Which check this is, so the warnings list can tell them apart. */
+  id: 'stock' | 'floor' | 'bit-depth' | 'angle' | 'bed' | 'margins' | 'panel' | 'passes' | 'pending';
   ok: boolean;
   text: string;
   /** A failed check that must stop the G-code being saved. */
@@ -270,10 +293,10 @@ export function buildPasses(layout: Layout, m: MachineSettings): Pass[] {
         .map((v) => {
           const len = pathLength(v);
           const w = len > 0 ? v.reduce((s, p, i) => (i ? s + (p.r + v[i - 1].r) * dist(v[i - 1], p) : 0), 0) / len : 2 * v[0].r;
-          return { v, width: w };
+          return { v, width: w, fork: isFork(v) };
         })
         .sort((a, b) => a.width - b.width);
-      strokes.forEach(({ v, width }, si) => {
+      strokes.forEach(({ v, width, fork }, si) => {
         // Start from whichever end is nearer.
         let pts = dist(at, v[0]) <= dist(at, v[v.length - 1]) ? v : v.slice().reverse();
         const target = pts.map((p) => slitDepth(p.r, m));
@@ -291,7 +314,7 @@ export function buildPasses(layout: Layout, m: MachineSettings): Pass[] {
           }
           pts.forEach((p, i) => path.push({ x: p.x, y: p.y, z: -Math.min(depths[i], cap) }));
         }
-        cuts.push({ item: it.id, feed: m.feedSlit, points: path, stroke: si + 1, width });
+        cuts.push({ item: it.id, feed: m.feedSlit, points: path, stroke: si + 1, width, fork });
         at = path[path.length - 1];
       });
     }
@@ -306,10 +329,11 @@ export function checkPasses(layout: Layout, passes: Pass[], m: MachineSettings, 
   const checks: Check[] = [];
   const deepest = Math.max(0, ...passes.map((q) => q.deepest));
   if (!(m.stockThickness > 0)) {
-    checks.push({ ok: false, blocking: true, text: 'Enter the stock thickness.' });
+    checks.push({ id: 'stock', ok: false, blocking: true, text: 'Enter the stock thickness.' });
   } else {
     const limit = m.stockThickness - m.safeFloor;
     checks.push({
+      id: 'floor',
       ok: deepest <= limit + 1e-9,
       blocking: true,
       text:
@@ -319,6 +343,7 @@ export function checkPasses(layout: Layout, passes: Pass[], m: MachineSettings, 
     });
   }
   checks.push({
+    id: 'bit-depth',
     ok: deepest <= m.toolCutDepth + 1e-9,
     blocking: true,
     text:
@@ -328,6 +353,7 @@ export function checkPasses(layout: Layout, passes: Pass[], m: MachineSettings, 
   });
   // The bit is steeper than the chisel, so the slit stays inside the waste.
   checks.push({
+    id: 'angle',
     ok: m.toolAngle < m.chiselAngle,
     blocking: true,
     text:
@@ -336,6 +362,7 @@ export function checkPasses(layout: Layout, passes: Pass[], m: MachineSettings, 
         : `The ${m.toolAngle}° bit is not steeper than the ${m.chiselAngle}° letter walls: the slit could cut into a finished wall.`,
   });
   checks.push({
+    id: 'bed',
     ok: bed !== 'too-big',
     blocking: true,
     text:
@@ -346,15 +373,16 @@ export function checkPasses(layout: Layout, passes: Pass[], m: MachineSettings, 
           : 'The panel is too big for the machine, even with the extended bed.',
   });
   if (layout.overflow.wide || layout.overflow.tall) {
-    checks.push({ ok: false, blocking: false, text: 'Some lettering runs past the margins. Check that is what you want.' });
+    checks.push({ id: 'margins', ok: false, blocking: false, text: 'Some lettering runs past the margins. Check that is what you want.' });
   }
   const offPanel = passes.some((q) => q.cuts.some((c) => c.points.some((pt) => pt.x < 0 || pt.y < 0 || pt.x > p.panelWidth || pt.y > p.panelHeight)));
   checks.push({
+    id: 'panel',
     ok: !offPanel,
     blocking: true,
     text: offPanel ? 'Some cuts fall outside the panel.' : 'Every cut is on the panel.',
   });
-  if (!passes.length) checks.push({ ok: false, blocking: true, text: 'Choose at least one pass to run.' });
-  if (layout.datumPending) checks.push({ ok: false, blocking: true, text: 'Still working out the datum lines; a moment…' });
+  if (!passes.length) checks.push({ id: 'passes', ok: false, blocking: true, text: 'Choose at least one pass to run.' });
+  if (layout.datumPending) checks.push({ id: 'pending', ok: false, blocking: true, text: 'Still working out the datum lines; a moment…' });
   return checks;
 }

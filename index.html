@@ -4,128 +4,108 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Incised Lettering</title>
+    <meta name="description" content="Lays out incised lettering and writes the G-code that marks it out for hand carving." />
+    <meta name="theme-color" content="#8a5a1c" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
     <link rel="stylesheet" href="./src/style.css" />
   </head>
-  <body>
-    <aside id="side">
-      <header>
-        <h1>Incised Lettering</h1>
-        <p class="sub">Layout workspace. No G-code yet.</p>
-      </header>
-
-      <section>
-        <h2><label for="text">Inscription</label></h2>
-        <textarea id="text" rows="4" spellcheck="false" placeholder="Type the inscription. Press Enter for a new line."></textarea>
-      </section>
-
-      <section>
-        <h2>Lines</h2>
-        <p class="hint">
-          Click a line, or its number in the margin, to select it. Drag it to move it; it snaps to the panel centre,
-          margins, guides and the other lines (hold <kbd>Alt</kbd> to move freely). The arrow keys nudge it 0.1 mm, or 1 mm
-          with <kbd>Shift</kbd>.
-        </p>
-        <div id="line-editor"></div>
-        <button id="reflow" class="quiet" title="Put every line back in its automatic place (locked lines stay)">Re-flow all</button>
-      </section>
-
-      <section>
-        <h2>Lettering</h2>
-        <div id="sliders"></div>
-        <div class="row">
-          <span class="name">Alignment</span>
-          <span class="seg" id="align">
-            <button data-align="left">Left</button>
-            <button data-align="centre">Centre</button>
-            <button data-align="right">Right</button>
-          </span>
-        </div>
-      </section>
-
-      <section>
-        <h2>Datum line</h2>
-        <p class="hint">Follows the thick and thin. It stops where the stroke is too narrow to fit a line each side.</p>
-        <div id="datum-sliders"></div>
-      </section>
-
-      <section>
-        <h2>Panel</h2>
-        <div class="boxes">
-          <label>Width <span><input type="number" id="panelWidth" min="10" max="1000" step="0.5" /> mm</span></label>
-          <label>Height <span><input type="number" id="panelHeight" min="10" max="1000" step="0.5" /> mm</span></label>
-        </div>
-        <button id="fit-panel" title="Size the panel to hold the lettering plus the margins and border">Fit panel to the lettering</button>
-        <p id="bed-status"></p>
-        <div id="warnings"></div>
-      </section>
-
-      <section>
-        <h2>Border</h2>
-        <span class="seg" id="border-style">
-          <button data-border="none">None</button>
-          <button data-border="single">Single</button>
-          <button data-border="double">Double</button>
-          <button data-border="incised">Incised</button>
+  <body data-stage="write">
+    <header id="topbar">
+      <div class="brand">
+        <img src="/icons/icon.svg" alt="" width="22" height="22" />
+        <b>Incised Lettering</b>
+        <span id="file-name" title="The project file this job was last saved to or opened from"></span>
+      </div>
+      <nav id="stages" aria-label="Stages of the job, in order">
+        <button data-stage="write" title="The inscription, letter size and lines (key 1)"><kbd>1</kbd> Write</button>
+        <button data-stage="space" title="Spacing between letters (key 2)"><kbd>2</kbd> Space</button>
+        <button data-stage="panel" title="Panel size, border and margins (key 3)"><kbd>3</kbd> Panel</button>
+        <button data-stage="machine" title="Marking out and G-code (key 4)"><kbd>4</kbd> Machine</button>
+        <button data-stage="3d" title="The board in 3D (key 5)"><kbd>5</kbd> 3D</button>
+      </nav>
+      <div class="top-tools">
+        <span class="seg">
+          <button id="undo" title="Undo (Ctrl+Z)">↶<span class="lbl"> Undo</span></button>
+          <button id="redo" title="Redo (Ctrl+Shift+Z)">↷<span class="lbl"> Redo</span></button>
         </span>
-        <div class="boxes" id="border-boxes">
-          <label data-for="single double incised">In from the panel edge <span><input type="number" id="b-inset" min="0" step="0.5" /> mm</span></label>
-          <label data-for="double">Gap between the lines <span><input type="number" id="b-gap" min="0.2" step="0.1" /> mm</span></label>
-          <label data-for="single double">Depth of the scribed line <span><input type="number" id="b-scribe" min="0.05" max="1" step="0.05" /> mm</span></label>
-          <label data-for="incised">Width of the cut <span><input type="number" id="b-width" min="0.5" step="0.1" /> mm</span></label>
-        </div>
-        <p class="hint" id="border-hint"></p>
-      </section>
-
-      <section>
-        <h2>Margins</h2>
-        <p class="hint" id="margin-hint"></p>
-        <div class="margins-grid">
-          <label class="m-top">Top <input type="number" id="m-top" min="0" step="0.5" /></label>
-          <label class="m-left">Left <input type="number" id="m-left" min="0" step="0.5" /></label>
-          <span class="m-mid">mm</span>
-          <label class="m-right">Right <input type="number" id="m-right" min="0" step="0.5" /></label>
-          <label class="m-bottom">Bottom <input type="number" id="m-bottom" min="0" step="0.5" /></label>
-        </div>
-        <div class="boxes"><label>All four sides <span><input type="number" id="m-all" min="0" step="0.5" placeholder="—" /> mm</span></label></div>
-      </section>
-
-      <section>
-        <h2>Reference picture</h2>
-        <p class="hint">
-          Put a photo of an inscription, a rubbing, a drawing or an alphabet sheet behind the layout to trace or match.
-          Scale it to true size, line it up, then lock it.
-        </p>
-        <input type="file" id="ref-file" accept="image/*" hidden />
-        <button id="ref-load">Load a picture…</button>
-        <div id="ref-controls" hidden>
-          <div class="toggles">
-            <label><input type="checkbox" id="ref-visible" /> Show the picture</label>
-            <label><input type="checkbox" id="ref-locked" /> Lock it in place</label>
+        <div class="menu">
+          <button id="file-btn" aria-haspopup="true" aria-expanded="false">File ▾</button>
+          <div id="file-menu" class="menu-list" hidden>
+            <button data-file="new">New: start again with OAK</button>
+            <button data-file="open">Open project… <kbd>Ctrl O</kbd></button>
+            <button data-file="save">Save project <kbd>Ctrl S</kbd></button>
+            <button data-file="saveas">Save project as… <kbd>Ctrl Shift S</kbd></button>
+            <hr />
+            <button data-file="sheet">Bench sheet… <kbd>Ctrl P</kbd></button>
           </div>
-          <div class="slider">
-            <div class="row"><label class="name" for="ref-opacity">Strength</label><span id="ref-opacity-read"></span></div>
-            <input type="range" id="ref-opacity" min="0.05" max="1" step="0.05" />
-          </div>
-          <div class="boxes"><label>Width on the panel <span><input type="number" id="ref-width" min="1" step="0.1" /> mm</span></label></div>
-          <div class="line-buttons">
-            <button id="ref-scale" title="Click two points on the picture a known distance apart, then type that distance">Scale from two points</button>
-            <button id="ref-remove" class="quiet">Remove</button>
-          </div>
-          <p class="hint small" id="ref-hint">While it's unlocked, drag the picture to move it.</p>
         </div>
-      </section>
+        <button id="install" hidden title="Install as an app on this computer: it opens in its own window and works without the internet">Install app</button>
+        <button id="search-btn" title="Find any command or setting (Ctrl+K)">Search<span class="lbl"> <kbd>Ctrl K</kbd></span></button>
+        <button id="keys-btn" title="Keyboard shortcuts (?)">?</button>
+      </div>
+    </header>
 
-      <section>
-        <h2>Spacing</h2>
-        <p class="hint">Click the gap between two letters to move them closer or further apart, either everywhere that pair of letters appears or in that one gap only.</p>
-        <p class="hint"><b>Keys:</b> point at or click a gap, then <kbd>Alt</kbd>+<kbd>←</kbd> / <kbd>→</kbd> closes or opens it 0.1 mm (add <kbd>Shift</kbd> for 1 mm). <kbd>Tab</kbd> and <kbd>Shift</kbd>+<kbd>Tab</kbd> step to the next or previous gap.</p>
-        <div id="kerning-summary"></div>
-        <p class="hint">With <b>Space between letters</b> shown (below), the space only counts so far into open letters such as E, C, F, L and the mouth of G. The green dashed lines show where it is cut off.</p>
-        <div id="space-sliders"></div>
-        <p class="hint small">Group and pair kerning are kept with the alphabet, so they apply every time those letters are typed, in every job. One-gap kerning stays with this job.</p>
+    <aside id="side">
+      <!-- 1 Write -->
+      <div class="stage-panel" data-panel="write">
+        <section>
+          <h2><label for="text">Inscription</label></h2>
+          <textarea id="text" rows="4" spellcheck="false" placeholder="Type the inscription. Press Enter for a new line."></textarea>
+        </section>
 
-        <details id="even-up" open>
-          <summary>Even up spacing</summary>
+        <section>
+          <h2>Lettering</h2>
+          <div id="sliders"></div>
+          <div class="row">
+            <span class="name">Alignment</span>
+            <span class="seg" id="align">
+              <button data-align="left">Left</button>
+              <button data-align="centre">Centre</button>
+              <button data-align="right">Right</button>
+            </span>
+          </div>
+        </section>
+
+        <section>
+          <h2>Lines</h2>
+          <p class="hint">
+            Click a line, or its number in the margin, and its tools appear beside it. Drag it to move it; it snaps to the
+            panel centre, margins, guides and the other lines (hold <kbd>Alt</kbd> to move freely). The arrow keys nudge it
+            0.1 mm, or 1 mm with <kbd>Shift</kbd>.
+          </p>
+          <button id="reflow" class="quiet" title="Put every line back in its automatic place (locked lines stay)">Re-flow all</button>
+        </section>
+
+        <details class="more" data-more="write" data-keys="wordStops">
+          <summary>More <span class="changed"></span></summary>
+          <h3>Word stops</h3>
+          <p class="hint">Small incised triangles between words, cut like the letters.</p>
+          <div class="toggles"><label><input type="checkbox" id="ws-on" /> Put a stop between words</label></div>
+          <div id="ws-sliders"></div>
+          <div class="row">
+            <span class="name">Point</span>
+            <span class="seg" id="ws-point">
+              <button data-point="up">Up ▲</button>
+              <button data-point="down">Down ▼</button>
+            </span>
+          </div>
+        </details>
+      </div>
+
+      <!-- 2 Space -->
+      <div class="stage-panel" data-panel="space" hidden>
+        <section>
+          <h2>Kerning</h2>
+          <p class="hint">Click the gap between two letters and its spacing controls appear beside it: move them closer or further apart, everywhere that pair appears or in that one gap only.</p>
+          <p class="hint"><b>Keys:</b> point at or click a gap, then <kbd>Alt</kbd>+<kbd>←</kbd> / <kbd>→</kbd> closes or opens it 0.1 mm (add <kbd>Shift</kbd> for 1 mm). <kbd>Tab</kbd> and <kbd>Shift</kbd>+<kbd>Tab</kbd> step to the next or previous gap.</p>
+          <div id="kerning-summary"></div>
+          <p class="hint small">Group and pair kerning are kept with the alphabet, so they apply every time those letters are typed, in every job. One-gap kerning stays with this job.</p>
+        </section>
+
+        <section id="even-up">
+          <h2>Even up spacing</h2>
           <p class="hint">
             Set one reference pair to look right by eye. Every other pair is then matched to its space, allowing for round,
             straight and diagonal sides. Suggestions are only shown: nothing changes until you accept them.
@@ -140,10 +120,15 @@
           <div id="eu-factors"></div>
           <button id="eu-suggest">Suggest spacing</button>
           <div id="eu-results"></div>
-        </details>
+        </section>
 
-        <details id="fitting">
-          <summary>Fit to a width</summary>
+        <details class="more" data-more="space" data-keys="spaceDepth groups lineExtras">
+          <summary>More <span class="changed"></span></summary>
+          <h3>Measuring the space</h3>
+          <p class="hint">With <b>Space between letters</b> shown, the space only counts so far into open letters such as E, C, F, L and the mouth of G. The green dashed lines show where it is cut off.</p>
+          <div id="space-sliders"></div>
+
+          <h3 id="fitting">Fit to a width</h3>
           <p class="hint">Stretch or squeeze a line to an exact length, end to end, by opening or closing its letter spacing or its word spacing.</p>
           <div class="row">
             <span class="name">Fill by</span>
@@ -163,24 +148,8 @@
             <button id="fit-clear" class="quiet">Clear fitting</button>
           </div>
           <p class="hint small" id="fit-msg"></p>
-        </details>
 
-        <details id="stops">
-          <summary>Word stops</summary>
-          <p class="hint">Small incised triangles between words, cut like the letters.</p>
-          <div class="toggles"><label><input type="checkbox" id="ws-on" /> Put a stop between words</label></div>
-          <div id="ws-sliders"></div>
-          <div class="row">
-            <span class="name">Point</span>
-            <span class="seg" id="ws-point">
-              <button data-point="up">Up ▲</button>
-              <button data-point="down">Down ▼</button>
-            </span>
-          </div>
-        </details>
-
-        <details id="groups-box">
-          <summary>Kerning groups</summary>
+          <h3>Kerning groups</h3>
           <p class="hint">
             Letters whose side has the same shape are kerned together. Each line is one group: change its letters, or
             clear them to remove it. A pair kerned on its own overrides its groups.
@@ -188,85 +157,186 @@
           <div id="groups-edit"></div>
           <button id="groups-reset" class="quiet">Back to the starting groups</button>
         </details>
-      </section>
+      </div>
 
-      <section id="machine">
-        <h2>Machine and G-code</h2>
-        <p class="hint">Marks out the letters with the 30° V-bit: hairline, datum line and valley slit (see the brief). Zero is the top surface of the stock.</p>
-        <div class="boxes">
-          <label>Stock thickness <span><input type="number" data-mc="stockThickness" min="0" step="0.5" placeholder="enter" /> mm</span></label>
-          <label>Safe floor <span><input type="number" data-mc="safeFloor" min="0.5" step="0.5" /> mm</span></label>
-          <label>Chisel angle <span><input type="number" data-mc="chiselAngle" min="30" max="120" step="1" /> °</span></label>
-          <label>Slit margin <span><input type="number" data-mc="slitMargin" min="0" step="0.05" /> mm</span></label>
-        </div>
-        <p class="hint small">No cut goes deeper than the stock thickness less the safe floor. The slit stops the slit margin short of the true valley depth.</p>
-        <div class="row"><span class="name">X0 Y0 at the panel's</span></div>
-        <div class="seg corners" id="mc-corner">
-          <button data-corner="top-left" title="Top left on screen">↖ Back left</button>
-          <button data-corner="top-right" title="Top right on screen">Back right ↗</button>
-          <button data-corner="bottom-left" title="Bottom left on screen">↙ Front left</button>
-          <button data-corner="bottom-right" title="Bottom right on screen">Front right ↘</button>
-        </div>
-        <p class="hint small">Front is the edge nearest you, with the board on the bed reading the right way up: the bottom edge on screen.</p>
-        <div class="toggles mc-passes">
-          <label><input type="checkbox" data-mc-pass="hairline" /> <i class="key outline"></i> Pass 1: hairline</label>
-          <label><input type="checkbox" data-mc-pass="datum" /> <i class="key datum"></i> Pass 2: datum line</label>
-          <label><input type="checkbox" data-mc-pass="slit" /> <i class="key valley"></i> Pass 3: valley slit and forks</label>
-        </div>
-        <details>
-          <summary>Bit, speeds and depths</summary>
+      <!-- 3 Panel -->
+      <div class="stage-panel" data-panel="panel" hidden>
+        <section>
+          <h2>Panel</h2>
           <div class="boxes">
-            <label>Bit angle <span><input type="number" data-mc="toolAngle" min="10" max="90" step="1" /> °</span></label>
-            <label>Bit cutting depth <span><input type="number" data-mc="toolCutDepth" min="1" step="0.1" /> mm</span></label>
-            <label>Spindle speed, set by hand <span><input type="number" data-mc="spindle" min="1000" step="500" /> rpm</span></label>
-            <label>Hairline depth <span><input type="number" data-mc="hairlineDepth" min="0.05" step="0.05" /> mm</span></label>
-            <label>Hairline feed <span><input type="number" data-mc="feedHairline" min="50" step="50" /> mm/min</span></label>
-            <label>Datum depth <span><input type="number" data-mc="datumDepth" min="0.05" step="0.05" /> mm</span></label>
-            <label>Datum feed <span><input type="number" data-mc="feedDatum" min="50" step="50" /> mm/min</span></label>
-            <label>Slit depth per pass <span><input type="number" data-mc="slitStep" min="0.2" step="0.25" /> mm</span></label>
-            <label>Slit feed <span><input type="number" data-mc="feedSlit" min="50" step="50" /> mm/min</span></label>
-            <label>Plunge feed <span><input type="number" data-mc="feedPlunge" min="20" step="10" /> mm/min</span></label>
-            <label>Lift between cuts <span><input type="number" data-mc="safeZ" min="1" step="0.5" /> mm</span></label>
+            <label>Width <span><input type="number" id="panelWidth" min="10" max="1000" step="0.5" /> mm</span></label>
+            <label>Height <span><input type="number" id="panelHeight" min="10" max="1000" step="0.5" /> mm</span></label>
           </div>
-          <p class="hint small">Starting values for oak from the brief, to be fine-tuned by test cuts. The spindle is run by hand on its own speed governor; the file never switches it on or off.</p>
+          <button id="fit-panel" title="Size the panel to hold the lettering plus the margins and border">Fit panel to the lettering</button>
+          <p id="bed-status"></p>
+        </section>
+
+        <section>
+          <h2>Border</h2>
+          <span class="seg" id="border-style">
+            <button data-border="none">None</button>
+            <button data-border="single">Single</button>
+            <button data-border="double">Double</button>
+            <button data-border="incised">Incised</button>
+          </span>
+          <div class="boxes" id="border-boxes">
+            <label data-for="single double incised">In from the panel edge <span><input type="number" id="b-inset" min="0" step="0.5" /> mm</span></label>
+            <label data-for="double">Gap between the lines <span><input type="number" id="b-gap" min="0.2" step="0.1" /> mm</span></label>
+            <label data-for="single double">Depth of the scribed line <span><input type="number" id="b-scribe" min="0.05" max="1" step="0.05" /> mm</span></label>
+            <label data-for="incised">Width of the cut <span><input type="number" id="b-width" min="0.5" step="0.1" /> mm</span></label>
+          </div>
+          <p class="hint" id="border-hint"></p>
+        </section>
+
+        <section>
+          <h2>Margins</h2>
+          <p class="hint" id="margin-hint"></p>
+          <div class="margins-grid">
+            <label class="m-top" data-find="Top margin">Top <input type="number" id="m-top" min="0" step="0.5" /></label>
+            <label class="m-left" data-find="Left margin">Left <input type="number" id="m-left" min="0" step="0.5" /></label>
+            <span class="m-mid">mm</span>
+            <label class="m-right" data-find="Right margin">Right <input type="number" id="m-right" min="0" step="0.5" /></label>
+            <label class="m-bottom" data-find="Bottom margin">Bottom <input type="number" id="m-bottom" min="0" step="0.5" /></label>
+          </div>
+          <div class="boxes"><label data-find="All four margins">All four sides <span><input type="number" id="m-all" min="0" step="0.5" placeholder="—" /> mm</span></label></div>
+        </section>
+
+        <details class="more" data-more="panel" data-keys="refImage">
+          <summary>More <span class="changed"></span></summary>
+          <h3>Reference picture</h3>
+          <p class="hint">
+            Put a photo of an inscription, a rubbing, a drawing or an alphabet sheet behind the layout to trace or match.
+            Scale it to true size, line it up, then lock it.
+          </p>
+          <input type="file" id="ref-file" accept="image/*" hidden />
+          <button id="ref-load">Load a picture…</button>
+          <div id="ref-controls" hidden>
+            <div class="toggles">
+              <label><input type="checkbox" id="ref-visible" /> Show the picture</label>
+              <label><input type="checkbox" id="ref-locked" /> Lock it in place</label>
+            </div>
+            <div class="slider">
+              <div class="row"><label class="name" for="ref-opacity">Strength</label><span id="ref-opacity-read"></span></div>
+              <input type="range" id="ref-opacity" min="0.05" max="1" step="0.05" />
+            </div>
+            <div class="boxes"><label>Width on the panel <span><input type="number" id="ref-width" min="1" step="0.1" /> mm</span></label></div>
+            <div class="line-buttons">
+              <button id="ref-scale" title="Click two points on the picture a known distance apart, then type that distance">Scale from two points</button>
+              <button id="ref-remove" class="quiet">Remove</button>
+            </div>
+            <p class="hint small" id="ref-hint">While it's unlocked, drag the picture to move it.</p>
+          </div>
+
+          <h3>Check the screen scale</h3>
+          <p class="hint">
+            Hold a steel rule against the screen. The bar below should measure exactly <b>100 mm</b>. If it doesn't, nudge it
+            until it does. This makes <b>True size</b> really full size, and the screen remembers it.
+          </p>
+          <div id="ruler"></div>
+          <div class="calib">
+            <button id="cal-minus" title="Shorter">−</button>
+            <input type="range" id="cal" min="0.6" max="1.6" step="0.001" aria-label="Screen scale" />
+            <button id="cal-plus" title="Longer">+</button>
+            <button id="cal-reset">Reset</button>
+          </div>
         </details>
-        <button id="mc-preview" class="primary">Preview the passes…</button>
-        <p class="hint small" id="mc-note">The G-code can only be saved from the preview, once every pass has been looked at and every check is passed.</p>
-        <p class="hint small">Every file starts by raising the bit, then pauses with a message to start the spindle by hand. Nothing moves until you press Resume. An air cut is the same file run clear of the board, the deepest point 5 mm above it, for a dry run.</p>
-      </section>
+      </div>
 
-      <section>
-        <h2>Show</h2>
-        <p class="hint">The view buttons above the panel (keys 1 to 4) set these for you. Tick or untick for finer control.</p>
-        <div class="toggles">
-          <label><input type="checkbox" id="show-outline" checked /> <i class="key outline"></i> Outline (hairline)</label>
-          <label><input type="checkbox" id="show-datum" checked /> <i class="key datum"></i> Datum line</label>
-          <label><input type="checkbox" id="show-valley" checked /> <i class="key valley"></i> Valley lines and forks</label>
-          <label><input type="checkbox" id="show-fill" /> <i class="key fill"></i> Letters filled solid</label>
-          <label><input type="checkbox" id="show-space" /> <i class="key space"></i> Space between letters (mm²)</label>
-          <label><input type="checkbox" id="show-guides" checked /> <i class="key guides"></i> Margin, baselines and cap lines</label>
-          <label><input type="checkbox" id="show-kerns" /> <i class="key kerns">0.0</i> Kerning value under every gap</label>
-          <label><input type="checkbox" id="show-bed" /> <i class="key bed"></i> Machine bed outline</label>
-        </div>
-      </section>
+      <!-- 4 Machine -->
+      <div class="stage-panel" data-panel="machine" hidden>
+        <section id="machine">
+          <h2>Marking out and G-code</h2>
+          <p class="hint">Marks out the letters with the 30° V-bit: hairline, datum line and valley slit (see the brief). Zero is the top surface of the stock.</p>
+          <div class="boxes">
+            <label>Stock thickness <span><input type="number" data-mc="stockThickness" min="0" step="0.5" placeholder="enter" /> mm</span></label>
+          </div>
+          <div class="toggles mc-passes">
+            <label><input type="checkbox" data-mc-pass="hairline" /> <i class="key outline"></i> Pass 1: hairline</label>
+            <label><input type="checkbox" data-mc-pass="datum" /> <i class="key datum"></i> Pass 2: datum line</label>
+            <label><input type="checkbox" data-mc-pass="slit" /> <i class="key valley"></i> Pass 3: valley slit and forks</label>
+          </div>
+          <button id="mc-preview" class="primary">Preview the passes…</button>
+          <p class="hint small" id="mc-note">The G-code can only be saved from the preview, once every pass has been looked at and every check is passed.</p>
+          <p class="hint small">Every file starts by raising the bit, then pauses with a message to start the spindle by hand. Nothing moves until you press Resume. An air cut is the same file run clear of the board, the deepest point 5 mm above it, for a dry run.</p>
 
-      <details>
-        <summary>Check the screen scale</summary>
-        <p class="hint">
-          Hold a steel rule against the screen. The bar below should measure exactly <b>100 mm</b>. If it doesn't, nudge it
-          until it does. This makes <b>True size</b> really full size, and the screen remembers it.
-        </p>
-        <div id="ruler"></div>
-        <div class="calib">
-          <button id="cal-minus" title="Shorter">−</button>
-          <input type="range" id="cal" min="0.6" max="1.6" step="0.001" />
-          <button id="cal-plus" title="Longer">+</button>
-          <button id="cal-reset">Reset</button>
-        </div>
-      </details>
+          <details class="more" data-more="machine" data-keys="machine.safeFloor machine.chiselAngle machine.slitMargin machine.zeroCorner datumPercent datumMinimum machine.toolAngle machine.toolCutDepth machine.spindle machine.hairlineDepth machine.datumDepth machine.slitStep machine.feedHairline machine.feedDatum machine.feedSlit machine.feedPlunge machine.safeZ">
+            <summary>More <span class="changed"></span></summary>
+            <h3>Depths and safety</h3>
+            <div class="boxes">
+              <label>Safe floor <span><input type="number" data-mc="safeFloor" min="0.5" step="0.5" /> mm</span></label>
+              <label>Chisel angle <span><input type="number" data-mc="chiselAngle" min="30" max="120" step="1" /> °</span></label>
+              <label>Slit margin <span><input type="number" data-mc="slitMargin" min="0" step="0.05" /> mm</span></label>
+            </div>
+            <p class="hint small">No cut goes deeper than the stock thickness less the safe floor. The slit stops the slit margin short of the true valley depth.</p>
 
-      <footer>
-        <button id="reset-all" class="quiet">Start again with OAK</button>
+            <h3>X0 Y0 at the panel's</h3>
+            <div class="seg corners" id="mc-corner">
+              <button data-corner="top-left" title="Top left on screen">↖ Back left</button>
+              <button data-corner="top-right" title="Top right on screen">Back right ↗</button>
+              <button data-corner="bottom-left" title="Bottom left on screen">↙ Front left</button>
+              <button data-corner="bottom-right" title="Bottom right on screen">Front right ↘</button>
+            </div>
+            <p class="hint small">Front is the edge nearest you, with the board on the bed reading the right way up: the bottom edge on screen.</p>
+
+            <h3>Datum line</h3>
+            <p class="hint">Follows the thick and thin. It stops where the stroke is too narrow to fit a line each side.</p>
+            <div id="datum-sliders"></div>
+
+            <h3>Bit, speeds and depths</h3>
+            <div class="boxes">
+              <label>Bit angle <span><input type="number" data-mc="toolAngle" min="10" max="90" step="1" /> °</span></label>
+              <label>Bit cutting depth <span><input type="number" data-mc="toolCutDepth" min="1" step="0.1" /> mm</span></label>
+              <label>Spindle speed, set by hand <span><input type="number" data-mc="spindle" min="1000" step="500" /> rpm</span></label>
+              <label>Hairline depth <span><input type="number" data-mc="hairlineDepth" min="0.05" step="0.05" /> mm</span></label>
+              <label>Hairline feed <span><input type="number" data-mc="feedHairline" min="50" step="50" /> mm/min</span></label>
+              <label>Datum depth <span><input type="number" data-mc="datumDepth" min="0.05" step="0.05" /> mm</span></label>
+              <label>Datum feed <span><input type="number" data-mc="feedDatum" min="50" step="50" /> mm/min</span></label>
+              <label>Slit depth per pass <span><input type="number" data-mc="slitStep" min="0.2" step="0.25" /> mm</span></label>
+              <label>Slit feed <span><input type="number" data-mc="feedSlit" min="50" step="50" /> mm/min</span></label>
+              <label>Plunge feed <span><input type="number" data-mc="feedPlunge" min="20" step="10" /> mm/min</span></label>
+              <label>Lift between cuts <span><input type="number" data-mc="safeZ" min="1" step="0.5" /> mm</span></label>
+            </div>
+            <p class="hint small">Starting values for oak from the brief, to be fine-tuned by test cuts. The spindle is run by hand on its own speed governor; the file never switches it on or off.</p>
+          </details>
+        </section>
+      </div>
+
+      <!-- 5 3D -->
+      <div class="stage-panel" data-panel="3d" hidden>
+        <section>
+          <h2>The board</h2>
+          <div class="seg stack" id="v3d-state">
+            <button data-state="marked" title="As the 30° bit leaves it: exactly the passes the G-code makes">Marked out by the bit</button>
+            <button data-state="finished" title="The letters carved to the chisel angle">Finished letters</button>
+          </div>
+          <div class="row v3d-colours">
+            <span class="name">Colour</span>
+            <span class="seg" id="v3d-colour">
+              <button data-colour="wood">Wood</button>
+              <button data-colour="depth">Depth</button>
+            </span>
+          </div>
+          <p id="v3d-legend"></p>
+        </section>
+        <section>
+          <h2>Light</h2>
+          <label class="v3d-slider" data-find="Light from the left or right">From <small>left</small><input type="range" id="v3d-across" min="-90" max="90" step="1" /><small>right</small></label>
+          <label class="v3d-slider" data-find="Height of the light">Height <small>low</small><input type="range" id="v3d-height" min="3" max="85" step="1" /><small>high</small></label>
+          <button id="v3d-sweep">Sweep ▶</button>
+        </section>
+        <section id="v3d-views">
+          <h2>Look</h2>
+          <div class="seg stack">
+            <button data-view="fit">Whole board</button>
+            <button data-view="top">From above</button>
+            <button data-view="front">Along the front</button>
+          </div>
+          <p class="hint small">Left-drag to turn · right-drag to move · scroll to zoom. <kbd>Esc</kbd> goes back.</p>
+        </section>
+        <p id="v3d-note" class="hint small"></p>
+      </div>
+
+      <footer id="side-foot">
         <p id="credit"></p>
       </footer>
     </aside>
@@ -280,7 +350,8 @@
       <svg id="ruler-top" class="ruler" aria-label="Ruler in millimetres; drag down to make a guide"></svg>
       <svg id="ruler-left" class="ruler" aria-label="Ruler in millimetres; drag right to make a guide"></svg>
       <div id="ruler-corner" title="Rulers in mm from the panel's top-left corner">mm</div>
-      <div id="kern-pop" hidden>
+
+      <div id="kern-pop" class="ctx" hidden>
         <div class="pair"></div>
         <div class="seg mode">
           <button data-mode="group" title="Every pair of letters with these two side shapes, in every job">Group</button>
@@ -288,9 +359,9 @@
           <button data-mode="gap" title="Just this one gap, in this job">This gap only</button>
         </div>
         <div class="kern-row">
-          <button data-nudge="-1" title="Closer (← key)">◀ Closer</button>
+          <button data-nudge="-1" title="Closer (Alt+←)">◀ Closer</button>
           <output></output>
-          <button data-nudge="1" title="Further apart (→ key)">Apart ▶</button>
+          <button data-nudge="1" title="Further apart (Alt+→)">Apart ▶</button>
         </div>
         <div class="breakdown"></div>
         <div class="kern-row small">
@@ -298,54 +369,60 @@
           <button data-close>Done</button>
         </div>
       </div>
+
+      <div id="line-pop" class="ctx" hidden>
+        <div class="ctx-head">
+          <b class="line-title"></b>
+          <span class="line-text"></span>
+          <button data-act="close" class="quiet" title="Close (Esc)">✕</button>
+        </div>
+        <p class="line-state"></p>
+        <div class="ctx-boxes">
+          <label>Left end <input type="number" step="0.1" data-pos="left" /></label>
+          <label>Centre <input type="number" step="0.1" data-pos="centre" /></label>
+          <label>Baseline <input type="number" step="0.1" data-pos="baseline" /></label>
+          <span class="unit">mm</span>
+        </div>
+        <div class="ctx-buttons">
+          <button data-act="auto" title="Put the line back where line spacing and alignment place it">Return to auto</button>
+          <button data-act="lock"></button>
+          <button data-act="fit" title="Stretch or squeeze this line to the width set under Space › More › Fit to a width">Fit to width</button>
+        </div>
+      </div>
+
       <div id="viewbar">
         <span class="seg" id="presets">
-          <button data-preset="design" title="Letters filled solid, nothing else (key 1)"><kbd>1</kbd> Design</button>
-          <button data-preset="spacing" title="Letters with the spaces between them shaded and measured (key 2)"><kbd>2</kbd> Spacing</button>
-          <button data-preset="setting" title="Hairline, datum and valley lines only (key 3)"><kbd>3</kbd> Setting-out</button>
-          <button data-preset="proof" title="Clean letters as a client would see them (key 4)"><kbd>4</kbd> Proof</button>
+          <button data-preset="design" title="Letters filled solid, nothing else (Shift+1)">Design</button>
+          <button data-preset="spacing" title="Letters with the spaces between them shaded and measured (Shift+2)">Spacing</button>
+          <button data-preset="setting" title="Hairline, datum and valley lines only (Shift+3)">Setting-out</button>
+          <button data-preset="proof" title="Clean letters as a client would see them (Shift+4)">Proof</button>
         </span>
+        <div class="menu">
+          <button id="layers-btn" aria-haspopup="true" aria-expanded="false" title="Choose exactly what is drawn">Layers ▾</button>
+          <div id="layers" class="menu-list toggles" hidden>
+            <label><input type="checkbox" id="show-outline" checked /> <i class="key outline"></i> Outline (hairline)</label>
+            <label><input type="checkbox" id="show-datum" checked /> <i class="key datum"></i> Datum line</label>
+            <label><input type="checkbox" id="show-valley" checked /> <i class="key valley"></i> Valley lines and forks</label>
+            <label><input type="checkbox" id="show-fill" /> <i class="key fill"></i> Letters filled solid</label>
+            <label><input type="checkbox" id="show-space" /> <i class="key space"></i> Space between letters (mm²)</label>
+            <label><input type="checkbox" id="show-guides" checked /> <i class="key guides"></i> Margin, baselines and cap lines</label>
+            <label><input type="checkbox" id="show-kerns" /> <i class="key kerns">0.0</i> Kerning value under every gap</label>
+            <label><input type="checkbox" id="show-bed" /> <i class="key bed"></i> Machine bed outline</label>
+          </div>
+        </div>
         <span class="tools">
-          <button id="undo" title="Undo (Ctrl+Z)">↶ Undo</button>
-          <button id="redo" title="Redo (Ctrl+Shift+Z)">↷ Redo</button>
           <button id="measure" title="Measure between two points (M)">Measure</button>
           <button id="ins-toggle" title="Show or hide the inspection panel (I)">Inspect</button>
-          <button id="v3d-open" title="The board in 3D, as marked out and as finished (key 5)"><kbd>5</kbd> 3D view</button>
-          <button id="true-size">True size</button>
-          <button id="fit">Fit panel</button>
-          <span id="zoom-read"></span>
+          <button id="true-size" title="Show the panel at full size">True size</button>
+          <button id="fit" title="Fit the whole panel on the screen">Fit panel</button>
         </span>
       </div>
+
       <div id="v3d" hidden>
         <div id="v3d-canvas"></div>
-        <div id="v3d-bar">
-          <div class="v3d-row">
-            <span class="seg" id="v3d-state">
-              <button data-state="marked" title="As the 30° bit leaves it: exactly the passes the G-code makes">Marked out by the bit</button>
-              <button data-state="finished" title="The letters carved to the chisel angle">Finished letters</button>
-            </span>
-            <span class="seg" id="v3d-colour">
-              <button data-colour="wood">Wood</button>
-              <button data-colour="depth">Depth colours</button>
-            </span>
-            <span class="seg">
-              <button data-view="fit">Whole board</button>
-              <button data-view="top">From above</button>
-              <button data-view="front">Along the front</button>
-            </span>
-            <button id="v3d-close" class="quiet" title="Back to the layout (Esc)">Back to the layout</button>
-          </div>
-          <div class="v3d-row">
-            <label class="v3d-slider">Light from <small>left</small><input type="range" id="v3d-across" min="-90" max="90" step="1" /><small>right</small></label>
-            <label class="v3d-slider">Light height <small>low</small><input type="range" id="v3d-height" min="3" max="85" step="1" /><small>high</small></label>
-            <button id="v3d-sweep">Sweep ▶</button>
-            <span id="v3d-legend"></span>
-          </div>
-          <p id="v3d-note" class="hint small"></p>
-        </div>
         <p id="v3d-working" hidden>Working out the board…</p>
-        <p id="v3d-help">Left-drag to turn · right-drag to move · scroll to zoom</p>
       </div>
+
       <div id="cam-bar" hidden>
         <div class="cam-head">
           <b>Check every pass before saving</b>
@@ -360,7 +437,6 @@
           <button id="cam-save" class="primary" disabled>Save G-code</button>
         </div>
       </div>
-      <p id="help">Drag to move · Scroll to zoom · Drag from a ruler to make a guide, drag it back to remove it</p>
       <p id="loading">Loading letters…</p>
     </main>
 
@@ -389,6 +465,54 @@
         <div id="balance"></div>
       </section>
     </aside>
+
+    <footer id="status">
+      <span id="st-cursor" title="Where the pointer is, in mm from the panel's top-left corner, the same as the rulers">—</span>
+      <span class="st-zoom">
+        <button id="zoom-out" title="Zoom out">−</button>
+        <button id="zoom-read" title="Click for true size"></button>
+        <button id="zoom-in" title="Zoom in">+</button>
+      </span>
+      <button id="st-snap" title="Snapping while dragging a line to the centre, margins, guides and other lines (S)"></button>
+      <span id="st-msg" aria-live="polite"></span>
+      <button id="st-warn" aria-haspopup="true" aria-expanded="false"></button>
+    </footer>
+    <div id="warn-pop" hidden>
+      <h3>Problems</h3>
+      <ul></ul>
+      <p class="hint small">Click a problem to go to the stage where it is put right.</p>
+    </div>
+
+    <dialog id="palette" aria-label="Find a command or setting">
+      <input id="palette-input" type="text" placeholder="Find a command or setting…" autocomplete="off" spellcheck="false" />
+      <ul id="palette-list" role="listbox"></ul>
+      <p class="hint small">↑ ↓ to choose · Enter to do it · Esc to close</p>
+    </dialog>
+
+    <dialog id="keys" aria-labelledby="keys-title">
+      <header class="dlg-head"><h2 id="keys-title">Keyboard shortcuts</h2><button class="quiet" data-close>Close</button></header>
+      <div id="keys-list"></div>
+    </dialog>
+
+    <dialog id="sheet-view" aria-label="Bench sheet">
+      <header class="dlg-head">
+        <h2>Bench sheet</h2>
+        <span class="hint small" id="sheet-note"></span>
+        <span class="grow"></span>
+        <button id="sheet-print" class="primary">Print…</button>
+        <button class="quiet" data-close>Close</button>
+      </header>
+      <div id="sheet-paper"></div>
+    </dialog>
+
+    <dialog id="ask" aria-labelledby="ask-title">
+      <h2 id="ask-title"></h2>
+      <p id="ask-text"></p>
+      <div class="ask-buttons"></div>
+    </dialog>
+
+    <div id="print-root" aria-hidden="true"></div>
+    <input type="file" id="open-file" accept=".lettering,.json,application/json" hidden />
 
     <script type="module" src="./src/main.ts"></script>
   </body>
