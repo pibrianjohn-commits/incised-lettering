@@ -18,3 +18,17 @@ Brian is a trained architectural woodcarver. He does not read or write code and 
 - Safety first in G-code: never cut below the stock thickness less a safe floor, never touch a finished wall or termination face, and always show a preview before G-code can be saved.
 - Keep the app a static site that builds and deploys to GitHub Pages automatically on every push to main.
 - Use TypeScript. Keep dependencies few and well established.
+
+## Think like a product designer for professional letterers
+
+A standing rule for every task, from 7 Oct 2026.
+
+- Whenever you build a feature, also build its natural counterparts without being asked:
+  - its inverse (fit panel to lettering, and fit lettering to panel);
+  - the fix for any problem it reports: every problem in the Problems list offers one-click fixes;
+  - its undo;
+  - its keyboard shortcut (and its entry in Ctrl+K search and the ? key list);
+  - its behaviour in every other tab, view and size.
+- Before finishing, use the feature as a letterer would. Try the awkward cases: blank lines, huge or tiny panels, letters off the board, panels too big for the machine. Fix anything illogical you find.
+- Only ask Brian about craft decisions, never about obvious usability.
+

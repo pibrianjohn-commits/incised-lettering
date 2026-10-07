@@ -58,7 +58,7 @@ export function snapTargets(layout: Layout, index: number): { x: SnapTarget[]; y
 
   const others = layout.lines.filter((l) => l.index !== index && l.ink);
   for (const o of others) {
-    const n = o.index + 1;
+    const n = o.number ?? o.index + 1;
     x.push({ at: o.ink!.x0, label: `line ${n} left end`, for: ['left'] });
     x.push({ at: (o.ink!.x0 + o.ink!.x1) / 2, label: `line ${n} centre`, for: ['centre'] });
     x.push({ at: o.ink!.x1, label: `line ${n} right end`, for: ['right'] });

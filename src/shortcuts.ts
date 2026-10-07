@@ -7,6 +7,8 @@ export const SHORTCUTS: { group: string; items: [string, string][] }[] = [
       ['1 – 5', 'Write, Space, Panel, Machine, 3D'],
       ['Shift + 1 – 4', 'View: Design, Spacing, Setting-out, Proof'],
       ['I', 'Show or hide the inspection panel'],
+      ['Z', 'Zoom to the whole panel'],
+      ['Shift + Z', 'True size'],
       ['Esc', 'Close a box, clear the selection, or leave the 3D view'],
     ],
   },
@@ -15,6 +17,7 @@ export const SHORTCUTS: { group: string; items: [string, string][] }[] = [
     items: [
       ['Ctrl + K', 'Find any command or setting'],
       ['?', 'This list'],
+      ['Click the problems badge', 'Every problem, each with buttons that put it right'],
     ],
   },
   {
@@ -34,6 +37,13 @@ export const SHORTCUTS: { group: string; items: [string, string][] }[] = [
     ],
   },
   {
+    group: 'Fitting',
+    items: [
+      ['F', 'Fit the lettering to the panel (as big as fits)'],
+      ['Shift + F', 'Fit the panel to the lettering'],
+    ],
+  },
+  {
     group: 'Lines',
     items: [
       ['Click a line', 'Select it: its tools appear beside it'],
@@ -41,6 +51,9 @@ export const SHORTCUTS: { group: string; items: [string, string][] }[] = [
       ['Shift + arrows', 'Nudge it 1 mm'],
       ['Alt while dragging', 'Move a line freely, without snapping'],
       ['S', 'Turn snapping on or off'],
+      ['[ / ]', 'Close or spread the selected line’s letters 0.1 mm (Shift: 1 mm)'],
+      ['Drag an end of the selected line', 'Spread or close its letters; the other end, or the centre, stays put'],
+      ['Click a blank line', 'Its height: ↑ / ↓ change it 0.5 mm (Shift: 5 mm), Delete removes it'],
     ],
   },
   {

@@ -85,8 +85,9 @@ describe('drag to change a value', () => {
 describe('the warnings badge', () => {
   it('says plainly when nothing is wrong, and counts problems when something is', () => {
     expect(problemSummary([])).toEqual({ level: 'ok', text: '✓ No problems' });
-    expect(problemSummary([{ level: 'warn', stage: 'panel', text: 'x' }]).level).toBe('warn');
-    expect(problemSummary([{ level: 'warn', stage: 'panel', text: 'x' }, { level: 'bad', stage: 'machine', text: 'y' }])).toEqual({
+    const q = { kind: 'edges' as const, fixes: [] };
+    expect(problemSummary([{ ...q, level: 'warn', stage: 'panel', text: 'x' }]).level).toBe('warn');
+    expect(problemSummary([{ ...q, level: 'warn', stage: 'panel', text: 'x' }, { ...q, level: 'bad', stage: 'machine', text: 'y' }])).toEqual({
       level: 'bad',
       text: '✗ 2 problems',
     });
@@ -100,7 +101,7 @@ describe('the warnings badge', () => {
       { id: 'margins', ok: false, blocking: false, text: 'Past the margins.' },
       { id: 'angle', ok: true, blocking: true, text: 'Fine.' },
     ];
-    const list = machineProblems(checks);
+    const list = machineProblems(checks, { letters: 3, border: 0, fixed: 0.3 }, defaultProject.machine, 25);
     expect(list.map((q) => q.level)).toEqual(['warn', 'bad']);
     expect(list.every((q) => q.stage === 'machine')).toBe(true);
   });
@@ -113,16 +114,17 @@ describe('the warnings badge', () => {
       letters: [letter('A', 0, 10, 20, 30, 45), letter('B', 1, 15, 40, 35, 65)],
       gaps: [],
       lines: [
-        { index: 0, text: 'Aé', baselineY: 45, x0: 10, width: 20, ink: { x0: 10, x1: 30 }, placed: false, locked: false },
-        { index: 1, text: 'B', baselineY: 65, x0: 15, width: 20, ink: { x0: 15, x1: 35 }, placed: false, locked: false },
+        { index: 0, number: 1, text: 'Aé', baselineY: 45, x0: 10, width: 20, ink: { x0: 10, x1: 30 }, placed: false, locked: false },
+        { index: 1, number: 2, text: 'B', baselineY: 65, x0: 15, width: 20, ink: { x0: 15, x1: 35 }, placed: false, locked: false },
       ],
+      spacers: [],
       overflow: { wide: false, tall: false },
       datumPending: false,
       stops: [],
     };
     const texts = layoutProblems(layout, (ch) => ch !== 'é').map((q) => q.text);
     expect(texts).toContain('Not in the alphabet, so left as a space: é');
-    expect(texts).toContain('Some lettering falls off the edge of the panel.'); // B runs below the 60 mm panel
+    expect(texts).toContain('Line 2 runs off the board at the bottom by 5.0 mm.'); // B runs below the 60 mm panel
     expect(texts).toContain('Lines 1 and 2 run into each other.');
   });
 });

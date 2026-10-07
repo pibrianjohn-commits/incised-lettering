@@ -5,7 +5,7 @@
 // alphabet it was set in, and the reference picture (if any) so the job is
 // complete on its own.
 
-import { defaultProject, type Project } from './layout';
+import { defaultProject, KERN_CAP, type Project } from './layout';
 
 export const FILE_FORMAT = 'incised-lettering-project';
 /** Bumped only if the file layout changes in a way older apps could not read. */
@@ -53,6 +53,20 @@ export function normaliseProject(raw: unknown): Project {
   const part = (k: string): Loose => (isObject(saved[k]) ? (saved[k] as Loose) : {});
   const machine = part('machine');
   const guides = part('guides');
+  // Hand kerning used to be kept in mm at whatever size the letters were; it is
+  // now kept as at KERN_CAP and scales with the letters. Convert older saves once.
+  const cap = typeof saved.capHeight === 'number' && saved.capHeight > 0 ? saved.capHeight : d.capHeight;
+  const legacy = typeof saved.kernCap !== 'number';
+  const toKept = (v: number) => (legacy ? Math.round(((v * KERN_CAP) / cap) * 1e4) / 1e4 : v);
+  const kerns = (o: unknown): Record<string, number> =>
+    isObject(o) ? Object.fromEntries(Object.entries(o).filter(([, v]) => typeof v === 'number').map(([k, v]) => [k, toKept(v as number)])) : {};
+  const gaps = isObject(saved.gapKerning)
+    ? Object.fromEntries(
+        Object.entries(saved.gapKerning)
+          .filter(([, g]) => isObject(g) && typeof g.mm === 'number' && typeof g.pair === 'string')
+          .map(([k, g]) => [k, { pair: (g as Loose).pair as string, mm: toKept((g as Loose).mm as number) }]),
+      )
+    : d.gapKerning;
   return {
     ...d,
     ...saved,
@@ -63,9 +77,11 @@ export function normaliseProject(raw: unknown): Project {
     wordStops: { ...d.wordStops, ...part('wordStops') },
     machine: { ...d.machine, ...machine, passes: { ...d.machine.passes, ...(isObject(machine.passes) ? machine.passes : {}) } },
     guides: { x: numbers(guides.x), y: numbers(guides.y) },
-    kerning: isObject(saved.kerning) ? (saved.kerning as Project['kerning']) : d.kerning,
-    groupKerning: isObject(saved.groupKerning) ? (saved.groupKerning as Project['groupKerning']) : d.groupKerning,
-    gapKerning: isObject(saved.gapKerning) ? (saved.gapKerning as Project['gapKerning']) : d.gapKerning,
+    kerning: kerns(saved.kerning),
+    groupKerning: kerns(saved.groupKerning),
+    gapKerning: gaps,
+    kernCap: KERN_CAP,
+    spacers: isObject(saved.spacers) ? (Object.fromEntries(Object.entries(saved.spacers).filter(([, v]) => typeof v === 'number' && v >= 0)) as Project['spacers']) : {},
     lines: isObject(saved.lines) ? (saved.lines as Project['lines']) : d.lines,
     lineExtras: isObject(saved.lineExtras) ? (saved.lineExtras as Project['lineExtras']) : d.lineExtras,
     groups: isObject(saved.groups) && isObject(saved.groups.left) && isObject(saved.groups.right) ? (saved.groups as unknown as Project['groups']) : d.groups,
