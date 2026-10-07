@@ -90,7 +90,7 @@ export function toGcode(passes: Pass[], m: MachineSettings, info: GcodeInfo, dat
         c(cut.item.split('#')[0]);
         lastItem = cut.item;
       }
-      if (cut.stroke) c(`stroke ${cut.stroke}, ${n(cut.width ?? 0)} mm wide`);
+      if (cut.stroke) c(cut.fork ? `stroke ${cut.stroke}, fork` : `stroke ${cut.stroke}, ${n(cut.width ?? 0)} mm wide`);
       const [first, ...rest] = cut.points;
       out.push(`G0 ${xy(first)}`);
       out.push(`G1 Z${z(first.z)} F${Math.round(m.feedPlunge)}`);

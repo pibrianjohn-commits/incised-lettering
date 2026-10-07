@@ -10,13 +10,18 @@
 // G-code writer turns that into machine coordinates.
 //
 // Cutting order (BRIEF.md, Decisions): letter by letter in reading order, and
-// within each letter thin strokes first, then thick. A "stroke" for the slit
-// is one run of valley line between forks; its thickness is its average width.
+// within each letter thin strokes first, then thick. A stroke for the slit is
+// as the carver counts it: its valley runs straight on through any junction
+// where it is the thicker stroke (see strokes.ts); its thickness is its
+// average width. Each stroke's forks are cut straight after it.
 
 import { borderMarks } from './border';
+import { strokesOf } from './strokes';
 import { simplify, type Contour, type Pt } from './geometry';
 import type { Layout } from './layout';
 import type { ValleyLine } from './valley';
+
+export { isFork } from './strokes';
 
 export interface MachineSettings {
   /** Board thickness, mm. 0 = not entered yet (no G-code until it is). */
@@ -94,33 +99,20 @@ export interface Pt3 extends Pt {
 export interface Cut {
   points: Pt3[];
   feed: number;
-  /** Which letter (or 'border') it belongs to, and, for the slit, its stroke number within that letter (thin first). */
+  /** Which letter (or 'border') it belongs to, and, for the slit, its stroke number within that letter (thin first; see strokes.ts). */
   item: string;
   stroke?: number;
-  /** Average stroke width, mm (slit only). */
+  /** The stroke's average width, mm (slit only). */
   width?: number;
   /**
-   * A short branch from a stroke out to a corner of its termination (or a
-   * serif): the stop cut for the termination, pared to by hand, rather than a
-   * stroke of its own. Not given a stroke number on the bench sheet or in the
-   * preview (slit only).
+   * A fork from the stroke out to a corner of its termination (or a serif),
+   * or a scrap of valley inside a junction: a stop cut, pared to by hand, cut
+   * straight after its stroke and carrying its number, but not a stroke of
+   * its own, so not labelled (slit only).
    */
   fork?: boolean;
 }
 
-/**
- * Whether a run of valley line is a fork: it runs out towards a corner or a
- * serif tip (one end has narrowed to under a third of its widest) and it is
- * short for its width (under three times as long as it is wide). A stroke's
- * own valley stays wide to both ends, where it meets its forks or other
- * strokes; one that tapers away to a point is long for its width.
- */
-export function isFork(v: ValleyLine): boolean {
-  if (v.length < 2) return true;
-  const maxR = Math.max(...v.map((p) => p.r));
-  const endR = Math.min(v[0].r, v[v.length - 1].r);
-  return endR < 0.3 * maxR && pathLength(v) < 3 * (2 * maxR);
-}
 
 export interface Pass {
   name: PassName;
@@ -286,36 +278,47 @@ export function buildPasses(layout: Layout, m: MachineSettings): Pass[] {
   if (m.passes.slit) {
     const cuts: Cut[] = [];
     let at: Pt = { x: 0, y: 0 };
-    for (const it of list) {
-      // Each run of valley line is a stroke; thin strokes first (BRIEF.md, Decisions).
-      const strokes = it.valleys
-        .filter((v) => v.length >= 2)
-        .map((v) => {
-          const len = pathLength(v);
-          const w = len > 0 ? v.reduce((s, p, i) => (i ? s + (p.r + v[i - 1].r) * dist(v[i - 1], p) : 0), 0) / len : 2 * v[0].r;
-          return { v, width: w, fork: isFork(v) };
-        })
-        .sort((a, b) => a.width - b.width);
-      strokes.forEach(({ v, width, fork }, si) => {
-        // Start from whichever end is nearer.
-        let pts = dist(at, v[0]) <= dist(at, v[v.length - 1]) ? v : v.slice().reverse();
-        const target = pts.map((p) => slitDepth(p.r, m));
-        const deepest = Math.max(...target);
-        if (deepest <= 0) return;
-        const levels = Math.max(1, Math.ceil(deepest / m.slitStep - 1e-9));
-        const path: Pt3[] = [];
-        let depths = target;
-        for (let L = 1; L <= levels; L++) {
-          const cap = Math.min(deepest, L * m.slitStep);
-          // Back and forth: each level runs the other way, starting where the last one ended.
-          if (L > 1) {
-            pts = pts.slice().reverse();
-            depths = depths.slice().reverse();
-          }
-          pts.forEach((p, i) => path.push({ x: p.x, y: p.y, z: -Math.min(depths[i], cap) }));
+    /** Cut one run of valley line down to its depth, in steps. False if it is too shallow to cut at all. */
+    const slit = (v: ValleyLine, item: string, stroke: number, width: number, fork: boolean) => {
+      // Start from whichever end is nearer.
+      let pts = dist(at, v[0]) <= dist(at, v[v.length - 1]) ? v : v.slice().reverse();
+      const target = pts.map((p) => slitDepth(p.r, m));
+      const deepest = Math.max(...target);
+      if (deepest <= 0) return;
+      const levels = Math.max(1, Math.ceil(deepest / m.slitStep - 1e-9));
+      const path: Pt3[] = [];
+      let depths = target;
+      for (let L = 1; L <= levels; L++) {
+        const cap = Math.min(deepest, L * m.slitStep);
+        // Back and forth: each level runs the other way, starting where the last one ended.
+        if (L > 1) {
+          pts = pts.slice().reverse();
+          depths = depths.slice().reverse();
         }
-        cuts.push({ item: it.id, feed: m.feedSlit, points: path, stroke: si + 1, width, fork });
-        at = path[path.length - 1];
+        pts.forEach((p, i) => path.push({ x: p.x, y: p.y, z: -Math.min(depths[i], cap) }));
+      }
+      cuts.push({ item, feed: m.feedSlit, points: path, stroke, width, fork });
+      at = path[path.length - 1];
+    };
+    /** Runs taken nearest first, to keep travel short. */
+    const nearestFirst = (runs: ValleyLine[], each: (v: ValleyLine) => void) => {
+      const left = runs.slice();
+      while (left.length) {
+        let best = 0;
+        let bestD = Infinity;
+        left.forEach((v, i) => {
+          const d = Math.min(dist(at, v[0]), dist(at, v[v.length - 1]));
+          if (d < bestD) [best, bestD] = [i, d];
+        });
+        each(left.splice(best, 1)[0]);
+      }
+    };
+    for (const it of list) {
+      // The letter's strokes, thin first, each straight through its junctions where
+      // it is the thicker, then its forks (BRIEF.md, Decisions: strokes at a junction).
+      strokesOf(it.valleys).forEach((s, si) => {
+        nearestFirst(s.parts, (v) => slit(v, it.id, si + 1, s.width, false));
+        nearestFirst(s.extras, (v) => slit(v, it.id, si + 1, s.width, true));
       });
     }
     passes.push({ name: 'slit', title: 'Valley slit', cuts, ...stats(cuts, m) });
