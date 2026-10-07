@@ -31,7 +31,7 @@ import { defaultBox, evenUp, fitBlock, fitLine, type EvenUp, type FitBy } from '
 import { AIR_GAP, toGcode } from './gcode';
 import { openPalette, type Command } from './palette';
 import { checkFixes, layoutProblems, machineProblems, passDepths, problemSummary, type Fix, type Problem, type Stage } from './problems';
-import { alphabetDifferences, FILE_EXTENSION, FILE_TYPE, fileNameFor, normaliseProject, projectFileText, readProjectFile } from './projectfile';
+import { alphabetDifferences, FILE_EXTENSION, FILE_TYPE, fileNameFor, normaliseProject, PlainError, projectFileText, readProjectFile } from './projectfile';
 import { onFileLaunch, startApp } from './pwa';
 import { enableScrub } from './scrub';
 import { SHORTCUTS } from './shortcuts';
@@ -2514,7 +2514,8 @@ function reliefWorker(): Worker {
     v3d.job = null;
     if (msg.error) {
       showWorking(null);
-      return say(`The board could not be worked out: ${msg.error}`);
+      console.error('3D board:', msg.error);
+      return say('The 3D board could not be worked out; the board shown is from before. Change a setting to try again, and see the Problems badge.');
     }
     showBoard({ result: msg.result!, job });
   };
@@ -2543,7 +2544,7 @@ function startJob(area: Area | null) {
   const job: ReliefJob = { id: ++v3d.lastId, state: v3d.state, width: p.panelWidth, height: p.panelHeight, machine: p.machine, area };
   if (v3d.state === 'marked') {
     // The passes the G-code checks worked out, if they are for this very job; else the worker works them out.
-    if (machineChecks?.project === p) job.cuts = packCuts(machineChecks.passes);
+    if (machineChecks?.project === p && machineChecks.passes.length) job.cuts = packCuts(machineChecks.passes);
     else job.layout = { ...l, gaps: [] };
   } else {
     const f = finishedInput(l);
@@ -2927,10 +2928,17 @@ function scheduleChecks() {
     const p = project;
     const run = () => {
       if (p !== project || !store) return; // changed again: the next round will do it
-      const l = layoutPanel(store, p);
-      const passes = buildPasses(l, p.machine);
-      const checks = checkPasses(l, passes, p.machine, bedFit(p.panelWidth, p.panelHeight));
-      machineChecks = { project: p, problems: machineProblems(checks, passDepths(passes), p.machine, p.capHeight), passes };
+      try {
+        const l = layoutPanel(store, p);
+        const passes = buildPasses(l, p.machine);
+        const checks = checkPasses(l, passes, p.machine, bedFit(p.panelWidth, p.panelHeight));
+        machineChecks = { project: p, problems: machineProblems(checks, passDepths(passes), p.machine, p.capHeight), passes };
+      } catch (err) {
+        // Not to be tried again and again: the problem stands until the job changes.
+        console.error(err);
+        const problem: Problem = { level: 'bad', stage: 'machine', kind: 'machine', text: 'The G-code safety checks could not be worked out for this job, so the G-code cannot be saved yet.', fixes: [{ id: 'go-machine', label: 'Go to Machine' }] };
+        machineChecks = { project: p, problems: [problem], passes: [] };
+      }
       refreshProblems();
     };
     if ('requestIdleCallback' in window) requestIdleCallback(run, { timeout: 2000 });
@@ -2999,13 +3007,15 @@ function runFix(id: string) {
     case 'caps':
       setText([...project.text].map((ch) => (/\s/.test(ch) || hasLetter(ch) || !hasLetter(ch.toUpperCase()) ? ch : ch.toUpperCase())).join(''));
       return say('Changed to capitals. Ctrl+Z undoes it.');
-    case 'remove-missing': {
+    case 'remove-missing':
+    case 'remove-char': {
       // Each one goes with the space it leaves, so no double spaces or spaces at a line's end are left behind.
+      const gone = (ch: string) => (what === 'remove-char' ? ch === id.slice('remove-char:'.length) : !/\s/.test(ch) && !hasLetter(ch));
       const out: string[] = [];
       const chars = [...project.text];
       for (let i = 0; i < chars.length; i++) {
         const ch = chars[i];
-        if (/\s/.test(ch) || hasLetter(ch)) {
+        if (!gone(ch)) {
           out.push(ch);
           continue;
         }
@@ -3055,6 +3065,11 @@ function runFix(id: string) {
       update(change);
       return say(`Letters made smaller, everything in step: cap height ${n} mm. Ctrl+Z undoes it.`);
     }
+    case 'go-machine':
+      return setStage('machine');
+    case 'word-stops-off':
+      update({ wordStops: { ...project.wordStops, on: false } });
+      return say('Word stops turned off. Ctrl+Z undoes it.');
     case 'all-passes':
       update({ machine: { ...machine, passes: { hairline: true, datum: true, slit: true } } });
       return say('Every pass will be run. Ctrl+Z undoes it.');
@@ -3154,7 +3169,8 @@ async function openFromFile(f: File, handle: FileHandle | null) {
   try {
     opened = readProjectFile(await f.text());
   } catch (e) {
-    alert((e as Error).message);
+    console.error(e);
+    alert(e instanceof PlainError ? e.message : 'That file could not be opened: it may be damaged, or not a lettering project.');
     return;
   }
   let next = opened.project;
@@ -3537,6 +3553,21 @@ async function start() {
   }), 3000);
 }
 
+// Nothing reaches the carver as a raw error message: a plain word in the status
+// bar, the details kept for the browser's console. Anything left out of the
+// job is named in the problems list, where it is worked out.
+const PLAIN = 'Something could not be worked out. The rest of the job carries on: the Problems badge names anything left out.';
+window.addEventListener('error', (e) => {
+  e.preventDefault();
+  say(PLAIN);
+});
+window.addEventListener('unhandledrejection', (e) => {
+  e.preventDefault();
+  console.error(e.reason);
+  say(PLAIN);
+});
+
 start().catch((err) => {
-  $('loading').textContent = `Could not load the letters: ${err}`;
+  console.error(err);
+  $('loading').textContent = 'Could not load the letters. Check the internet connection and reload the page.';
 });

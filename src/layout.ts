@@ -302,6 +302,8 @@ export interface Layout {
   /** Some datum lines were left off in a quick layout. */
   datumPending: boolean;
   stops: PlacedStop[];
+  /** Letters that could not be worked out, left as spaces: the character and its line (0 = first). */
+  failed: { char: string; line: number }[];
 }
 
 /**
@@ -337,6 +339,7 @@ export function layoutPanel(store: LetterStore, p: Project, quick = false): Layo
 
   const letters: PlacedLetter[] = [];
   const stops: PlacedStop[] = [];
+  const failed: Layout['failed'] = [];
   const gaps: Gap[] = [];
   const lines: PlacedLine[] = [];
   let wide = false;
@@ -368,7 +371,12 @@ export function layoutPanel(store: LetterStore, p: Project, quick = false): Layo
     let inkL = Infinity;
     let inkR = -Infinity;
     chars.forEach((ch, i) => {
-      const m = store.marks(ch, k, { percent: p.datumPercent, minimum: p.datumMinimum }, true);
+      let m: ReturnType<LetterStore['marks']> = null;
+      try {
+        m = store.marks(ch, k, { percent: p.datumPercent, minimum: p.datumMinimum }, true);
+      } catch {
+        m = null; // named in the problems below
+      }
       if (!m) return;
       inkL = Math.min(inkL, pens[i] + m.box.x0);
       inkR = Math.max(inkR, pens[i] + m.box.x1);
@@ -390,7 +398,14 @@ export function layoutPanel(store: LetterStore, p: Project, quick = false): Layo
     let lastInk: PlacedLetter | null = null;
     let spaceSince = false;
     chars.forEach((ch, i) => {
-      const m = store.marks(ch, k, { percent: p.datumPercent, minimum: p.datumMinimum }, quick);
+      let m: ReturnType<LetterStore['marks']> = null;
+      try {
+        m = store.marks(ch, k, { percent: p.datumPercent, minimum: p.datumMinimum }, quick);
+      } catch (err) {
+        // Left as a space and named in the problems; the rest of the job carries on.
+        if (!failed.some((f) => f.char === ch && f.line === li)) failed.push({ char: ch, line: li });
+        console.error(`Could not work out “${ch}” on line ${li + 1}:`, err);
+      }
       if (!m) {
         prev = null; // a space breaks the run: no gap to kern across it
         if (/\s/.test(ch)) spaceSince = true;
@@ -449,7 +464,7 @@ export function layoutPanel(store: LetterStore, p: Project, quick = false): Layo
   const bottom = Math.max(...inked.map((l) => l.baselineY));
   const tall = inked.length > 0 && (top < box.y0 - 0.01 || bottom > box.y1 + 0.01);
 
-  return { project: p, letters, gaps, lines, spacers, overflow: { wide, tall }, datumPending, stops };
+  return { project: p, letters, gaps, lines, spacers, overflow: { wide, tall }, datumPending, stops, failed };
 }
 
 /** A line with nothing on it but spaces: a spacer between lettered lines. */

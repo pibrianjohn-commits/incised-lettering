@@ -72,7 +72,7 @@ export function strokeLabels(pass: Pass | null): { x: number; y: number; n: numb
   const out: { x: number; y: number; n: number; item: string; cuts: Cut[] }[] = [];
   for (const cuts of byStroke.values()) {
     const parts = cuts.filter((c) => !c.fork);
-    if (!parts.length) continue; // only forks (a word stop): nothing to number
+    if (!parts.length) continue; // only forks: nothing to number (a dot or word stop has its plunge)
     const firstRun = (c: Cut) => {
       const step = c.points.findIndex((p, i) => i > 0 && p.x === c.points[i - 1].x && p.y === c.points[i - 1].y);
       return step === -1 ? c.points : c.points.slice(0, step);

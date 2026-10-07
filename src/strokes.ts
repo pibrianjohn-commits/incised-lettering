@@ -22,12 +22,20 @@
 //  - The forks running out to the corners and serifs, and the scraps of valley
 //    line inside a junction, belong to the stroke they lead from and are cut
 //    straight after it. They are stop cuts, not strokes, and are not numbered.
+//  - A dot (a full stop, each dot of a colon, the head of a quotation mark, a
+//    word stop) has no stroke running through it: its valley is only forks
+//    out to its edge. It is one stroke of its own, cut as a single plunge at
+//    its centre, its deepest point, down to the valley depth less the slit
+//    margin, with its forks as its stop cuts (BRIEF.md, Decisions: "Dots").
 
 import type { Pt } from './geometry';
 import type { ValleyLine, ValleyPt } from './valley';
 
 export interface Stroke {
-  /** Each part is cut as one path. A stroke crossed by a thicker one has a part each side of it. */
+  /**
+   * Each part is cut as one path. A stroke crossed by a thicker one has a part
+   * each side of it. A dot has one part of a single point: a plunge at its centre.
+   */
   parts: ValleyLine[];
   /** The forks into its corners and serifs, and scraps of junction, cut straight after it. */
   extras: ValleyLine[];
@@ -125,10 +133,10 @@ export function strokesOf(valleys: ValleyLine[]): Stroke[] {
   const lines = valleys.filter((v) => v.length >= 2);
   // Forks, and hairs of valley far thinner than the letter's strokes (left by a
   // serif), are cut with the stroke they belong to but are not strokes.
+  if (!lines.length) return [];
   const widest = Math.max(0, ...lines.map(runWidth));
   const mains = lines.filter((v) => !isFork(v) && runWidth(v) >= 0.2 * widest);
   const forks = lines.filter((v) => !mains.includes(v));
-  if (!mains.length) return forks.length ? [{ parts: [], extras: forks, width: Math.max(...forks.map(runWidth)) }] : [];
 
   // Run ends that meet are the same point.
   const nodes: ValleyPt[] = [];
@@ -200,14 +208,49 @@ export function strokesOf(valleys: ValleyLine[]): Stroke[] {
     members.set(s, [...(members.get(s) ?? []), i]);
   });
 
+  // Pieces of the mark that no stroke runs through are dots (see above). The
+  // runs of valley line fall into pieces where they meet end to end.
+  const piece = groups(lines.length);
+  const at = new Map<number, number>(); // node → a run ending there
+  lines.forEach((v, i) => {
+    for (const p of [v[0], v[v.length - 1]]) {
+      const n = nodeOf(p);
+      if (at.has(n)) piece.join(i, at.get(n)!);
+      else at.set(n, i);
+    }
+  });
+  const strokeRuns = new Set([...members.values()].flat().map((i) => mains[i]));
+  const withStroke = new Set(lines.map((v, i) => (strokeRuns.has(v) ? piece.find(i) : -1)));
+  const dotPieces = new Map<number, ValleyLine[]>();
+  lines.forEach((v, i) => {
+    const k = piece.find(i);
+    if (!withStroke.has(k)) dotPieces.set(k, [...(dotPieces.get(k) ?? []), v]);
+  });
+  // A piece is a dot only if it is a real part of the mark: about as wide as the
+  // mark's strokes, and standing clear of them. A hair of valley line left
+  // apart in a serif's bracket is not; it is cut with the nearest stroke.
+  const deepest = Math.max(...lines.flatMap((v) => v.map((q) => q.r)));
+  const strokePts = [...strokeRuns].flat();
+  const dots = [...dotPieces.values()]
+    .map((runs) => {
+      // Its centre: the point furthest from its edge, where the valley is deepest.
+      let centre = runs[0][0];
+      for (const v of runs) for (const q of v) if (q.r > centre.r) centre = q;
+      return { runs, centre };
+    })
+    .filter(({ centre }) => centre.r >= 0.3 * deepest && strokePts.every((q) => dist(q, centre) > centre.r + q.r));
+  const inDot = new Set(dots.flatMap((d) => d.runs));
+
   // Cutting order: thin first; equal widths left to right, then top to bottom.
-  const list = [...members.values()].map((runs) => {
+  // A dot's width is the width at its centre.
+  const list: { runs: number[]; width: number; mid: Pt; dot?: (typeof dots)[number] }[] = [...members.values()].map((runs) => {
     const len = runs.reduce((s, i) => s + pathLength(mains[i]), 0);
     const width = len > 0 ? runs.reduce((s, i) => s + widths[i] * pathLength(mains[i]), 0) / len : widths[runs[0]];
     const pts = runs.flatMap((i) => mains[i]);
     const mid = { x: pts.reduce((s, p) => s + p.x, 0) / pts.length, y: pts.reduce((s, p) => s + p.y, 0) / pts.length };
     return { runs, width, mid };
   });
+  for (const d of dots) list.push({ runs: [], width: 2 * d.centre.r, mid: d.centre, dot: d });
   list.sort((a, b) => a.width - b.width);
   const ordered: typeof list = [];
   for (let i = 0; i < list.length; ) {
@@ -264,6 +307,7 @@ export function strokesOf(valleys: ValleyLine[]): Stroke[] {
   };
 
   const out: Stroke[] = ordered.map((s) => {
+    if (s.dot) return { parts: [[s.dot.centre]], extras: s.dot.runs, width: s.width };
     const parts: ValleyLine[] = [];
     const todo = new Set(s.runs);
     const portIndex = (run: number, end: 0 | 1) => ports.findIndex((p) => p.run === run && p.end === end);
@@ -299,16 +343,19 @@ export function strokesOf(valleys: ValleyLine[]): Stroke[] {
 
   // Forks and leftover scraps go with the stroke they lead from: the nearest
   // stroke to the fork's wide end (the one cut later, where two are as near).
-  const extras = [...forks, ...mains.filter((_, i) => scrap[i] && !usedScraps.has(i))];
+  // A dot's own forks are already with it.
+  const extras = [...forks, ...mains.filter((_, i) => scrap[i] && !usedScraps.has(i))].filter((f) => !inDot.has(f));
+  const strokes = out.filter((_, k) => !ordered[k].dot);
+  if (!strokes.length) strokes.push(...out); // only dots: the leftovers go with the nearest dot
   for (const f of extras) {
     const wide = f[0].r >= f[f.length - 1].r ? f[0] : f[f.length - 1];
-    let best = 0;
+    let best: Stroke | null = null;
     let bestD = Infinity;
-    out.forEach((s, k) => {
+    for (const s of strokes) {
       const d = Math.min(...s.parts.flatMap((p) => p.map((q) => dist(q, wide))));
-      if (d <= bestD + 1e-6) [best, bestD] = [k, d];
-    });
-    out[best].extras.push(f);
+      if (d <= bestD + 1e-6) [best, bestD] = [s, d];
+    }
+    best?.extras.push(f);
   }
   return out;
 }

@@ -31,5 +31,7 @@ A standing rule for every task, from 7 Oct 2026.
   - its behaviour in every other tab, view and size.
 - Before finishing, use the feature as a letterer would. Try the awkward cases: blank lines, huge or tiny panels, letters off the board, panels too big for the machine. Fix anything illogical you find.
 - Test every heavy feature with the browser's CPU slowed 4×, as Brian's laptop is an ordinary one, not a fast development machine (added 7 Oct 2026). Heavy work goes off the page into a worker, with a progress bar and Esc to cancel, so the page never freezes. The 3D view's check is `npm run test:browser` (browser-tests/perf3d.mjs).
+- Test with real inscriptions, including punctuation, numerals and blank lines, not just capital letters (added 7 Oct 2026): "No. 1312", "A.D. 1920", dates, quotation marks. Every character the alphabet has goes through the whole job in test/everychar.test.ts; a character that fails is a failing test.
+- Errors never reach Brian as raw messages ("TypeError…"). Whatever cannot be worked out is left out, the Problems badge names the character or line in plain words with a fix, and the rest of the job carries on.
 - Only ask Brian about craft decisions, never about obvious usability.
 
