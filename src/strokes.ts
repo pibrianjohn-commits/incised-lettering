@@ -16,7 +16,9 @@
 //    the thick stroke's valley line; then the thick stroke is cut straight
 //    through the junction in one cut. Strokes of equal width are taken from
 //    left to right, then top to bottom, and where they meet the one cut
-//    second is continuous.
+//    second is continuous (BRIEF.md, Decisions: "Equal-width strokes").
+//  - A valley that runs on with no junction is one stroke however its width
+//    changes along it: O, S, and U (BRIEF.md, Decisions: "U").
 //  - The forks running out to the corners and serifs, and the scraps of valley
 //    line inside a junction, belong to the stroke they lead from and are cut
 //    straight after it. They are stop cuts, not strokes, and are not numbered.

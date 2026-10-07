@@ -130,10 +130,10 @@ function drawing(input: SheetInput, s: number): string {
   out.push(`<path d="${outlines.map(contourToSvg).join('')}" fill="none" stroke="#000" stroke-width="${line(0.2)}"/>`);
   if (datums.length) {
     out.push(
-      `<path d="${datums.map(contourToSvg).join('')}" fill="none" stroke="#1f6fb2" stroke-width="${line(0.15)}" stroke-dasharray="${line(0.8)} ${line(0.5)}"/>`,
+      `<path d="${datums.map(contourToSvg).join('')}" fill="none" stroke="#7048e8" stroke-width="${line(0.15)}" stroke-dasharray="${line(0.8)} ${line(0.5)}"/>`,
     );
   }
-  out.push(`<path d="${valleys.map(polylineToSvg).join('')}" fill="none" stroke="#c2261d" stroke-width="${line(0.15)}" stroke-linejoin="round"/>`);
+  out.push(`<path d="${valleys.map(polylineToSvg).join('')}" fill="none" stroke="#e03131" stroke-width="${line(0.15)}" stroke-linejoin="round"/>`);
 
   // Stroke numbers, cutting order within each letter.
   const font = line(2.6);

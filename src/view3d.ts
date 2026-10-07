@@ -10,6 +10,7 @@
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { oakCanvas } from './oak';
 import type { Relief } from './relief';
 
 export type Colouring = 'wood' | 'depth';
@@ -28,6 +29,7 @@ void main() {
 
 const FRAGMENT = /* glsl */ `
 uniform sampler2D uDepth;
+uniform sampler2D uOak;  // the board's oak figure
 uniform vec2 uTexel;     // one cell, in uv
 uniform float uRes;      // one cell, in mm
 uniform vec2 uSize;      // board width and depth front to back, mm
@@ -72,10 +74,8 @@ void main() {
     }
   }
 
-  // Oak: a pale ground with faint grain running along the board.
-  float grain = 0.5 + 0.5 * sin(vPos.y * 0.9 + sin(vPos.x * 0.03) * 2.5);
-  float fleck = 0.5 + 0.5 * sin(vPos.y * 5.1 + vPos.x * 0.07);
-  vec3 wood = mix(vec3(0.84, 0.69, 0.47), vec3(0.78, 0.62, 0.40), grain * 0.5 + fleck * 0.15);
+  // Oak, the same figure as the Proof view (oak.ts).
+  vec3 wood = texture2D(uOak, vUv).rgb;
   float depth = -h0;
   vec3 base = wood;
   if (uMode == 1 && depth > 0.005) base = depthColour(clamp(depth / max(uMaxDepth, 0.001), 0.0, 1.0));
@@ -98,6 +98,8 @@ export class Board3D {
   private sun = new THREE.DirectionalLight(0xffffff, 1.6);
   private material: THREE.ShaderMaterial | null = null;
   private texture: THREE.DataTexture | null = null;
+  /** The oak figure, made again only when the board changes size. */
+  private oak: { key: string; texture: THREE.CanvasTexture } | null = null;
   private size = { w: 100, h: 100, t: 20 };
   private frame = 0;
   private light = new THREE.Vector3(0, 0.6, 0.8);
@@ -105,9 +107,10 @@ export class Board3D {
   private dirty = true;
 
   constructor(private host: HTMLElement) {
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+    // Clear to nothing, so the page's own background (light or graphite) shows round the board.
+    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
-    this.renderer.setClearColor(0x2b2620);
+    this.renderer.setClearColor(0x000000, 0);
     host.append(this.renderer.domElement);
     this.camera = new THREE.PerspectiveCamera(30, 1, 1, 10000);
     this.camera.up.set(0, 0, 1);
@@ -164,11 +167,22 @@ export class Board3D {
     this.texture.minFilter = THREE.LinearFilter;
     this.texture.needsUpdate = true;
 
+    // The oak, over the same area as the depth map (from the panel's top-left corner).
+    const oakKey = `${cols * relief.res}x${rows * relief.res}x${height}`;
+    if (this.oak?.key !== oakKey) {
+      this.oak?.texture.dispose();
+      const texture = new THREE.CanvasTexture(oakCanvas(cols * relief.res, rows * relief.res, height));
+      texture.minFilter = THREE.LinearMipmapLinearFilter;
+      texture.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
+      this.oak = { key: oakKey, texture };
+    }
+
     this.material = new THREE.ShaderMaterial({
       vertexShader: VERTEX,
       fragmentShader: FRAGMENT,
       uniforms: {
         uDepth: { value: this.texture },
+        uOak: { value: this.oak.texture },
         uTexel: { value: new THREE.Vector2(1 / cols, 1 / rows) },
         uRes: { value: relief.res },
         uSize: { value: new THREE.Vector2(cols * relief.res, rows * relief.res) },
