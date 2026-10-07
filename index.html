@@ -330,7 +330,7 @@
           <div class="row v3d-colours">
             <span class="name">Colour</span>
             <span class="seg" id="v3d-colour">
-              <button data-colour="wood">Wood</button>
+              <button data-colour="plain" title="A plain, matte, light surface: the cuts and their shadows show most clearly">Plain</button>
               <button data-colour="depth">Depth</button>
             </span>
           </div>
@@ -349,7 +349,9 @@
             <button data-view="top">From above</button>
             <button data-view="front">Along the front</button>
           </div>
-          <p class="hint small">Left-drag to turn · right-drag to move · scroll to zoom. <kbd>Esc</kbd> goes back.</p>
+          <button id="v3d-sharper" title="Work out the part of the board in view at full detail, to look at it closely (D)">Sharper</button>
+          <p id="v3d-detail" class="hint small"></p>
+          <p class="hint small">Left-drag to turn · right-drag to move · scroll to zoom. Move in close, then <b>Sharper</b> (<kbd>D</kbd>) shows that part at full detail. <kbd>Esc</kbd> stops the board being worked out, or goes back.</p>
         </section>
         <p id="v3d-note" class="hint small"></p>
       </div>
@@ -460,7 +462,11 @@
 
       <div id="v3d" hidden>
         <div id="v3d-canvas"></div>
-        <p id="v3d-working" hidden>Working out the board…</p>
+        <div id="v3d-working" hidden role="status" aria-live="polite">
+          <p><span class="v3d-what">Working out the board…</span> <b class="v3d-pct"></b></p>
+          <div class="v3d-bar"><i></i></div>
+          <p class="v3d-foot"><span>The board shown stays until the new one is ready.</span> <button class="quiet" data-v3d="cancel">Cancel (Esc)</button><button data-v3d="again" hidden>Work it out</button></p>
+        </div>
       </div>
 
       <div id="cam-bar" hidden>

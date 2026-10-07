@@ -66,6 +66,14 @@ export const SHORTCUTS: { group: string; items: [string, string][] }[] = [
     ],
   },
   {
+    group: '3D view',
+    items: [
+      ['Left-drag · right-drag · scroll', 'Turn the board · move it · zoom'],
+      ['D', 'Sharper: the part of the board in view at full detail'],
+      ['Esc', 'Stop the board being worked out (the one shown stays); again to go back'],
+    ],
+  },
+  {
     group: 'Mouse',
     items: [
       ['Drag', 'Move the view'],

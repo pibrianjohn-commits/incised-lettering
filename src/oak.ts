@@ -1,6 +1,6 @@
-// Realistic oak for the board, used only in the Proof view and the 3D view
-// (BRIEF.md, Decisions: "The look"). While designing, the board is a plain
-// light surface.
+// Realistic oak for the board, used only in the Proof view (BRIEF.md,
+// Decisions: "The look" and "The 3D view"). While designing, the board is a
+// plain light surface, and the 3D view shows a plain matte one.
 //
 // The figure is that of plain-sawn white oak, with the grain running along
 // the length of the board: growth rings swinging gently across it, each a
@@ -93,7 +93,7 @@ export function oakResolution(width: number, height: number): number {
  * corner, the grain running along its width. `board` is the board's height,
  * so the arches of the figure sit across its middle.
  */
-export function oakCanvas(width: number, height: number, board = height): HTMLCanvasElement {
+function oakCanvas(width: number, height: number, board = height): HTMLCanvasElement {
   const k = oakResolution(width, height);
   const w = Math.max(1, Math.round(width * k));
   const h = Math.max(1, Math.round(height * k));
