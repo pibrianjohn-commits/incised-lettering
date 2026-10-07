@@ -5,13 +5,18 @@ import { contourToSvg, polylineToSvg } from './geometry';
 import {
   contentBox,
   defaultProject,
+  kernKept,
+  kernMm,
+  isBlank,
   layoutPanel,
   lineAnchor,
+  lineNumber,
   pairKerning,
   type Align,
   type Gap,
   type Layout,
   type BorderStyle,
+  type LineExtra,
   type LinePlacement,
   type Margins,
   type PlacedLine,
@@ -20,12 +25,12 @@ import {
 import { blobToDataUrl, chooseFile, dataUrlToBlob, download, saveFile, type FileHandle, type FileKind } from './files';
 import { loadImage, saveImage } from './imagestore';
 import { balanceHtml, lineListHtml, overviewSvg, overviewViewBox, type OverviewMode } from './inspector';
-import { BED, BED_EXTENDED, bedFit, fitToLettering } from './panel';
+import { BED, BED_EXTENDED, bedFit, fitLetteringToPanel, fitToLettering, resizeLettering, shrinkDesignToBed, type FitAxis } from './panel';
 import { defaultGroups, type Side } from './groups';
 import { defaultBox, evenUp, fitBlock, fitLine, type EvenUp, type FitBy } from './spacing';
 import { AIR_GAP, toGcode } from './gcode';
 import { openPalette, type Command } from './palette';
-import { layoutProblems, machineProblems, problemSummary, type Problem, type Stage } from './problems';
+import { checkFixes, layoutProblems, machineProblems, passDepths, problemSummary, type Fix, type Problem, type Stage } from './problems';
 import { alphabetDifferences, FILE_EXTENSION, FILE_TYPE, fileNameFor, normaliseProject, projectFileText, readProjectFile } from './projectfile';
 import { onFileLaunch, startApp } from './pwa';
 import { enableScrub } from './scrub';
@@ -101,6 +106,8 @@ let measure: { a: { x: number; y: number }; b: { x: number; y: number } } | null
 let guideDrag: { axis: 'x' | 'y'; index: number; at: number | null } | null = null;
 /** The selected line (0 = first), or null. */
 let selectedLine: number | null = null;
+/** The selected blank line (its place in the text), or null. */
+let selectedSpacer: number | null = null;
 /** The inspection panel: shown or hidden, and how the overview draws the letters. */
 const INSPECT_KEY = 'incised.inspect';
 // Open to start with, except on a small screen, where it would cover the panel.
@@ -139,6 +146,7 @@ const labels = $<SVGGElement>('labels');
 const overlay = $<SVGGElement>('overlay');
 const pop = $('kern-pop');
 const linePop = $('line-pop');
+const spacerPop = $('spacer-pop');
 
 const view = new PanZoom(work, {
   changed: () => {
@@ -146,9 +154,12 @@ const view = new PanZoom(work, {
   },
   // Clicks on letters, gaps and line numbers are handled by onLinePress;
   // a click anywhere else clears the selection.
-  click: () => {
+  click: (target) => {
     selected = null;
     selectedLine = null;
+    // A click on a blank line's band selects it, to show its height.
+    const band = target.closest('[data-spacer]');
+    selectedSpacer = band ? Number(band.getAttribute('data-spacer')) : null;
     draw();
   },
 });
@@ -215,6 +226,8 @@ function buildControls() {
       const v = Number(input.value);
       if (input.value !== '' && Number.isFinite(v) && v >= 1) update({ [key]: v }, input, key);
     });
+    // Once a new size is entered, the view follows if the panel no longer sits comfortably on screen.
+    input.addEventListener('change', () => requestAnimationFrame(() => panelOffScreen() && fitPanel()));
   }
   wirePanel();
   wireSpacing();
@@ -316,25 +329,28 @@ function nudge(dir: number, step = 0.1) {
   if (!gap) return;
   // Read the current settings, not the last drawing, so quick presses all count.
   const [a, b] = [gap.left.char, gap.right.char];
+  // Kerning is shown and nudged in mm at the size the letters are now, and kept
+  // as at 25 mm cap height, so it scales with the letters (layout.ts, KERN_CAP).
+  const cap = project.capHeight;
   if (kernMode === 'group' && gap.groupKey) {
     const k = { ...project.groupKerning };
-    const v = dir === 0 ? 0 : round((k[gap.groupKey] ?? 0) + dir * step, 1);
+    const v = dir === 0 ? 0 : round(kernMm(k[gap.groupKey] ?? 0, cap) + dir * step, 1);
     if (v === 0) delete k[gap.groupKey];
-    else k[gap.groupKey] = v;
+    else k[gap.groupKey] = kernKept(v, cap);
     update({ groupKerning: k });
   } else if (kernMode === 'pair' || kernMode === 'group') {
     // An exact pair value starts from what the pair has now (its groups' value, if any)
     // and from then on overrides the groups. "Back to 0" removes it, handing back to the groups.
     const k = { ...project.kerning };
     if (dir === 0) delete k[gap.pair];
-    else k[gap.pair] = round(pairKerning(project, a, b).mm + dir * step, 1);
+    else k[gap.pair] = kernKept(round(pairKerning(project, a, b).mm + dir * step, 1), cap);
     update({ kerning: k });
   } else {
     const k = { ...project.gapKerning };
     const own = project.gapKerning[gap.key];
-    const v = dir === 0 ? 0 : round((own && own.pair === gap.pair ? own.mm : 0) + dir * step, 1);
+    const v = dir === 0 ? 0 : round((own && own.pair === gap.pair ? kernMm(own.mm, cap) : 0) + dir * step, 1);
     if (v === 0) delete k[gap.key];
-    else k[gap.key] = { pair: gap.pair, mm: v };
+    else k[gap.key] = { pair: gap.pair, mm: kernKept(v, cap) };
     update({ gapKerning: k });
   }
 }
@@ -427,11 +443,27 @@ function draw() {
   }
   out.push('<g class="guides">');
   for (const line of L.lines) {
+    if (!line.ink) continue; // a blank line is drawn as its spacer instead
     for (const y of [line.baselineY, line.baselineY - p.capHeight]) {
       out.push(`<line x1="0" x2="${p.panelWidth}" y1="${fmt(y)}" y2="${fmt(y)}"/>`);
     }
   }
   out.push('</g>');
+
+  // Blank lines: spacers, each with a handle along its bottom edge to drag its height.
+  if (!cam) {
+    const x0 = cb.x1 > cb.x0 ? cb.x0 : 0;
+    const x1 = cb.x1 > cb.x0 ? cb.x1 : p.panelWidth;
+    for (const sp of L.spacers) {
+      const bottom = sp.top + sp.height;
+      out.push(
+        `<g class="spacer${sp.index === selectedSpacer ? ' sel' : ''}${sp.custom ? ' custom' : ''}">` +
+          `<rect class="spacer-band" data-spacer="${sp.index}" x="${fmt(x0)}" y="${fmt(sp.top)}" width="${fmt(x1 - x0)}" height="${fmt(sp.height)}"/>` +
+          `<line class="spacer-edge" x1="${fmt(x0)}" x2="${fmt(x1)}" y1="${fmt(bottom)}" y2="${fmt(bottom)}"/>` +
+          `<line class="spacer-hit" data-spacer-handle="${sp.index}" x1="${fmt(x0)}" x2="${fmt(x1)}" y1="${fmt(bottom)}" y2="${fmt(bottom)}"/></g>`,
+      );
+    }
+  }
 
   const showSpace = $<HTMLInputElement>('show-space').checked;
   const spaces = showSpace
@@ -469,6 +501,23 @@ function draw() {
     out.push(
       `<rect class="${cls}" data-line="${line.index}" x="${fmt(line.ink.x0 - 0.5)}" y="${fmt(y - 0.5)}" width="${fmt(line.ink.x1 - line.ink.x0 + 1)}" height="${fmt(p.capHeight + 1)}"/>`,
     );
+  }
+  // The selected line's ends: drag one to spread or close its letters. The
+  // anchored end (left for a left-aligned line, right for a right-aligned one) has none.
+  const endLine = !cam && selectedLine !== null ? L.lines[selectedLine] : undefined;
+  if (endLine?.ink && !endLine.locked && letterPairs(endLine) > 0) {
+    const align = lineAlign(endLine);
+    const top = endLine.baselineY - p.capHeight * 1.15;
+    const bottom = endLine.baselineY + p.capHeight * 0.15;
+    for (const side of ['left', 'right'] as const) {
+      if (side === align) continue;
+      const x = fmt(side === 'left' ? endLine.ink.x0 : endLine.ink.x1);
+      out.push(
+        `<g class="line-end"><title>Drag to spread or close this line's letters (Alt: freely)</title>` +
+          `<line class="line-end-bar" x1="${x}" x2="${x}" y1="${fmt(top)}" y2="${fmt(bottom)}"/>` +
+          `<line class="line-end-hit" data-line-end="${side}" x1="${x}" x2="${x}" y1="${fmt(top)}" y2="${fmt(bottom)}"/></g>`,
+      );
+    }
   }
 
   // Clickable gaps between letters.
@@ -510,11 +559,19 @@ function applyView() {
   const sy = (y: number) => v.ty + y * v.scale;
   const p = project;
   const out: string[] = [];
-  for (const s of labelData.spaces) {
+  // Areas over the gaps. Where neighbours would run together (zoomed out), every
+  // other one steps up a row, so two figures never read as one.
+  const rowEnds = new Map<number, number[]>();
+  for (const s of [...labelData.spaces].sort((a, b) => a.gap.line - b.gap.line || a.gap.x - b.gap.x)) {
     const base = layout!.lines[s.gap.line].baselineY;
-    out.push(
-      `<text class="area" x="${sx(s.gap.x).toFixed(1)}" y="${(sy(base - p.capHeight) - 6).toFixed(1)}">${Math.round(s.area)}</text>`,
-    );
+    const text = String(Math.round(s.area));
+    const x = sx(s.gap.x);
+    const half = text.length * 3.6 + 2;
+    const ends = rowEnds.get(s.gap.line) ?? [-Infinity, -Infinity];
+    const row = x - half > ends[0] ? 0 : x - half > ends[1] ? 1 : 0;
+    ends[row] = x + half;
+    rowEnds.set(s.gap.line, ends);
+    out.push(`<text class="area" x="${x.toFixed(1)}" y="${(sy(base - p.capHeight) - 6 - row * 13).toFixed(1)}">${text}</text>`);
   }
   // Pending even-up suggestions, in their own colour.
   const pending = new Map((suggest?.suggestions ?? []).map((s) => [s.pair, tweaks[s.pair] ?? s.change]));
@@ -548,11 +605,11 @@ function applyView() {
     const cls = `linenum ${state}${line.index === selectedLine ? ' sel' : ''}`;
     const mark = line.locked ? ' ⚿' : line.placed ? ' ✥' : '';
     const w = mark ? 36 : 24;
-    const title = `Line ${line.index + 1}: ${state === 'auto' ? 'auto (follows line spacing and alignment)' : state === 'placed' ? 'placed by hand' : 'locked'}`;
+    const title = `Line ${line.number}: ${state === 'auto' ? 'auto (follows line spacing and alignment)' : state === 'placed' ? 'placed by hand' : 'locked'}`;
     out.push(
       `<g class="${cls}" data-line="${line.index}"><title>${esc(title)}</title>` +
         `<rect x="${(numX - w).toFixed(1)}" y="${(y - 10).toFixed(1)}" width="${w}" height="20" rx="4"/>` +
-        `<text x="${(numX - w / 2).toFixed(1)}" y="${(y + 4).toFixed(1)}">${line.index + 1}${mark}</text></g>`,
+        `<text x="${(numX - w / 2).toFixed(1)}" y="${(y + 4).toFixed(1)}">${line.number}${mark}</text></g>`,
     );
   }
   if (cam) out.push(camLabels(sx, sy));
@@ -592,6 +649,30 @@ function applyView() {
     placeBeside(linePop, sx((sl.ink.x0 + sl.ink.x1) / 2), sy(sl.baselineY - p.capHeight), sy(sl.baselineY));
   } else {
     linePop.hidden = true;
+  }
+  // Blank lines: their height on the band, and the selected one's box.
+  const out2: string[] = [];
+  if (layout && !cam) {
+    const cbx = contentBox(p);
+    for (const spc of layout.spacers) {
+      const hpx = spc.height * v.scale;
+      if (hpx < 16) continue;
+      out2.push(
+        `<text class="spacer-label" x="${(sx(cbx.x1 > cbx.x0 ? cbx.x0 : 0) + 6).toFixed(1)}" y="${(sy(spc.top) + Math.min(hpx / 2, 14) + 4).toFixed(1)}" text-anchor="start">blank line · ${spc.height.toFixed(1)} mm${spc.custom ? '' : ' (line spacing)'}</text>`,
+      );
+    }
+  }
+  if (out2.length) labels.insertAdjacentHTML('beforeend', out2.join(''));
+  const ss = layout && !cam && !g && selectedLine === null ? layout.spacers.find((x) => x.index === selectedSpacer) : undefined;
+  if (ss) {
+    spacerPop.hidden = false;
+    const hInput = spacerPop.querySelector<HTMLInputElement>('[data-spacer-height]')!;
+    if (document.activeElement !== hInput) hInput.value = ss.height.toFixed(1);
+    spacerPop.querySelector<HTMLButtonElement>('[data-act="reset"]')!.disabled = !ss.custom;
+    const cbx = contentBox(p);
+    placeBeside(spacerPop, sx((cbx.x0 + cbx.x1) / 2), sy(ss.top), sy(ss.top + ss.height));
+  } else {
+    spacerPop.hidden = true;
   }
 
   drawOverlay();
@@ -647,9 +728,9 @@ function showKerningSummary() {
   // Single gaps that still match the letters in that place.
   const own = layout ? layout.gaps.filter((g) => g.gapKern) : [];
   const items = [
-    ...groupsK.map(([k, v]) => `<li>Group: like <b>${esc(k.split('|')[0])}</b> · like <b>${esc(k.split('|')[1])}</b> ${signed(v)} mm</li>`),
-    ...pairs.map(([k, v]) => `<li>${pairName(k)} everywhere ${signed(v)} mm</li>`),
-    ...own.map((g) => `<li>${pairName(g.pair)} line ${g.line + 1}, this gap only ${signed(g.gapKern)} mm</li>`),
+    ...groupsK.map(([k, v]) => `<li>Group: like <b>${esc(k.split('|')[0])}</b> · like <b>${esc(k.split('|')[1])}</b> ${signed(kernMm(v, project.capHeight))} mm</li>`),
+    ...pairs.map(([k, v]) => `<li>${pairName(k)} everywhere ${signed(kernMm(v, project.capHeight))} mm</li>`),
+    ...own.map((g) => `<li>${pairName(g.pair)} line ${layout ? lineNumber(layout, g.line) : g.line + 1}, this gap only ${signed(g.gapKern)} mm</li>`),
   ];
   $('kerning-summary').innerHTML = items.length
     ? `<ul class="pairs">${items.join('')}</ul><button id="clear-kerning" class="quiet">Clear all spacing adjustments</button>`
@@ -780,11 +861,29 @@ function onKey(e: KeyboardEvent) {
     setMeasuring(!measuring);
   } else if (!e.altKey && (e.key === 's' || e.key === 'S')) {
     setSnapping(!snapping);
+  } else if (!e.altKey && e.key.toLowerCase() === 'f') {
+    // F fits the lettering to the panel; Shift+F the panel to the lettering.
+    if (e.shiftKey) fitPanelToLettering();
+    else fitLettering('both');
+  } else if (!e.altKey && (e.code === 'BracketLeft' || e.code === 'BracketRight') && selectedLine !== null) {
+    // [ and ] close and spread the selected line's letters: 0.1 mm a pair, or 1 mm with Shift.
+    spreadLine(e.code === 'BracketLeft' ? -1 : 1, e.shiftKey ? 1 : 0.1);
+  } else if (!e.altKey && e.key.toLowerCase() === 'z') {
+    // Z shows the whole panel; Shift+Z true size.
+    if (e.shiftKey) view.frame(project.panelWidth, project.panelHeight, pxPerMm());
+    else fitPanel();
   } else if (e.key === 'Tab' && (target === document.body || target.closest('#work'))) {
     // Step through the gaps in reading order.
     const cur = gapIndex(selected ?? hovered);
     selected = gapRef(cur < 0 ? (e.shiftKey ? -1 : 0) : cur + (e.shiftKey ? -1 : 1));
     draw();
+  } else if (!e.altKey && selectedSpacer !== null && selectedLine === null && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+    // A selected blank line: down makes it taller, up shorter, 0.5 mm (5 mm with Shift).
+    const sp = layout?.spacers.find((x) => x.index === selectedSpacer);
+    if (!sp) return;
+    setSpacer(sp.index, sp.height + (e.key === 'ArrowDown' ? 1 : -1) * (e.shiftKey ? 5 : 0.5));
+  } else if (selectedSpacer !== null && selectedLine === null && (e.key === 'Delete' || e.key === 'Backspace')) {
+    removeBlankLine(selectedSpacer);
   } else if (!e.altKey && e.key.startsWith('Arrow')) {
     // Plain arrows move the selected line: 0.1 mm, or 1 mm with Shift.
     if (selectedLine === null) return;
@@ -808,6 +907,7 @@ function onKey(e: KeyboardEvent) {
     }
     selected = null;
     selectedLine = null;
+    selectedSpacer = null;
     draw();
   } else return;
   e.preventDefault();
@@ -911,6 +1011,9 @@ function wireTools() {
   // Press on a line (its letters, a gap, or its number in the margin):
   // a click selects, a drag moves the line.
   work.addEventListener('pointerdown', onLinePress, true);
+  // Drag a blank line's bottom edge to change its height.
+  work.addEventListener('pointerdown', onSpacerPress, true);
+  wireSpacerPop();
   wireLinePop();
   wireInspector();
 
@@ -1056,6 +1159,101 @@ function setPlacement(index: number, place: LinePlacement | null, group: string 
   update({ lines }, undefined, group);
 }
 
+/** Change a line's own letter or word spacing (nothing extra on either drops the entry). */
+function setLineExtra(index: number, change: Partial<LineExtra>, group: string | null = null, source?: Element) {
+  const ex: LineExtra = { ...(project.lineExtras[String(index)] ?? { letter: 0, word: 0 }), ...change };
+  const lineExtras = { ...project.lineExtras };
+  if (ex.letter || ex.word) lineExtras[String(index)] = { letter: round(ex.letter, 3), word: round(ex.word, 3) };
+  else delete lineExtras[String(index)];
+  update({ lineExtras }, source, group);
+}
+
+/** How a line is anchored: by its left end, centre or right end. */
+function lineAlign(line: PlacedLine): Align {
+  return project.lines[String(line.index)]?.align ?? project.align;
+}
+
+/** The letter gaps between a line's first letter and its last: its ends move this many times any change of letter spacing. */
+function letterPairs(line: PlacedLine): number {
+  const chars = [...line.text];
+  const inked = chars.map((ch, i) => (!/\s/.test(ch) && hasLetter(ch) ? i : -1)).filter((i) => i >= 0);
+  return inked.length ? inked[inked.length - 1] - inked[0] : 0;
+}
+
+/** Close (dir -1) or spread (+1) the selected line's letters by `step` mm between each pair. */
+function spreadLine(dir: number, step: number) {
+  const line = lineAtIndex(selectedLine);
+  if (!line?.ink) return say('Select a line first: click it, or its number in the margin.');
+  if (line.locked) return say(`Line ${line.number} is locked: unlock it to change its spacing.`);
+  if (letterPairs(line) < 1) return say(`Line ${line.number} has only one letter: there is nothing to spread.`);
+  const ex = project.lineExtras[String(line.index)]?.letter ?? 0;
+  const v = round(ex + dir * step, 3);
+  setLineExtra(line.index, { letter: v }, `line-extra-${line.index}`);
+  say(`Line ${line.number}: letter spacing ${signed(v)} mm on top of the job's. [ and ] change it, Ctrl+Z undoes it.`);
+}
+
+/**
+ * Drag an end of the selected line to spread or close its letters. The other
+ * end, or the centre for a centred line, stays put; the dragged end snaps to
+ * the margins, guides and the other lines' ends (hold Alt to drag freely).
+ * The whole drag is one step to undo.
+ */
+function onLineEndPress(e: PointerEvent, side: 'left' | 'right') {
+  const line = lineAtIndex(selectedLine);
+  if (!line?.ink || !layout || line.locked) return;
+  e.stopPropagation();
+  e.preventDefault();
+  const pairs = letterPairs(line);
+  if (pairs < 1) return;
+  const before = project;
+  const from = toMm(e.clientX, e.clientY).x;
+  const end0 = side === 'left' ? line.ink.x0 : line.ink.x1;
+  const l0 = project.lineExtras[String(line.index)]?.letter ?? 0;
+  // How much wider the line gets for each mm the end moves.
+  const per = (lineAlign(line) === 'centre' ? 2 : 1) * (side === 'right' ? 1 : -1);
+  const targets = snapTargets(layout, line.index);
+  work.setPointerCapture(e.pointerId);
+  work.classList.add('dragging-end');
+  const move = (m: PointerEvent) => {
+    let end = end0 + toMm(m.clientX, m.clientY).x - from;
+    let snap: Snap | null = null;
+    if (snapping && !m.altKey) {
+      snap = nearest([{ f: side, at: end }], targets.x, 8 / view.v.scale);
+      if (snap) end += snap.offset;
+    }
+    const raw = l0 + (per * (end - end0)) / pairs;
+    const letter = snap || m.altKey ? round(raw, 3) : Math.round(raw / 0.05) * 0.05;
+    lineSnaps = { x: snap, y: null };
+    const ex: LineExtra = { ...(project.lineExtras[String(line.index)] ?? { letter: 0, word: 0 }), letter: round(letter, 3) };
+    project = { ...project, lineExtras: { ...project.lineExtras, [String(line.index)]: ex } };
+    say(`Line ${line.number}: letter spacing ${signed(ex.letter)} mm on top of the job's${snap ? `, its end on the ${snap.target.label}` : ''}. Alt drags freely.`);
+    relayout();
+  };
+  const up = () => {
+    work.removeEventListener('pointermove', move);
+    work.removeEventListener('pointerup', up);
+    work.removeEventListener('pointercancel', up);
+    work.classList.remove('dragging-end');
+    lineSnaps = null;
+    if (project !== before) {
+      const ex = project.lineExtras[String(line.index)];
+      if (ex && !ex.letter && !ex.word) {
+        const lineExtras = { ...project.lineExtras };
+        delete lineExtras[String(line.index)];
+        project = { ...project, lineExtras };
+      }
+      history.record(before);
+      refreshUndoButtons();
+      syncControls();
+      saveProject();
+    }
+    relayout();
+  };
+  work.addEventListener('pointermove', move);
+  work.addEventListener('pointerup', up);
+  work.addEventListener('pointercancel', up);
+}
+
 /** Nudge a line by (dx, dy) mm. An auto line becomes placed. */
 function moveLine(index: number, dx: number, dy: number) {
   const line = lineAtIndex(index);
@@ -1067,6 +1265,8 @@ function moveLine(index: number, dx: number, dy: number) {
 function onLinePress(e: PointerEvent) {
   if (measuring || e.button !== 0) return;
   const t = e.target as Element;
+  const end = t.closest<SVGElement>('[data-line-end]');
+  if (end) return onLineEndPress(e, end.dataset.lineEnd as 'left' | 'right');
   const hit = t.closest('[data-gap], [data-line]');
   if (!hit || !layout) return;
   e.stopPropagation(); // not a pan
@@ -1142,6 +1342,7 @@ function onLinePress(e: PointerEvent) {
     if (u.type !== 'pointerup') return;
     // A click: a gap selects that gap for kerning (and its line); anything else selects the line.
     selectedLine = index;
+    selectedSpacer = null;
     if (gapAttr) {
       const [l, n] = gapAttr.split(':').map(Number);
       selected = { line: l, n };
@@ -1164,17 +1365,19 @@ function showLinePop() {
     centre: (line.ink.x0 + line.ink.x1) / 2,
     baseline: line.baselineY,
   };
-  linePop.querySelector('.line-title')!.textContent = `Line ${line.index + 1}`;
+  linePop.querySelector('.line-title')!.textContent = `Line ${line.number}`;
   linePop.querySelector('.line-text')!.textContent = line.text.trim();
-  const ex = project.lineExtras[String(line.index)];
-  const fitted = ex && (ex.letter || ex.word)
-    ? ` Fitted: ${[ex.letter ? `letter spacing ${signed(ex.letter)} mm` : '', ex.word ? `word spacing ${signed(ex.word)} mm` : ''].filter(Boolean).join(', ')}.`
-    : '';
-  linePop.querySelector('.line-state')!.textContent = (line.locked
-    ? 'Locked: it will not move until unlocked.'
+  const ex = project.lineExtras[String(line.index)] ?? { letter: 0, word: 0 };
+  linePop.querySelector('.line-state')!.textContent = line.locked
+    ? 'Locked: it will not move or change until unlocked.'
     : line.placed
       ? 'Placed by hand: it stays put when the line spacing or alignment changes.'
-      : 'Auto: it follows the line spacing and alignment.') + fitted;
+      : 'Auto: it follows the line spacing and alignment.';
+  for (const input of linePop.querySelectorAll<HTMLInputElement>('[data-extra]')) {
+    if (document.activeElement !== input) input.value = String(round(ex[input.dataset.extra as 'letter' | 'word'], 2));
+    input.disabled = line.locked;
+  }
+  linePop.querySelector<HTMLButtonElement>('[data-act="spacing"]')!.disabled = line.locked || (!ex.letter && !ex.word);
   for (const input of linePop.querySelectorAll<HTMLInputElement>('[data-pos]')) {
     // Typing in a box isn't interrupted.
     if (document.activeElement !== input) input.value = values[input.dataset.pos as keyof typeof values].toFixed(1);
@@ -1187,6 +1390,14 @@ function showLinePop() {
 }
 
 function wireLinePop() {
+  linePop.addEventListener('input', (e) => {
+    const input = (e.target as HTMLElement).closest<HTMLInputElement>('[data-extra]');
+    const line = lineAtIndex(selectedLine);
+    if (!input || !line || line.locked) return;
+    const v = Number(input.value);
+    if (input.value === '' || !Number.isFinite(v)) return;
+    setLineExtra(line.index, { [input.dataset.extra as 'letter' | 'word']: v }, `line-extra-${line.index}`, input);
+  });
   linePop.addEventListener('change', (e) => {
     const input = (e.target as HTMLElement).closest<HTMLInputElement>('[data-pos]');
     const line = lineAtIndex(selectedLine);
@@ -1210,6 +1421,10 @@ function wireLinePop() {
       draw();
     }
     if (b.dataset.act === 'auto') setPlacement(line.index, null);
+    if (b.dataset.act === 'spacing') {
+      setLineExtra(line.index, { letter: 0, word: 0 });
+      say(`Line ${line.number}'s own spacing reset. Ctrl+Z undoes it.`);
+    }
     if (b.dataset.act === 'lock') setPlacement(line.index, { ...placementOf(line), locked: !line.locked });
     if (b.dataset.act === 'fit') $('fit-line').click();
   });
@@ -1220,12 +1435,96 @@ function wireLinePop() {
   });
 }
 
+// ---------------------------------------------------------------- blank lines (spacers)
+
+/** Drag a blank line's bottom edge to change its height: 0.5 mm steps, or freely with Alt. One step to undo. */
+function onSpacerPress(e: PointerEvent) {
+  if (measuring || e.button !== 0 || cam || !layout) return;
+  const handle = (e.target as Element).closest('[data-spacer-handle]');
+  if (!handle) return;
+  e.stopPropagation(); // not a pan
+  const index = Number(handle.getAttribute('data-spacer-handle'));
+  const sp = layout.spacers.find((x) => x.index === index);
+  if (!sp) return;
+  const from = toMm(e.clientX, e.clientY).y;
+  const before = project;
+  selectedSpacer = index;
+  selected = null;
+  selectedLine = null;
+  work.setPointerCapture(e.pointerId);
+  work.classList.add('dragging-spacer');
+  const move = (m: PointerEvent) => {
+    const raw = sp.height + toMm(m.clientX, m.clientY).y - from;
+    const h = Math.max(0, m.altKey ? round(raw, 1) : Math.round(raw * 2) / 2);
+    project = { ...project, spacers: { ...project.spacers, [String(index)]: h } };
+    relayout();
+  };
+  const up = () => {
+    work.removeEventListener('pointermove', move);
+    work.removeEventListener('pointerup', up);
+    work.removeEventListener('pointercancel', up);
+    work.classList.remove('dragging-spacer');
+    if (project !== before) {
+      history.record(before);
+      refreshUndoButtons();
+      saveProject();
+      showFileName();
+    }
+    draw();
+  };
+  work.addEventListener('pointermove', move);
+  work.addEventListener('pointerup', up);
+  work.addEventListener('pointercancel', up);
+}
+
+/** Set a blank line's height, mm, or (null) put it back to one line spacing. */
+function setSpacer(index: number, height: number | null) {
+  const spacers = { ...project.spacers };
+  if (height === null) delete spacers[String(index)];
+  else spacers[String(index)] = Math.max(0, round(height, 1));
+  update({ spacers }, undefined, `spacer-${index}`);
+}
+
+/** Take a blank line out of the inscription. */
+function removeBlankLine(index: number) {
+  const texts = project.text.replace(/\r/g, '').split('\n');
+  if (index >= texts.length || !isBlank(texts[index])) return;
+  texts.splice(index, 1);
+  const text = texts.join('\n');
+  selectedSpacer = null;
+  update({ text, ...remapForEdit(project, text) });
+  say('Blank line removed. Ctrl+Z puts it back.');
+}
+
+function wireSpacerPop() {
+  spacerPop.addEventListener('pointerdown', (e) => e.stopPropagation());
+  spacerPop.addEventListener('change', (e) => {
+    const input = (e.target as HTMLElement).closest<HTMLInputElement>('[data-spacer-height]');
+    if (!input || selectedSpacer === null) return;
+    const v = Number(input.value);
+    if (input.value !== '' && Number.isFinite(v)) setSpacer(selectedSpacer, v);
+  });
+  spacerPop.addEventListener('click', (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLElement>('[data-act]');
+    if (!b || selectedSpacer === null) return;
+    if (b.dataset.act === 'close') {
+      selectedSpacer = null;
+      draw();
+    } else if (b.dataset.act === 'reset') setSpacer(selectedSpacer, null);
+    else if (b.dataset.act === 'remove') removeBlankLine(selectedSpacer);
+  });
+}
+
 // ---------------------------------------------------------------- panel, border, margins, picture
 
 const SIDES = ['top', 'right', 'bottom', 'left'] as const;
 
 function wirePanel() {
   $('fit-panel').addEventListener('click', fitPanelToLettering);
+  $('fit-lettering').addEventListener('click', (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLElement>('[data-fit]');
+    if (b) fitLettering(b.dataset.fit as FitAxis);
+  });
 
   $('border-style').addEventListener('click', (e) => {
     const b = (e.target as HTMLElement).closest<HTMLElement>('[data-border]');
@@ -1383,11 +1682,20 @@ function syncPanelControls(source?: Element) {
   }
 }
 
+/** The panel runs off the screen, or has become too small on it to work on. */
+function panelOffScreen(): boolean {
+  const r = work.getBoundingClientRect();
+  const v = view.v;
+  const w = project.panelWidth * v.scale;
+  const h = project.panelHeight * v.scale;
+  return v.tx < 0 || v.ty < 0 || v.tx + w > r.width || v.ty + h > r.height || Math.max(w / r.width, h / r.height) < 0.3;
+}
+
 /** One undoable step: size the panel round the lettering and shift everything placed by hand to match. */
 function fitPanelToLettering() {
   if (!layout) return;
   const f = fitToLettering(layoutPanel(store!, project));
-  if (!f) return;
+  if (!f) return say('There is no lettering to fit the panel to.');
   const lines = Object.fromEntries(
     Object.entries(project.lines).map(([k, pl]) => [k, { ...pl, x: pl.x + f.dx, baseline: pl.baseline + f.dy }]),
   );
@@ -1395,6 +1703,20 @@ function fitPanelToLettering() {
   const refImage = project.refImage ? { ...project.refImage, x: project.refImage.x + f.dx, y: project.refImage.y + f.dy } : null;
   update({ panelWidth: f.width, panelHeight: f.height, lines, guides, refImage });
   requestAnimationFrame(fitPanel);
+  say(`Panel fitted to the lettering: ${f.width} × ${f.height} mm. Ctrl+Z undoes it.`);
+}
+
+/**
+ * One undoable step, the inverse of fitting the panel: scale the lettering to
+ * fill the space inside the margins, across, up, or both (panel.ts).
+ */
+function fitLettering(axis: FitAxis) {
+  if (!store) return;
+  const change = fitLetteringToPanel(layoutPanel(store, project), axis);
+  if (!change) return say(project.text.trim() ? 'The border and margins leave no room to fit the lettering into.' : 'There is no lettering to fit.');
+  update(change);
+  const how = axis === 'width' ? ' across its width' : axis === 'height' ? ' up its height' : '';
+  say(`Lettering fitted to the panel${how}: cap height ${change.capHeight} mm. Ctrl+Z undoes it.`);
 }
 
 function onPicturePress(e: PointerEvent) {
@@ -1572,10 +1894,13 @@ function loadAlphabetSettings() {
     const raw = localStorage.getItem(alphaKey());
     if (!raw) return; // first time with this alphabet: whatever the job has becomes the alphabet's
     const a = JSON.parse(raw);
+    // Older alphabet kerning was kept in mm at the size it was set; convert it once to scale with the letters.
+    const kept = (o: Record<string, number> | undefined) =>
+      typeof a.kernCap === 'number' ? (o ?? {}) : Object.fromEntries(Object.entries(o ?? {}).map(([k, v]) => [k, kernKept(v, project.capHeight)]));
     project = {
       ...project,
-      kerning: { ...project.kerning, ...(a.kerning ?? {}) },
-      groupKerning: { ...project.groupKerning, ...(a.groupKerning ?? {}) },
+      kerning: { ...project.kerning, ...kept(a.kerning) },
+      groupKerning: { ...project.groupKerning, ...kept(a.groupKerning) },
       groups: a.groups ?? project.groups,
       evenUp: { ...project.evenUp, ...(a.evenUp ?? {}) },
     };
@@ -1590,7 +1915,7 @@ function shownProject(): Project {
   const kerning = { ...project.kerning };
   for (const s of suggest.suggestions) {
     const [a, b] = [...s.pair];
-    kerning[s.pair] = round(pairKerning(project, a, b).mm + (tweaks[s.pair] ?? s.change), 1);
+    kerning[s.pair] = kernKept(round(pairKerning(project, a, b).mm + (tweaks[s.pair] ?? s.change), 1), project.capHeight);
   }
   return { ...project, kerning };
 }
@@ -1615,7 +1940,7 @@ function wireSpacing() {
   const nudgeRef = (d: number) => {
     const [a, b] = [...project.evenUp.reference];
     if (!a || !b) return;
-    update({ kerning: { ...project.kerning, [a + b]: round(pairKerning(project, a, b).mm + d, 1) } });
+    update({ kerning: { ...project.kerning, [a + b]: kernKept(round(pairKerning(project, a, b).mm + d, 1), project.capHeight) } });
   };
   $('eu-closer').addEventListener('click', () => nudgeRef(-0.1));
   $('eu-apart').addEventListener('click', () => nudgeRef(0.1));
@@ -1676,7 +2001,7 @@ function wireSpacing() {
     const e = fitLine(store, project, selectedLine, fitSize().w, fitBy);
     if (!e) return fitMessage(fitBy === 'word' ? 'That line has no word spaces to open or close.' : 'That line has too few letters to fit.');
     update({ lineExtras: { ...project.lineExtras, [String(selectedLine)]: e } });
-    fitMessage(`Line ${selectedLine + 1} fitted to ${fitSize().w} mm.`);
+    fitMessage(`Line ${layout ? lineNumber(layout, selectedLine) : selectedLine + 1} fitted to ${fitSize().w} mm.`);
   });
   $('fit-block').addEventListener('click', () => {
     if (!store) return;
@@ -1741,7 +2066,7 @@ function acceptSuggestions(pairs: string[]) {
     const s = suggest.suggestions.find((x) => x.pair === pair);
     if (!s) continue;
     const [a, b] = [...pair];
-    kerning[pair] = round(pairKerning(project, a, b).mm + (tweaks[pair] ?? s.change), 1);
+    kerning[pair] = kernKept(round(pairKerning(project, a, b).mm + (tweaks[pair] ?? s.change), 1), project.capHeight);
   }
   update({ kerning });
   dropSuggestions(pairs);
@@ -1888,6 +2213,14 @@ function wireMachine() {
     showCam();
     draw();
   });
+  $('cam-checks').addEventListener('click', (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLElement>('[data-fix]');
+    if (!b) return;
+    const before = project;
+    runFix(b.dataset.fix!);
+    // A fix that changed the work is previewed afresh, so the checks show where it now stands.
+    if (project !== before && stage === 'machine') openCam();
+  });
   $('cam-save').addEventListener('click', () => saveGcode(false));
   $('cam-air').addEventListener('click', () => saveGcode(true));
 }
@@ -1963,8 +2296,17 @@ function showCam() {
       deepest ${p.deepest.toFixed(2)} mm, feed ${feed(p)} mm/min, about ${minutes(p.minutes)}.</p>`,
     )
     .join('') + `<p class="hint small">All passes: about ${minutes(total)} on the machine. Start the spindle by hand at ${m.spindle} rpm when the file pauses. X0 Y0 at the ${CORNER_NAMES[m.zeroCorner]} corner, Z0 on the top surface.</p>`;
+  // Each failed check offers the same fixes as the problems list.
+  const depths = passDepths(c.passes);
+  const fromLayout = (kinds: Problem['kind'][]) => {
+    const seen = new Map<string, Fix>();
+    for (const q of layoutProblems(c.layout, hasLetter)) if (kinds.includes(q.kind)) for (const f of q.fixes) seen.set(f.id, f);
+    return [...seen.values()];
+  };
+  const fixesFor = (k: Check): Fix[] =>
+    k.ok ? [] : k.id === 'bed' ? fromLayout(['bed']) : k.id === 'margins' || k.id === 'panel' ? fromLayout(['edges', 'room']) : checkFixes(k, depths, m, c.project.capHeight);
   $('cam-checks').innerHTML = c.checks
-    .map((k) => `<li class="${k.ok ? 'ok' : k.blocking ? 'bad' : 'warn'}">${k.ok ? '✓' : k.blocking ? '✗' : '!'} ${esc(k.text)}</li>`)
+    .map((k) => `<li class="${k.ok ? 'ok' : k.blocking ? 'bad' : 'warn'}">${k.ok ? '✓' : k.blocking ? '✗' : '!'} ${esc(k.text)}${fixButtons(fixesFor(k))}</li>`)
     .join('');
   const unseen = c.passes.filter((p) => !c.viewed.has(p.name));
   const blocked = c.checks.some((k) => k.blocking && !k.ok);
@@ -2260,6 +2602,9 @@ function wireChrome() {
     $('st-warn').setAttribute('aria-expanded', 'true');
   });
   $('warn-pop').addEventListener('click', (e) => {
+    // A fix is carried out where you are, and the list stays open to show what is left.
+    const fix = (e.target as HTMLElement).closest<HTMLElement>('[data-fix]');
+    if (fix) return runFix(fix.dataset.fix!);
     const li = (e.target as HTMLElement).closest<HTMLElement>('[data-stage]');
     if (!li) return;
     closeMenus();
@@ -2280,6 +2625,7 @@ function wireChrome() {
   };
   enableScrub($('side'), hooks);
   enableScrub(linePop, hooks);
+  enableScrub(spacerPop, hooks);
 
   // The "More" folds remember whether they were left open.
   for (const d of document.querySelectorAll<HTMLDetailsElement>('details.more')) {
@@ -2389,10 +2735,18 @@ let problems: Problem[] = [];
 
 function refreshProblems() {
   if (!layout || !store) return;
-  const alphabet = store.alphabet;
-  const list = layoutProblems(layout, (ch) => !!alphabet.letter(ch)?.contours.length);
+  const list = layoutProblems(layout, hasLetter);
   if (project.refImage && !refUrl) {
-    list.push({ level: 'warn', stage: 'panel', text: 'The reference picture was not kept by this browser: load it again (Panel › More).' });
+    list.push({
+      level: 'warn',
+      stage: 'panel',
+      kind: 'picture',
+      text: 'The reference picture was not kept by this browser.',
+      fixes: [
+        { id: 'reload-picture', label: 'Load the picture again' },
+        { id: 'remove-picture', label: 'Remove the picture' },
+      ],
+    });
   }
   // The G-code checks take longer, so they follow a moment behind; the last ones stand till then.
   if (machineChecks) list.push(...machineChecks.problems);
@@ -2402,8 +2756,13 @@ function refreshProblems() {
   const b = $('st-warn');
   b.textContent = sum.text;
   b.className = `badge ${sum.level}`;
-  b.title = list.length ? 'Click to see every problem' : 'Nothing needs putting right';
+  b.title = list.length ? 'Click to see every problem, with ways to put each right' : 'Nothing needs putting right';
   if (!$('warn-pop').hidden) showProblemList();
+}
+
+/** Whether the alphabet has a drawn letter for this character. */
+function hasLetter(ch: string): boolean {
+  return !!store?.alphabet.letter(ch)?.contours.length;
 }
 
 function scheduleChecks() {
@@ -2413,8 +2772,9 @@ function scheduleChecks() {
     const run = () => {
       if (p !== project || !store) return; // changed again: the next round will do it
       const l = layoutPanel(store, p);
-      const checks = checkPasses(l, buildPasses(l, p.machine), p.machine, bedFit(p.panelWidth, p.panelHeight));
-      machineChecks = { project: p, problems: machineProblems(checks) };
+      const passes = buildPasses(l, p.machine);
+      const checks = checkPasses(l, passes, p.machine, bedFit(p.panelWidth, p.panelHeight));
+      machineChecks = { project: p, problems: machineProblems(checks, passDepths(passes), p.machine, p.capHeight) };
       refreshProblems();
     };
     if ('requestIdleCallback' in window) requestIdleCallback(run, { timeout: 2000 });
@@ -2422,15 +2782,134 @@ function scheduleChecks() {
   }, 500);
 }
 
+const fixButtons = (fixes: Fix[]) =>
+  fixes.length ? `<span class="fixes">${fixes.map((f) => `<button type="button" data-fix="${esc(f.id)}">${esc(f.label)}</button>`).join('')}</span>` : '';
+
 function showProblemList() {
   $('warn-pop').querySelector('ul')!.innerHTML = problems.length
     ? problems
         .map(
           (q) =>
-            `<li class="${q.level}" data-stage="${q.stage}" title="Go to ${STAGE_NAMES[q.stage]}"><b>${q.level === 'bad' ? '✗' : '!'}</b><span>${esc(q.text)}</span><small>${STAGE_NAMES[q.stage]}</small></li>`,
+            `<li class="${q.level}" data-stage="${q.stage}" title="Go to ${STAGE_NAMES[q.stage]}"><b>${q.level === 'bad' ? '✗' : '!'}</b><span>${esc(q.text)}</span><small>${STAGE_NAMES[q.stage]}</small>${fixButtons(q.fixes)}</li>`,
         )
         .join('')
     : '<li class="ok"><b>✓</b><span>Nothing needs putting right.</span></li>';
+}
+
+// ---------------------------------------------------------------- one-click fixes
+
+/** Move a line placed by hand the least distance that brings it inside the margins. */
+function moveLineInside(index: number) {
+  const line = lineAtIndex(index);
+  if (!line?.ink) return;
+  const box = contentBox(project);
+  const k = project.capHeight;
+  const shift = (a0: number, a1: number, b0: number, b1: number) => (a0 < b0 ? b0 - a0 : a1 > b1 ? b1 - a1 : 0);
+  const dx = shift(line.ink.x0, line.ink.x1, box.x0, box.x1);
+  const dy = shift(line.baselineY - k, line.baselineY, box.y0, box.y1);
+  const p0 = placementOf(line);
+  setPlacement(index, { ...p0, x: round(p0.x + dx, 3), baseline: round(p0.baseline + dy, 3) });
+  say(`Line ${line.number} moved inside the margins. Ctrl+Z undoes it.`);
+}
+
+/** Change the text, carrying placed lines, blank-line heights and one-gap kerning with it. */
+function setText(text: string) {
+  selected = null;
+  update({ text, ...remapForEdit(project, text) });
+}
+
+/** Carry out a one-click fix from the problems list (problems.ts); each is one step to undo. */
+function runFix(id: string) {
+  if (!store || !layout) return;
+  const [what, arg] = id.split(':');
+  const n = Number(arg);
+  const machine = project.machine;
+  const mc = (key: keyof MachineSettings) => $('machine').querySelector<HTMLInputElement>(`[data-mc="${key}"]`)!;
+  switch (what) {
+    case 'fit-lettering':
+      return fitLettering('both');
+    case 'fit-panel':
+      return fitPanelToLettering();
+    case 'auto-line': {
+      const number = lineNumber(layout, n);
+      setPlacement(n, null);
+      return say(`Line ${number} returned to auto: it follows the line spacing and alignment again. Ctrl+Z undoes it.`);
+    }
+    case 'inside-line':
+      return moveLineInside(n);
+    case 'line-spacing':
+      update({ lineSpacing: n });
+      return say(`Line spacing opened to ${n} mm. Ctrl+Z undoes it.`);
+    case 'caps':
+      setText([...project.text].map((ch) => (/\s/.test(ch) || hasLetter(ch) || !hasLetter(ch.toUpperCase()) ? ch : ch.toUpperCase())).join(''));
+      return say('Changed to capitals. Ctrl+Z undoes it.');
+    case 'remove-missing': {
+      // Each one goes with the space it leaves, so no double spaces or spaces at a line's end are left behind.
+      const out: string[] = [];
+      const chars = [...project.text];
+      for (let i = 0; i < chars.length; i++) {
+        const ch = chars[i];
+        if (/\s/.test(ch) || hasLetter(ch)) {
+          out.push(ch);
+          continue;
+        }
+        const next = chars[i + 1];
+        const atStart = !out.length || out[out.length - 1] === '\n';
+        if (out[out.length - 1] === ' ' && (next === undefined || next === ' ' || next === '\n')) out.pop();
+        else if (atStart && next === ' ') i++;
+      }
+      setText(out.join(''));
+      return say('Taken out of the text. Ctrl+Z undoes it.');
+    }
+    case 'panel-default':
+      update({
+        panelWidth: defaultProject.panelWidth,
+        panelHeight: defaultProject.panelHeight,
+        margins: defaultProject.margins,
+        border: defaultProject.border,
+      });
+      requestAnimationFrame(fitPanel);
+      return say('Panel, border and margins returned to the starting sizes. Ctrl+Z undoes it.');
+    case 'bed-standard':
+    case 'bed-extended': {
+      const bed = what === 'bed-standard' ? BED : BED_EXTENDED;
+      const change = shrinkDesignToBed(project, bed);
+      if (!change) return;
+      update(change);
+      requestAnimationFrame(fitPanel);
+      return say(`Everything shrunk to fit the ${what === 'bed-standard' ? '' : 'extended '}bed: panel ${change.panelWidth} × ${change.panelHeight} mm, cap height ${change.capHeight} mm. Ctrl+Z undoes it.`);
+    }
+    case 'reload-picture':
+      return $('ref-file').click();
+    case 'remove-picture':
+      scaling = null;
+      update({ refImage: null });
+      return say('Reference picture removed. Ctrl+Z puts it back.');
+    case 'enter-stock':
+      return goToSetting(mc('stockThickness'));
+    case 'go-bit-depth':
+      return goToSetting(mc('toolCutDepth'));
+    case 'go-bit-angle':
+      return goToSetting(mc('toolAngle'));
+    case 'go-border':
+      return goToSetting(project.border.style === 'incised' ? $('b-width') : $('border-style').querySelector<HTMLElement>('button.on') ?? $('border-style'));
+    case 'cap-height': {
+      const change = resizeLettering(layoutPanel(store, project), n);
+      if (!change) return;
+      update(change);
+      return say(`Letters made smaller, everything in step: cap height ${n} mm. Ctrl+Z undoes it.`);
+    }
+    case 'all-passes':
+      update({ machine: { ...machine, passes: { hairline: true, datum: true, slit: true } } });
+      return say('Every pass will be run. Ctrl+Z undoes it.');
+  }
+}
+
+/** Every fix the problems list offers now, once each (for Ctrl+K). */
+function currentFixes(): Fix[] {
+  const seen = new Map<string, Fix>();
+  for (const q of problems) for (const f of q.fixes) if (!seen.has(f.id)) seen.set(f.id, f);
+  return [...seen.values()];
 }
 
 // ---------------------------------------------------------------- "More" folds
@@ -2680,9 +3159,26 @@ function commands(): Command[] {
   add(measuring ? 'Stop measuring' : 'Measure between two points', () => setMeasuring(!measuring), 'M', 'ruler distance');
   add(`${inspectOpen ? 'Hide' : 'Show'} the inspection panel`, () => setInspect(!inspectOpen), 'I', 'overview balance');
   add(`Turn snapping ${snapping ? 'off' : 'on'}`, () => setSnapping(!snapping), 'S');
-  add('True size', () => view.frame(project.panelWidth, project.panelHeight, pxPerMm()), 'View', 'full size zoom');
-  add('Fit the panel on the screen', fitPanel, 'View', 'zoom');
-  add('Fit the panel to the lettering', fitPanelToLettering, 'Panel', 'size');
+  add('True size', () => view.frame(project.panelWidth, project.panelHeight, pxPerMm()), 'Shift+Z', 'full size zoom view');
+  add('Zoom to panel', fitPanel, 'Z', 'whole panel screen view');
+  add('Fit the panel to the lettering', fitPanelToLettering, 'Shift+F', 'size board');
+  add('Fit the lettering to the panel', () => fitLettering('both'), 'F', 'scale size fill');
+  add("Spread the selected line's letters", () => spreadLine(1, 0.1), ']', 'letter spacing wider line open');
+  add("Close up the selected line's letters", () => spreadLine(-1, 0.1), '[', 'letter spacing tighter line narrower');
+  add(
+    "Reset the selected line's own spacing",
+    () => {
+      const line = lineAtIndex(selectedLine);
+      if (!line) return say('Select a line first: click it, or its number in the margin.');
+      setLineExtra(line.index, { letter: 0, word: 0 });
+    },
+    'Line',
+    'letter word spacing clear',
+  );
+  // Whatever the problems list offers now, by name.
+  for (const f of currentFixes()) add(`Put right: ${f.label}`, () => runFix(f.id), 'Problems', 'fix problem warning');
+  add('Fit the lettering to the panel across its width', () => fitLettering('width'), 'Panel', 'scale size fill');
+  add('Fit the lettering to the panel up its height', () => fitLettering('height'), 'Panel', 'scale size fill');
   add('Re-flow all lines', () => $('reflow').click(), 'Write', 'lines auto');
   add(
     'Suggest spacing (even up)',
@@ -2808,8 +3304,8 @@ function saveProject() {
       localStorage.setItem(PROJECT_KEY, JSON.stringify(project));
       // Kerning, groups and even-up settings belong to the alphabet, for every job.
       if (alphabetName) {
-        const { kerning, groupKerning, groups, evenUp } = project;
-        localStorage.setItem(alphaKey(), JSON.stringify({ kerning, groupKerning, groups, evenUp }));
+        const { kerning, groupKerning, groups, evenUp, kernCap } = project;
+        localStorage.setItem(alphaKey(), JSON.stringify({ kerning, groupKerning, groups, evenUp, kernCap }));
       }
     } catch {
       /* storage unavailable */

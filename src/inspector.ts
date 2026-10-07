@@ -61,7 +61,7 @@ export function lineListHtml(layout: Layout, selectedLine: number | null, esc: (
       return `
       <div class="ln${s.index === selectedLine ? ' sel' : ''}" data-select-line="${s.index}">
         <div class="ln-top">
-          <span class="ln-num">${s.index + 1}</span>
+          <span class="ln-num">${s.number}</span>
           <span class="ln-text">${esc(s.text.trim())}</span>
           <button class="ln-state ${state.toLowerCase()}" data-line-auto="${s.index}" ${s.placed && !s.locked ? '' : 'disabled'}
             title="${s.placed && !s.locked ? 'Placed by hand. Click to return it to auto.' : state === 'Auto' ? 'Follows the line spacing and alignment' : 'Locked'}">${state}</button>

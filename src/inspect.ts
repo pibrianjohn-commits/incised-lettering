@@ -6,6 +6,8 @@ import type { Layout, PlacedLetter } from './layout';
 
 export interface LineStats {
   index: number;
+  /** The number the carver sees (lettered lines only). */
+  number: number;
   text: string;
   /** Length of the line's letters, end to end, mm. */
   length: number;
@@ -65,6 +67,7 @@ export function lineStats(layout: Layout): LineStats[] {
       const ink = layout.letters.filter((t) => t.line === l.index).reduce((s, t) => s + letterArea(t), 0);
       return {
         index: l.index,
+        number: l.number ?? l.index + 1,
         text: l.text,
         length,
         percentOfPanel: (100 * length) / p.panelWidth,

@@ -74,7 +74,11 @@
           <p class="hint">
             Click a line, or its number in the margin, and its tools appear beside it. Drag it to move it; it snaps to the
             panel centre, margins, guides and the other lines (hold <kbd>Alt</kbd> to move freely). The arrow keys nudge it
-            0.1 mm, or 1 mm with <kbd>Shift</kbd>.
+            0.1 mm, or 1 mm with <kbd>Shift</kbd>. Drag the handles at its ends to spread or close its letters.
+          </p>
+          <p class="hint">
+            A blank line is a spacer, shown as a dashed band: drag its bottom edge to make it taller or shorter, or click it
+            to type its height.
           </p>
           <button id="reflow" class="quiet" title="Put every line back in its automatic place (locked lines stay)">Re-flow all</button>
         </section>
@@ -165,10 +169,23 @@
         <section>
           <h2>Panel</h2>
           <div class="boxes">
-            <label>Width <span><input type="number" id="panelWidth" min="10" max="1000" step="0.5" /> mm</span></label>
-            <label>Height <span><input type="number" id="panelHeight" min="10" max="1000" step="0.5" /> mm</span></label>
+            <label>Width <span><input type="number" id="panelWidth" min="1" step="0.5" /> mm</span></label>
+            <label>Height <span><input type="number" id="panelHeight" min="1" step="0.5" /> mm</span></label>
           </div>
-          <button id="fit-panel" title="Size the panel to hold the lettering plus the margins and border">Fit panel to the lettering</button>
+          <div class="fit-rows">
+            <div class="row">
+              <span class="name">Panel to the lettering <small>size the board round the lettering and margins</small></span>
+              <button id="fit-panel" title="Size the panel to hold the lettering plus the margins and border (Shift+F)">Fit panel</button>
+            </div>
+            <div class="row stack">
+              <span class="name">Lettering to the panel <small>scale the lettering to fill the space inside the margins</small></span>
+              <span class="seg" id="fit-lettering">
+                <button data-fit="both" title="As big as fits both ways (F)">Both</button>
+                <button data-fit="width" title="Margin to margin across">Width</button>
+                <button data-fit="height" title="Margin to margin up and down">Height</button>
+              </span>
+            </div>
+          </div>
           <p id="bed-status"></p>
         </section>
 
@@ -384,10 +401,32 @@
           <label>Baseline <input type="number" step="0.1" data-pos="baseline" /></label>
           <span class="unit">mm</span>
         </div>
+        <div class="ctx-boxes">
+          <label title="Added between every pair of letters on this line, on top of the letter spacing for the whole job. Drag the handles at the line's ends, or press [ and ]">Letter spacing <input type="number" step="0.05" data-extra="letter" /></label>
+          <label title="Added to every word space on this line">Word spacing <input type="number" step="0.1" data-extra="word" /></label>
+          <span class="unit">mm</span>
+        </div>
         <div class="ctx-buttons">
+          <button data-act="spacing" title="This line's letter and word spacing back to nothing extra">Reset spacing</button>
           <button data-act="auto" title="Put the line back where line spacing and alignment place it">Return to auto</button>
           <button data-act="lock"></button>
           <button data-act="fit" title="Stretch or squeeze this line to the width set under Space › More › Fit to a width">Fit to width</button>
+        </div>
+      </div>
+
+      <div id="spacer-pop" class="ctx" hidden>
+        <div class="ctx-head">
+          <b>Blank line</b>
+          <span class="line-text hint small">space between lines</span>
+          <button data-act="close" class="quiet" title="Close (Esc)">✕</button>
+        </div>
+        <div class="ctx-boxes">
+          <label>Height <input type="number" step="0.5" min="0" data-spacer-height /></label>
+          <span class="unit">mm</span>
+        </div>
+        <div class="ctx-buttons">
+          <button data-act="reset" title="One line spacing high, following the line spacing slider">Same as line spacing</button>
+          <button data-act="remove" title="Take the blank line out of the inscription (Delete)">Remove blank line</button>
         </div>
       </div>
 
@@ -414,8 +453,8 @@
         <span class="tools">
           <button id="measure" title="Measure between two points (M)">Measure</button>
           <button id="ins-toggle" title="Show or hide the inspection panel (I)">Inspect</button>
-          <button id="true-size" title="Show the panel at full size">True size</button>
-          <button id="fit" title="Fit the whole panel on the screen">Fit panel</button>
+          <button id="true-size" title="Show the panel at full size (Shift+Z)">True size</button>
+          <button id="fit" title="Show the whole panel on the screen (Z)">Zoom to panel</button>
         </span>
       </div>
 
@@ -481,7 +520,7 @@
     <div id="warn-pop" hidden>
       <h3>Problems</h3>
       <ul></ul>
-      <p class="hint small">Click a problem to go to the stage where it is put right.</p>
+      <p class="hint small">A button puts a problem right at once (Ctrl+Z undoes it). Click the problem itself to go to the stage where it is put right by hand.</p>
     </div>
 
     <dialog id="palette" aria-label="Find a command or setting">

@@ -33,12 +33,13 @@ export interface Project {
   /** …but never closer to the outline than this, mm. */
   datumMinimum: number;
   /**
-   * Hand kerning in mm for an exact letter pair (e.g. "AV"), wherever it
-   * occurs. Overrides the pair's group kerning. Saved with the alphabet, so
-   * it applies in every job.
+   * Hand kerning for an exact letter pair (e.g. "AV"), wherever it occurs.
+   * Overrides the pair's group kerning. Saved with the alphabet, so it
+   * applies in every job. Like all hand kerning it is kept in mm as it would
+   * be at KERN_CAP (25 mm) cap height, and scales with the letters.
    */
   kerning: Record<string, number>;
-  /** Hand kerning in mm by kerning group, keyed "right group|left group". Saved with the alphabet. */
+  /** Hand kerning by kerning group, keyed "right group|left group" (mm at KERN_CAP). Saved with the alphabet. */
   groupKerning: Record<string, number>;
   /** Which letters share a side shape, for group kerning. Saved with the alphabet. */
   groups: KernGroups;
@@ -50,7 +51,7 @@ export interface Project {
   /** Stock, tool, feeds, depths and which passes to run, for the G-code. */
   machine: MachineSettings;
   /**
-   * Hand kerning for one gap only, mm, added on top of the pair's kerning.
+   * Hand kerning for one gap only (mm at KERN_CAP), added on top of the pair's kerning.
    * Keyed by gap (see gapKey); the pair is kept so that if the text is edited
    * and different letters end up in that place, the adjustment is ignored.
    */
@@ -65,7 +66,22 @@ export interface Project {
   guides: { x: number[]; y: number[] };
   /** Lines placed or locked by hand, keyed by line number (0 = first line). */
   lines: Record<string, LinePlacement>;
+  /** Heights of blank lines, mm, keyed by line number; a blank line not listed is one line spacing high. */
+  spacers: Record<string, number>;
+  /** The cap height hand kerning is kept at (always KERN_CAP; older saves lack it and are converted). */
+  kernCap: number;
 }
+
+/**
+ * Hand kerning scales with the letters, as the alphabet's own kerning does
+ * (BRIEF.md, Decisions: "Kerning scales with the letters"). It is kept as it
+ * would be at this cap height, mm.
+ */
+export const KERN_CAP = 25;
+/** Kept kerning to mm at a cap height. */
+export const kernMm = (kept: number, capHeight: number) => (kept * capHeight) / KERN_CAP;
+/** mm at a cap height to kept kerning. */
+export const kernKept = (mm: number, capHeight: number) => Math.round(((mm * KERN_CAP) / capHeight) * 1e4) / 1e4;
 
 /**
  * A line placed by hand. It keeps its place when the line-spacing slider or
@@ -104,6 +120,8 @@ export const defaultProject: Project = {
   spaceDepth: 6,
   guides: { x: [], y: [] },
   lines: {},
+  spacers: {},
+  kernCap: KERN_CAP,
 };
 
 export interface EvenUpSettings {
@@ -140,12 +158,12 @@ export interface PlacedStop {
   datum: Contour[];
 }
 
-/** The pair kerning for a pair: its exact value if set, else its groups' value. */
+/** The pair kerning for a pair at the project's cap height, mm: its exact value if set, else its groups' value. */
 export function pairKerning(p: Project, a: string, b: string): { mm: number; from: 'pair' | 'group' | 'none'; groupMm: number } {
   const gk = groupPairKey(p.groups, a, b);
-  const groupMm = gk ? (p.groupKerning[gk] ?? 0) : 0;
+  const groupMm = gk ? kernMm(p.groupKerning[gk] ?? 0, p.capHeight) : 0;
   const exact = p.kerning[a + b];
-  if (exact !== undefined) return { mm: exact, from: 'pair', groupMm };
+  if (exact !== undefined) return { mm: kernMm(exact, p.capHeight), from: 'pair', groupMm };
   if (gk && p.groupKerning[gk] !== undefined) return { mm: groupMm, from: 'group', groupMm };
   return { mm: 0, from: 'none', groupMm };
 }
@@ -246,8 +264,10 @@ export interface Gap {
 }
 
 export interface PlacedLine {
-  /** 0 for the first line. Shown to the carver as 1, 2, 3… */
+  /** 0 for the first line of the text, blank lines included. */
   index: number;
+  /** The number shown to the carver: lettered lines only, 1, 2, 3…; null for a line with no letters. */
+  number: number | null;
   text: string;
   baselineY: number;
   /** Pen start of the line, mm. */
@@ -260,11 +280,23 @@ export interface PlacedLine {
   locked: boolean;
 }
 
+/** A blank line: a spacer whose height can be changed (Project.spacers). */
+export interface Spacer {
+  /** The blank line's place in the text (0 = first line). */
+  index: number;
+  /** The band of space it adds, mm from the panel's top edge: from where its cap line would be, `height` deep. */
+  top: number;
+  height: number;
+  /** Its height was set by hand (else it is one line spacing). */
+  custom: boolean;
+}
+
 export interface Layout {
   project: Project;
   letters: PlacedLetter[];
   gaps: Gap[];
   lines: PlacedLine[];
+  spacers: Spacer[];
   /** Lettering that runs outside the margins. */
   overflow: { wide: boolean; tall: boolean };
   /** Some datum lines were left off in a quick layout. */
@@ -283,8 +315,25 @@ export function layoutPanel(store: LetterStore, p: Project, quick = false): Layo
 
   // Stack the lines so the block of capitals is centred top to bottom within the margins.
   const box = contentBox(p);
-  const blockHeight = k + (texts.length - 1) * p.lineSpacing;
+  // Each line sits one step below the line before. A lettered line's step is the
+  // line spacing; a blank line is a spacer, and its step is its own height (one
+  // line spacing unless set by hand). A blank line at the end adds its height
+  // below the last lettered line.
+  const steps = lineSteps(p, texts);
+  const virtual: number[] = [];
+  let run = 0;
+  for (const st of steps) {
+    virtual.push(run);
+    run += st;
+  }
+  const last = texts.length - 1;
+  const trailing = isBlank(texts[last]) ? steps[last] - p.lineSpacing : 0;
+  const blockHeight = k + virtual[last] + trailing;
   const firstBaseline = box.y0 + (box.y1 - box.y0 - blockHeight) / 2 + k;
+  const spacers: Spacer[] = [];
+  texts.forEach((t, i) => {
+    if (isBlank(t)) spacers.push({ index: i, top: firstBaseline + virtual[i] - k, height: steps[i], custom: String(i) in p.spacers });
+  });
 
   const letters: PlacedLetter[] = [];
   const stops: PlacedStop[] = [];
@@ -300,7 +349,7 @@ export function layoutPanel(store: LetterStore, p: Project, quick = false): Layo
     let pen = 0;
     const gapKern = (i: number) => {
       const g = p.gapKerning[gapKey(li, i)];
-      return g && g.pair === chars[i - 1] + chars[i] ? g.mm : 0;
+      return g && g.pair === chars[i - 1] + chars[i] ? kernMm(g.mm, k) : 0;
     };
     const extra = p.lineExtras[String(li)] ?? { letter: 0, word: 0 };
     chars.forEach((ch, i) => {
@@ -333,8 +382,8 @@ export function layoutPanel(store: LetterStore, p: Project, quick = false): Layo
         : p.align === 'right'
           ? box.x1 - inkR
           : (box.x0 + box.x1) / 2 - (inkL + inkR) / 2;
-    const baselineY = place ? place.baseline : firstBaseline + li * p.lineSpacing;
-    const line: PlacedLine = { index: li, text, baselineY, x0, width, ink: null, placed: !!place, locked: !!place?.locked };
+    const baselineY = place ? place.baseline : firstBaseline + virtual[li];
+    const line: PlacedLine = { index: li, number: null, text, baselineY, x0, width, ink: null, placed: !!place, locked: !!place?.locked };
     lines.push(line);
 
     let prev: PlacedLetter | null = null;
@@ -395,11 +444,30 @@ export function layoutPanel(store: LetterStore, p: Project, quick = false): Layo
   });
 
   const inked = lines.filter((l) => l.ink);
+  inked.forEach((l, n) => (l.number = n + 1));
   const top = Math.min(...inked.map((l) => l.baselineY - k));
   const bottom = Math.max(...inked.map((l) => l.baselineY));
   const tall = inked.length > 0 && (top < box.y0 - 0.01 || bottom > box.y1 + 0.01);
 
-  return { project: p, letters, gaps, lines, overflow: { wide, tall }, datumPending, stops };
+  return { project: p, letters, gaps, lines, spacers, overflow: { wide, tall }, datumPending, stops };
+}
+
+/** A line with nothing on it but spaces: a spacer between lettered lines. */
+export function isBlank(text: string): boolean {
+  return !text.trim();
+}
+
+/**
+ * How far below each line the next one sits, mm: the line spacing after a
+ * lettered line, and a blank line's own height after a blank one.
+ */
+export function lineSteps(p: Project, texts = p.text.replace(/\r/g, '').split('\n')): number[] {
+  return texts.map((t, i) => (isBlank(t) ? Math.max(0, p.spacers[String(i)] ?? p.lineSpacing) : p.lineSpacing));
+}
+
+/** The number the carver sees for a line (lettered lines only, from 1), from its place in the text. */
+export function lineNumber(layout: Layout, index: number): number {
+  return layout.lines[index]?.number ?? layout.lines.filter((l) => l.ink && l.index < index).length + 1;
 }
 
 /**

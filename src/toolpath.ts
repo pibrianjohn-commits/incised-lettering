@@ -165,10 +165,10 @@ function items(layout: Layout): Item[] {
   const p = layout.project;
   const list: (Item & { line: number; x: number })[] = [];
   layout.letters.forEach((l, i) =>
-    list.push({ id: `${l.char} (line ${l.line + 1})#${i}`, line: l.line, x: l.box.x0, outline: l.outline, datum: l.datum, valleys: l.valleys }),
+    list.push({ id: `${l.char} (line ${layout.lines[l.line]?.number ?? l.line + 1})#${i}`, line: l.line, x: l.box.x0, outline: l.outline, datum: l.datum, valleys: l.valleys }),
   );
   layout.stops.forEach((s, i) =>
-    list.push({ id: `word stop (line ${s.line + 1})#${i}`, line: s.line, x: s.valleys[0][0].x, outline: s.outline, datum: s.datum, valleys: s.valleys }),
+    list.push({ id: `word stop (line ${layout.lines[s.line]?.number ?? s.line + 1})#${i}`, line: s.line, x: s.valleys[0][0].x, outline: s.outline, datum: s.datum, valleys: s.valleys }),
   );
   list.sort((a, b) => a.line - b.line || a.x - b.x);
   const out: Item[] = list;

@@ -282,7 +282,13 @@ button:hover { background: var(--hover); }
 button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 button:disabled { opacity: 0.45; cursor: default; background: var(--card); }
 button.on { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
-#fit-panel { margin-top: 8px; }
+.fit-rows { display: grid; gap: 8px; margin-top: 10px; }
+.fit-rows .row { align-items: center; }
+.fit-rows .name { font-size: 13px; white-space: normal; flex: 1 1 auto; min-width: 0; }
+.fit-rows .row > button, .fit-rows .row > .seg { flex: none; margin: 0; }
+.fit-rows .row.stack { flex-direction: column; align-items: stretch; gap: 6px; }
+.fit-rows .row.stack .seg { display: flex; }
+.fit-rows .row.stack .seg button { flex: 1; }
 .bed-status { margin: 8px 0 0; font-size: 13px; font-weight: 600; }
 .bed-status.standard { color: var(--ok); }
 .bed-status.extended { color: var(--ink); }
@@ -366,6 +372,22 @@ button.quiet { font-size: 13px; color: var(--muted); box-shadow: none; }
 #world .linehit.locked { cursor: not-allowed; }
 #world .linehit.sel { stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 5 3; fill-opacity: 0.06; }
 #work.dragging-line, #work.dragging-line * { cursor: grabbing !important; }
+/* The selected line's ends: drag to spread or close its letters. */
+#world .line-end-bar { stroke: var(--accent); stroke-width: 3; stroke-linecap: round; }
+#world .line-end-hit { stroke: transparent; stroke-width: 14; cursor: ew-resize; pointer-events: stroke; }
+#world .line-end:hover .line-end-bar { stroke-width: 5; }
+#work.dragging-end, #work.dragging-end * { cursor: ew-resize !important; }
+#work.dragging-end #line-pop { display: none; }
+/* Blank lines: spacers, their bottom edge a handle to drag their height. */
+#world .spacer-band { fill: var(--lines); fill-opacity: 0.06; stroke: var(--lines); stroke-width: 1; stroke-dasharray: 3 3; cursor: pointer; }
+#world .spacer.sel .spacer-band { fill: var(--accent); fill-opacity: 0.08; stroke: var(--accent); }
+#world .spacer-edge { stroke: var(--lines); stroke-width: 2; }
+#world .spacer.sel .spacer-edge { stroke: var(--accent); }
+#world .spacer-hit { stroke: transparent; stroke-width: 10; cursor: ns-resize; pointer-events: stroke; }
+#work.hide-guides #world .spacer, #work.clean #world .spacer,
+#work.hide-guides #labels .spacer-label, #work.clean #labels .spacer-label { display: none; }
+#labels .spacer-label { fill: var(--muted); font-size: 11px; text-anchor: start; }
+#work.dragging-spacer, #work.dragging-spacer * { cursor: ns-resize !important; }
 #world .gap { fill: var(--accent); fill-opacity: 0; cursor: pointer; }
 #world .gap:hover { fill-opacity: 0.12; }
 #world .gap.sel { fill-opacity: 0.16; stroke: var(--accent); stroke-width: 1.5; }
@@ -574,12 +596,17 @@ body[data-stage='3d'] #st-cursor, body[data-stage='3d'] .st-zoom, body[data-stag
 }
 #warn-pop h3 { margin: 0; font-size: 14px; }
 #warn-pop ul { list-style: none; padding: 0; margin: 6px 0; }
-#warn-pop li { display: grid; grid-template-columns: 16px 1fr auto; gap: 8px; align-items: baseline; padding: 6px; border-radius: 6px; cursor: pointer; }
+#warn-pop li { color: var(--ink); margin: 0; font-size: 13px; display: grid; grid-template-columns: 16px 1fr auto; gap: 8px; align-items: baseline; padding: 6px; border-radius: 6px; cursor: pointer; }
 #warn-pop li:hover { background: var(--hover); }
 #warn-pop li.bad b { color: var(--bad); }
 #warn-pop li.warn b { color: var(--caution); }
 #warn-pop li.ok { color: var(--ok); cursor: default; }
 #warn-pop small { color: var(--muted); border: 1px solid var(--rule); border-radius: 4px; padding: 0 5px; }
+/* One-click fixes under a problem (and under a failed G-code check). */
+.fixes { display: flex; flex-wrap: wrap; gap: 6px; }
+.fixes button { margin: 0; padding: 3px 9px; font-size: 12px; font-weight: 500; color: var(--ink); cursor: pointer; }
+#warn-pop .fixes { grid-column: 2 / -1; margin-top: 2px; }
+#cam-checks .fixes { margin: 4px 0 6px 16px; }
 
 /* ---------------------------------------------------------- boxes over everything: search, keys, bench sheet, questions */
 

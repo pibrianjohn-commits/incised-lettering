@@ -5,7 +5,7 @@
 // accept, refuse or tweak; fitting returns the extra spacing to apply.
 
 import { sideShape, type SideShape } from './groups';
-import { contentBox, layoutPanel, type Layout, type LineExtra, type Project } from './layout';
+import { contentBox, isBlank, layoutPanel, type Layout, type LineExtra, type Project } from './layout';
 import type { LetterStore } from './letters';
 import { negativeSpace } from './negativeSpace';
 
@@ -93,7 +93,9 @@ export function fitLine(store: LetterStore, p: Project, index: number, width: nu
 /**
  * Fit every line to `width`, and if `height` is given, set the line spacing
  * so the block runs from the first cap line to the last baseline in exactly
- * that height. Returns the changes to make.
+ * that height (blank lines set to their own height keep it; the others open
+ * or close with the line spacing). Returns the changes to make; `skipped`
+ * lists the numbers of lines that could not be fitted.
  */
 export function fitBlock(
   store: LetterStore,
@@ -104,16 +106,26 @@ export function fitBlock(
 ): { lineExtras: Record<string, LineExtra>; lineSpacing?: number; skipped: number[] } {
   const lineExtras = { ...p.lineExtras };
   const skipped: number[] = [];
-  const count = p.text.replace(/\r/g, '').split('\n').length;
+  const texts = p.text.replace(/\r/g, '').split('\n');
   const layout = layoutPanel(store, p, true);
-  for (let i = 0; i < count; i++) {
-    if (!layout.lines[i]?.ink) continue;
+  for (let i = 0; i < texts.length; i++) {
+    const line = layout.lines[i];
+    if (!line?.ink) continue;
     const e = fitLine(store, { ...p, lineExtras }, i, width, by);
     if (e) lineExtras[String(i)] = e;
-    else skipped.push(i + 1);
+    else skipped.push(line.number ?? i + 1);
   }
   const result: { lineExtras: Record<string, LineExtra>; lineSpacing?: number; skipped: number[] } = { lineExtras, skipped };
-  if (height !== null && count > 1) result.lineSpacing = Math.round(((height - p.capHeight) / (count - 1)) * 1000) / 1000;
+  const lettered = texts.map((t, i) => (isBlank(t) ? -1 : i)).filter((i) => i >= 0);
+  if (height !== null && lettered.length > 1) {
+    let fixed = 0;
+    let n = 0;
+    for (let i = lettered[0]; i < lettered[lettered.length - 1]; i++) {
+      if (isBlank(texts[i]) && String(i) in p.spacers) fixed += p.spacers[String(i)];
+      else n++;
+    }
+    if (n > 0) result.lineSpacing = Math.round(((height - p.capHeight - fixed) / n) * 1000) / 1000;
+  }
   return result;
 }
 

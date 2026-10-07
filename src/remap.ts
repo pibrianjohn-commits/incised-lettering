@@ -9,7 +9,7 @@
 import { gapKey, type LinePlacement, type Project } from './layout';
 
 /** The changes to apply to the project alongside `newText`. */
-export function remapForEdit(p: Project, newText: string): Pick<Project, 'gapKerning' | 'lines' | 'lineExtras'> {
+export function remapForEdit(p: Project, newText: string): Pick<Project, 'gapKerning' | 'lines' | 'lineExtras' | 'spacers'> {
   const before = [...p.text.replace(/\r/g, '')];
   const after = [...newText.replace(/\r/g, '')];
 
@@ -70,7 +70,26 @@ export function remapForEdit(p: Project, newText: string): Pick<Project, 'gapKer
     return out;
   };
 
-  return { gapKerning, lines: followLine<LinePlacement>(p.lines), lineExtras: followLine(p.lineExtras) };
+  // A blank line's height follows the blank line: it goes with the line break
+  // just before it (or, for a blank first line, the one just after it), as long
+  // as that survives the edit and the line is still blank.
+  const spacers: Project['spacers'] = {};
+  const newLines = after.join('').split('\n');
+  for (const [key, h] of Object.entries(p.spacers ?? {})) {
+    const li = Number(key);
+    if (li >= startsOld.length) continue;
+    let n: number | null = null;
+    if (li > 0) {
+      const m = map(startsOld[li] - 1);
+      if (m !== null) n = lineOf(startsNew, m + 1);
+    } else if (startsOld.length > 1) {
+      const m = map(startsOld[1] - 1);
+      if (m !== null) n = lineOf(startsNew, m);
+    } else n = 0;
+    if (n !== null && n < newLines.length && !newLines[n].trim()) spacers[String(n)] = h;
+  }
+
+  return { gapKerning, lines: followLine<LinePlacement>(p.lines), lineExtras: followLine(p.lineExtras), spacers };
 }
 
 /** Position of the first character of each line. */
