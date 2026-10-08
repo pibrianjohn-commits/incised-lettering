@@ -233,7 +233,7 @@ function settings(input: SheetInput): [string, string] {
             ? linkedGaps
                 .map((g) => {
                   const joint = g.left.joints?.[Number(g.key.split(':')[1]) - g.left.pos - 1];
-                  const thick = joint ? `joined ${joint.width.toFixed(2)} mm thick${joint.fill ? ', filled' : ''}, ` : '';
+                  const thick = !joint ? '' : joint.width < 0.005 ? 'no wood joining them, ' : `joined ${joint.width.toFixed(2)} mm thick${joint.fill ? ', filled' : ''}, `;
                   return `${esc([...g.pair].join(' '))} on line ${L.lines[g.line]?.number ?? g.line + 1}, ${thick}overlap ${mm(g.link!.overlap)}`;
                 })
                 .join('; ')

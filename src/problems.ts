@@ -515,7 +515,10 @@ function linkProblems(layout: Layout): Problem[] {
         level: 'warn',
         stage: 'space',
         kind: 'link',
-        text: `The ${named(chars[n])} and ${named(chars[n + 1])} in line ${lineNumber(layout, l.line)} are joined by only ${j.width.toFixed(2)} mm of wood.`,
+        text:
+          j.width < 0.005
+            ? `The ${named(chars[n])} and ${named(chars[n + 1])} in line ${lineNumber(layout, l.line)} are linked, but no wood joins them.`
+            : `The ${named(chars[n])} and ${named(chars[n + 1])} in line ${lineNumber(layout, l.line)} are joined by only ${j.width.toFixed(2)} mm of wood.`,
         fixes: [],
         key: `thin:${key}`,
         facts: [`thin:${key}`],

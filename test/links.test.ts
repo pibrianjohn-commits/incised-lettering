@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { alphabetFromFont } from '../src/alphabet';
 import { findCollisions } from '../src/collisions';
-import { insideShape, type Pt } from '../src/geometry';
+import { insideShape, signedArea, type Pt } from '../src/geometry';
 import { toGcode } from '../src/gcode';
 import { defaultProject, kernKept, layoutPanel, type Layout, type PlacedLetter, type Project } from '../src/layout';
 import { LetterStore } from '../src/letters';
@@ -279,26 +279,63 @@ describe('the joint, measured as wood and filled', () => {
     }
   });
 
-  it('every pair of capitals and figures, linked at the starting overlap: each join is filled to 0.6 mm, or else measured and left to the Problems list', () => {
+  it('every pair of capitals and figures, linked at the starting overlap: each join is filled to 0.6 mm or already that thick, and no fill shuts in a speck of wood', () => {
     const chars = [...'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789&'];
+    const holes = (cs: Pt[][]) => {
+      const big = cs.reduce((m, c) => (Math.abs(signedArea(c)) > Math.abs(m) ? signedArea(c) : m), 0);
+      return cs.filter((c) => Math.sign(signedArea(c)) !== Math.sign(big)).length;
+    };
     let filled = 0;
-    let thin = 0;
     for (const x of chars)
       for (const y of chars) {
         const [a, b] = [x, y].map((c) => store.alphabet.letter(c)!.contours);
         const t = touchAdvance(a, b);
         if (t === null) continue;
-        const j = unitRun([a, b], [LINK_OVERLAP / 25], () => t, THIN_JOINT / 25)!.joints[0];
-        expect(j.width, x + y).toBeGreaterThan(0.004); // never nothing: 0.1 mm at 25 mm
+        const run = unitRun([a, b], [LINK_OVERLAP / 25], () => t, THIN_JOINT / 25)!;
+        const j = run.joints[0];
+        expect(j.width, x + y).toBeGreaterThanOrEqual(THIN_JOINT / 25 - 1e-6);
         expect(j.width, x + y).toBeLessThan(1);
         if (j.fill) {
           filled++;
-          expect(j.width, x + y).toBeGreaterThanOrEqual(THIN_JOINT / 25 - 1e-6);
-        } else if (j.width < THIN_JOINT / 25) thin++;
+          expect(holes(run.outline), x + y).toBeLessThanOrEqual(holes(unitRun([a, b], [LINK_OVERLAP / 25], () => t, THIN_JOINT / 25, false)!.outline));
+        }
       }
     expect(filled).toBeGreaterThan(300);
-    // Left thin only where a tail runs out to a point against a round letter (0 S and 5 S), cured by overlapping 0.5 mm more.
-    expect(thin).toBeLessThanOrEqual(2);
+  }, 120000);
+
+  it('a figure’s flag or a beard meeting the side of a bowl reads as the wood that joins them, not the bowl’s height (“A.D. 1910”: 9 and 1)', () => {
+    const p = proj({ text: 'A.D. 1910', capHeight: 25, links: linked('A.D. 1910', ['0:7']) });
+    const l = lay(p);
+    const j = letter(l, '91').joints![0];
+    expect(j.fill).not.toBeNull();
+    expect(j.width).toBeGreaterThanOrEqual(0.6 - 0.001);
+    expect(j.width).toBeLessThan(0.7);
+    for (const pair of ['&V', '81', 'G9']) {
+      const [a, b] = [...pair].map((c) => store.alphabet.letter(c)!.contours);
+      const t = touchAdvance(a, b)!;
+      expect(unitRun([a, b], [LINK_OVERLAP / 25], () => t, THIN_JOINT / 25)!.joints[0].width * 25, pair).toBeLessThan(0.7);
+    }
+  });
+
+  it('where an S’s tail divides into its body and the beak at its tip, the joint is read through the body (O and S)', () => {
+    const [a, b] = ['O', 'S'].map((c) => store.alphabet.letter(c)!.contours);
+    const t = touchAdvance(a, b)!;
+    expect(unitRun([a, b], [LINK_OVERLAP / 25], () => t, THIN_JOINT / 25)!.joints[0].width * 25).toBeGreaterThan(3);
+  });
+
+  it('a fill leaves no speck of wood shut in beside it, for the hairline to go round (I S, A S, S N, 6 M)', () => {
+    for (const text of ['IS', 'AS', 'SN', '6M', 'MS', 'XC']) {
+      const l = lay(proj({ text, capHeight: 25, links: linked(text, ['0:1']) }));
+      const run = l.letters.find((x) => x.span > 1)!;
+      const big = run.outline.reduce((m, c) => (Math.abs(signedArea(c)) > Math.abs(m) ? signedArea(c) : m), 0);
+      const inner = run.outline.filter((c) => Math.sign(signedArea(c)) !== Math.sign(big));
+      // Only the letters' own counters (A's, 6's) and spaces wider than the 0.6 mm minimum are left.
+      for (const c of inner) {
+        const xs = c.map((q) => q.x);
+        const ys = c.map((q) => q.y);
+        expect(Math.min(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)), text).toBeGreaterThan(0.6);
+      }
+    }
   }, 60000);
 
   it('the joint mark sits at the fill, and the gap tools and bench sheet read the thickness', () => {
@@ -433,13 +470,27 @@ describe('problems with linked letters', () => {
     }
   });
 
-  it('a join the fill cannot build up (the tip of an S’s tail meeting the side of a 0) is still named, with a fix that overlaps them more, or one that parts them', () => {
-    // The S's tail runs out to a point before it is 0.6 mm thick: there is nothing to fill from.
-    const p = proj({ text: '0S', capHeight: 25, links: linked('0S', ['0:1']) });
+  it('a join the fill cannot build up (the tail of a quote running to a point against a C) is still named, with a fix that overlaps them more, or one that parts them', () => {
+    // Linked 1 mm deep, the quote's tail runs out to a point inside the C before it is 0.6 mm thick: there is nothing to fill from.
+    const p = proj({ text: 'O’CONNOR', capHeight: 25, links: linked('O’CONNOR', ['0:2'], 1) });
     const thin = everyFixCures(p).filter((q) => q.kind === 'link');
-    expect(thin.map((q) => q.text)).toEqual(['The 0 and S in line 1 are joined by only 0.30 mm of wood.']);
+    expect(thin.map((q) => q.text)).toEqual([expect.stringMatching(/^The “’” and C in line 1 are joined by only 0\.\d\d mm of wood\.$/)]);
     // The least of the deeper overlaps that cures it, tried first; or part them again.
+    expect(thin[0].fixes.map((f) => f.label)).toEqual([expect.stringMatching(/^Overlap them [\d.]+ mm more$/), 'Unlink them']);
+  });
+
+  it('two letters linked so that they only touch are said to have no wood joining them, not to be joined by 0.00 mm', () => {
+    const p = proj({ text: 'AM', capHeight: 25, links: linked('AM', ['0:1'], 0) });
+    const thin = everyFixCures(p).filter((q) => q.kind === 'link');
+    expect(thin.map((q) => q.text)).toEqual(['The A and M in line 1 are linked, but no wood joins them.']);
     expect(thin[0].fixes.map((f) => f.label)).toEqual(['Overlap them 0.5 mm more', 'Unlink them']);
+  });
+
+  it('linked deep, a serif running free across the overlap is not read as the joint (7 and A at 2.8 mm)', () => {
+    for (const mm of [2.3, 2.8, 3.3]) {
+      const p = proj({ text: '7A', capHeight: 25, links: linked('7A', ['0:1'], mm) });
+      expect(problemsOf(p).filter((q) => q.kind === 'link'), `${mm} mm`).toEqual([]);
+    }
   });
 
   it('the thin-joint minimum scales with the letters: 0.6 mm at 25 mm is 1.2 mm at 50 mm', () => {

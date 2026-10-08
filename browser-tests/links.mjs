@@ -12,14 +12,16 @@
 //     dragged: the joined shapes' valley lines are worked out in a worker,
 //     so linking adds no more than LINK_EXTRA ms to the longest the page goes
 //     without answering, over the same line unlinked; and the shapes arrive;
+//     taking one of its joints deeper with Alt+← holds the page up no more
+//     than NUDGE_LIMIT ms;
 //   - on the carver's layout, linked at AM and MA, the joined feet are filled:
 //     the problems list names no thin joint, and the gap box reads the joint as
 //     wood, "joined N mm thick (filled)"; "Link them" for the A and M that touch
 //     in line 1, tried first in slices of at most MAX_SLICE ms, links and fills
 //     them too;
-//   - a joint no fill can build up (the tip of an S's tail against a 0) is
-//     named, with "Overlap them N mm more" and "Unlink them", and the first
-//     cures it;
+//   - a joint no fill can build up (a quote's tail running to a point inside
+//     a C, linked 1 mm deep, in O’CONNOR) is named, with "Overlap them N mm
+//     more" and "Unlink them", and the first cures it;
 //   - the 3D view, marked out and finished, shows the board with links, with
 //     no page errors.
 //
@@ -32,6 +34,7 @@ const SLOWDOWN = 4;
 const MAX_SLICE = 250; // ms of trying fixes at once (as collisions.mjs)
 const LINK_EXTRA = 150; // ms linking may add to the longest wait while dragging
 const SHAPES_LIMIT = 15000; // ms for a line of new joined shapes to arrive from the worker, slowed
+const NUDGE_LIMIT = 500; // ms the page may go without answering when a joint of a whole linked line is taken deeper (its outline, fills and joints are worked out on the page)
 const SLICE = 'Trying the fixes for letters that collide';
 
 const BRIAN = {
@@ -181,6 +184,21 @@ try {
     const marks = await linkMarks(joined.page);
     const valleys = await joined.page.evaluate(() => document.querySelectorAll('#world .valley').length);
     check(marks === LINE.length - 1 && valleys === 1, `${what}: one joined letter, with its valley lines (${marks} link marks, ${valleys} letter)`);
+    // Going in deeper on one joint of the line: the whole joined line is worked out again each time.
+    {
+      const page = joined.page;
+      await page.keyboard.press('2');
+      await page.click('#world [data-gap="0:4"]', { force: true });
+      await page.waitForTimeout(500);
+      await startTiming(page);
+      for (let i = 0; i < 4; i++) {
+        await page.keyboard.press('Alt+ArrowLeft');
+        await page.waitForTimeout(250);
+      }
+      await page.waitForTimeout(1500);
+      const timed = await stopTiming(page);
+      check(timed.held <= NUDGE_LIMIT, `${name}, a line linked end to end, Alt+← four times on one joint, ${joined.slowed ? `CPU ${SLOWDOWN}× slower` : 'CPU NOT SLOWED'}: the page went without answering for at most ${timed.held} ms at once (limit ${NUDGE_LIMIT})`);
+    }
     await joined.page.close();
 
     // A new joined shape, from the worker.
@@ -224,8 +242,8 @@ try {
       check(!!touch?.fixes.includes('Link them'), `${what}: the A and M that touch in line 1 offer “Link them” (${touch?.fixes.join(', ')})`);
       await startTiming(page);
       await page.click('#warn-pop li:has-text("The A and M in line 1 touch.") button >> text=Link them');
+      // The list stays open after a fix, and is tried again for the changed layout.
       await page.waitForTimeout(500);
-      await page.click('#st-warn');
       await settled();
       await page.waitForTimeout(800);
       const timed = await stopTiming(page);
@@ -248,14 +266,14 @@ try {
       await page.close();
     }
 
-    // A joint no fill can build up: the tip of an S's tail against the side of a 0.
+    // A joint no fill can build up: a quote's tail running to a point inside a C.
     {
-      const { page } = await openWith({ text: '0S', capHeight: 30, panelWidth: 200, panelHeight: 80, links: { '0:1': { pair: '0S', overlap: 0.3 } } }, false);
-      const what = `${name}, 0 and S linked`;
+      const { page } = await openWith({ text: 'O’CONNOR', capHeight: 30, panelWidth: 320, panelHeight: 100, links: { '0:2': { pair: '’C', overlap: 1 } } }, false);
+      const what = `${name}, ’ and C linked 1 mm deep`;
       await page.click('#st-warn');
       await page.waitForFunction(() => [...document.querySelectorAll('#warn-pop li')].some((li) => /joined by only/.test(li.textContent)) && !document.querySelector('#warn-pop .trying'), null, { timeout: 60000, polling: 50 });
       const thin = await page.evaluate(() => [...document.querySelectorAll('#warn-pop li')].filter((li) => /joined by only/.test(li.textContent)).map((li) => ({ text: li.querySelector('span').textContent, fixes: [...li.querySelectorAll('[data-fix]')].map((b) => b.textContent) })));
-      check(thin.length === 1 && /^The 0 and S in line 1 are joined by only 0\.\d\d mm of wood\.$/.test(thin[0].text) && /^Overlap them [\d.]+ mm more,Unlink them$/.test(thin[0].fixes.join()), `${what}: ${thin.map((q) => `“${q.text}” → ${q.fixes.join(', ')}`).join('; ')}`);
+      check(thin.length === 1 && /^The “’” and C in line 1 are joined by only 0\.\d\d mm of wood\.$/.test(thin[0].text) && /^Overlap them [\d.]+ mm more,Unlink them$/.test(thin[0].fixes.join()), `${what}: ${thin.map((q) => `“${q.text}” → ${q.fixes.join(', ')}`).join('; ')}`);
       await page.click('#warn-pop button >> text=/^Overlap them/');
       await page.waitForTimeout(800);
       const after = await page.evaluate(() => [...document.querySelectorAll('#warn-pop li span')].map((s) => s.textContent));
