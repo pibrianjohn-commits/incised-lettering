@@ -21,12 +21,16 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      # The whole history, so the build can number the version from the last pull request merged (vite.config.ts).
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
       - run: npm ci
+      # The unit tests only; the browser tests need Playwright, Firefox and a screen (npm run test:browser).
       - run: npm test
       - run: npm run build
       - uses: actions/upload-pages-artifact@v3

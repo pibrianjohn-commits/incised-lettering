@@ -465,7 +465,8 @@
         <div id="v3d-working" hidden role="status" aria-live="polite">
           <p><span class="v3d-what">Working out the board…</span> <b class="v3d-pct"></b></p>
           <div class="v3d-bar"><i></i></div>
-          <p class="v3d-foot"><span>The board shown stays until the new one is ready.</span> <button class="quiet" data-v3d="cancel">Cancel (Esc)</button><button data-v3d="again" hidden>Work it out</button></p>
+          <p class="v3d-foot"><span>The board shown stays until the new one is ready.</span> <button class="quiet" data-v3d="cancel">Cancel (Esc)</button><button data-v3d="again" hidden>Work it out</button><button data-v3d="refresh" class="primary" hidden>Refresh the app</button></p>
+          <details class="why" hidden><summary>Details</summary><pre></pre></details>
         </div>
       </div>
 
@@ -521,6 +522,7 @@
       </span>
       <button id="st-snap" title="Snapping while dragging a line to the centre, margins, guides and other lines (S)"></button>
       <span id="st-msg" aria-live="polite"></span>
+      <span id="st-version" title="Which version of the app this is. When online the newest always opens; offline, the copy saved on this computer."></span>
       <button id="st-warn" aria-haspopup="true" aria-expanded="false"></button>
     </footer>
     <div id="warn-pop" hidden>
@@ -536,7 +538,7 @@
     </dialog>
 
     <dialog id="keys" aria-labelledby="keys-title">
-      <header class="dlg-head"><h2 id="keys-title">Keyboard shortcuts</h2><button class="quiet" data-close>Close</button></header>
+      <header class="dlg-head"><h2 id="keys-title">Keyboard shortcuts</h2><span class="hint small" id="keys-version"></span><span class="grow"></span><button class="quiet" data-close>Close</button></header>
       <div id="keys-list"></div>
     </dialog>
 

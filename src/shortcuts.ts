@@ -27,6 +27,7 @@ export const SHORTCUTS: { group: string; items: [string, string][] }[] = [
       ['Ctrl + Shift + S', 'Save the project as a new file'],
       ['Ctrl + O', 'Open a project'],
       ['Ctrl + P', 'Bench sheet, to print'],
+      ['F5', 'Refresh the app: the newest version when online, the saved copy when not'],
     ],
   },
   {

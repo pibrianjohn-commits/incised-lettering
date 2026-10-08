@@ -9,6 +9,9 @@ Brian is a trained architectural woodcarver. He does not read or write code and 
 - Explain what you changed in plain workshop language, not code terms.
 - End every task with something he can open and look at on the published page.
 - Never ask him to run commands, edit files or debug.
+- He uses Firefox on Ubuntu, on an ordinary laptop (Intel i5, 16 GB), with the app's offline copy (added 8 Oct 2026).
+- His machine is a Genmitsu 3020-PRO Ultra running GRBL. The spindle is run by hand from its manual speed governor and is never controlled by the G-code.
+- The status bar shows which version of the app is running ("Version 22, published 8 Oct 2026, 21:40"). When he reports a problem, check the version in his screenshot first.
 
 ## Rules
 
@@ -30,7 +33,9 @@ A standing rule for every task, from 7 Oct 2026.
   - its keyboard shortcut (and its entry in Ctrl+K search and the ? key list);
   - its behaviour in every other tab, view and size.
 - Before finishing, use the feature as a letterer would. Try the awkward cases: blank lines, huge or tiny panels, letters off the board, panels too big for the machine. Fix anything illogical you find.
-- Test every heavy feature with the browser's CPU slowed 4×, as Brian's laptop is an ordinary one, not a fast development machine (added 7 Oct 2026). Heavy work goes off the page into a worker, with a progress bar and Esc to cancel, so the page never freezes. The 3D view's check is `npm run test:browser` (browser-tests/perf3d.mjs).
+- Test every heavy feature with the browser's CPU slowed 4×, as Brian's laptop is an ordinary one, not a fast development machine (added 7 Oct 2026). Heavy work goes off the page into a worker, with a progress bar and Esc to cancel, so the page never freezes. The 3D view's check is `npm run test:perf3d` (browser-tests/perf3d.mjs).
+- Every browser test runs in Firefox as well as Chrome (added 8 Oct 2026). `npm run test:browser` runs them all in both (browser-tests/; `BROWSERS=firefox` for one; browsers.mjs says how Firefox is found and slowed). Browser tests are never part of `npm test`: GitHub runs that before publishing, on a machine with no browsers or screen.
+- Test the installed app as Brian's browser lives with it, not only a clean browser (added 8 Oct 2026). A browser that has kept the offline copy through several updates can fail where a clean or private window works. browser-tests/updates.mjs publishes versions in quick succession, goes offline, and leaves a page open across updates; run it after any change to the offline copy (pwa/sw.js), to how the app loads its own files, or to the build.
 - Test with real inscriptions, including punctuation, numerals and blank lines, not just capital letters (added 7 Oct 2026): "No. 1312", "A.D. 1920", dates, quotation marks. Every character the alphabet has goes through the whole job in test/everychar.test.ts; a character that fails is a failing test.
 - Errors never reach Brian as raw messages ("TypeError…"). Whatever cannot be worked out is left out, the Problems badge names the character or line in plain words with a fix, and the rest of the job carries on.
 - Only ask Brian about craft decisions, never about obvious usability.
