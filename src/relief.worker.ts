@@ -7,25 +7,23 @@
 // letters linked into one shape (letters.ts), which take a moment each: the
 // page shows their outlines meanwhile.
 
+import { datumLines, type DatumRule } from './datum';
 import type { Contour } from './geometry';
 import { runJob, type ReliefJob } from './relief-job';
-import { letterValleyOptions, valleyLines } from './valley';
+import { letterValleyOptions, valleyLines, type ValleyLine } from './valley';
 import { APP_VERSION } from './version';
 
-/** A linked run's joined outline (cap height 1), to work out its valley lines. */
-export interface ShapeJob {
-  kind: 'valleys';
-  key: string;
-  outline: Contour[];
-}
+/** A linked run's joined outline (cap height 1), to work out its valley lines; or its valley lines at a size, for its datum lines. */
+export type ShapeJob = { kind: 'valleys'; key: string; outline: Contour[] } | { kind: 'datum'; key: string; valleys: ValleyLine[]; rule: DatumRule };
 
 self.onmessage = (e: MessageEvent<ReliefJob | ShapeJob>) => {
   const data = e.data;
-  if ('kind' in data && data.kind === 'valleys') {
+  if ('kind' in data) {
     try {
-      self.postMessage({ kind: 'valleys', key: data.key, valleys: valleyLines(data.outline, letterValleyOptions), version: APP_VERSION });
+      const answer = data.kind === 'valleys' ? { valleys: valleyLines(data.outline, letterValleyOptions) } : { datum: datumLines(data.valleys, data.rule) };
+      self.postMessage({ kind: data.kind, key: data.key, ...answer, version: APP_VERSION });
     } catch (err) {
-      self.postMessage({ kind: 'valleys', key: data.key, error: String(err), version: APP_VERSION });
+      self.postMessage({ kind: data.kind, key: data.key, error: String(err), version: APP_VERSION });
     }
     return;
   }

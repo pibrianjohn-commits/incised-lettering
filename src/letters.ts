@@ -6,8 +6,9 @@
 //
 // Letters linked into one shape (links.ts) are kept the same way, once per
 // run of characters and overlaps. Their valley lines take a moment (a tenth
-// to a third of a second each on a fast computer), so in the app they are
-// asked of a worker and the run shows its outline until they come.
+// to a third of a second each on a fast computer), and their datum lines at
+// each size longer than the letters' own, so in the app both are asked of a
+// worker: the run shows its outline, then its valleys, until they come.
 
 import type { Alphabet } from './alphabet';
 import { datumLines, type DatumRule } from './datum';
@@ -68,6 +69,8 @@ export class LetterStore {
   private asked = new Set<string>();
   /** In the app: hands a run's joined outline (unit scale) to the worker, which answers with putValleys. */
   ask: ((key: string, outline: Contour[]) => void) | null = null;
+  /** In the app: hands a run's valley lines at a size to the worker, for its datum lines; it answers with putDatum. */
+  askDatum: ((key: string, valleys: ValleyLine[], rule: DatumRule) => void) | null = null;
 
   constructor(readonly alphabet: Alphabet) {}
 
@@ -89,6 +92,13 @@ export class LetterStore {
   /** A run's valley lines, worked out elsewhere (the worker), at cap height 1. */
   putValleys(key: string, valleys: ValleyLine[]) {
     this.runValleys.set(key, valleys);
+    this.asked.delete(key);
+  }
+
+  /** A run's datum lines at a size, worked out elsewhere (the worker). */
+  putDatum(key: string, datum: Contour[]) {
+    if (this.datums.size > 2000) this.datums.clear();
+    this.datums.set(key, datum);
     this.asked.delete(key);
   }
 
@@ -132,10 +142,12 @@ export class LetterStore {
     if (valleys) {
       const dkey = `${key}|${k}|${rule.percent}|${rule.minimum}`;
       datum = this.datums.get(dkey) ?? null;
-      if (!datum && !quick) {
+      if (!datum && !quick && (mode === 'now' || !this.askDatum)) {
         datum = datumLines(sizedValleys, rule);
-        if (this.datums.size > 2000) this.datums.clear();
-        this.datums.set(dkey, datum);
+        this.putDatum(dkey, datum);
+      } else if (!datum && !quick && mode === 'ask' && !this.asked.has(dkey)) {
+        this.asked.add(dkey);
+        this.askDatum?.(dkey, sizedValleys, rule);
       }
     }
     return {

@@ -2,6 +2,7 @@ import { alphabetFromFont } from './alphabet';
 import { benchSheet, scaleName, strokeLabels } from './benchsheet';
 import { borderMarks } from './border';
 import { contourToSvg, polylineToSvg, type Contour } from './geometry';
+import { datumLines, type DatumRule } from './datum';
 import { LINK_OVERLAP } from './links';
 import type { ValleyLine } from './valley';
 import {
@@ -2692,48 +2693,65 @@ function reliefWorkerSource(): Promise<string> {
 }
 
 /**
- * Linked letters' valley lines (letters.ts) are worked out by an instance of
- * the 3D view's worker program of their own, a run at a time; the page shows
- * their outlines meanwhile, and lays them out afresh as each arrives. If the
- * worker can't be had, they are worked out on the page instead.
+ * Linked letters' valley lines, and their datum lines at each size
+ * (letters.ts), are worked out by an instance of the 3D view's worker program
+ * of their own, one at a time; the page shows what it has meanwhile, and lays
+ * them out afresh as each arrives. If the worker can't be had, they are worked
+ * out on the page instead.
  */
+type ShapeJob = { kind: 'valleys'; key: string; outline: Contour[] } | { kind: 'datum'; key: string; valleys: ValleyLine[]; rule: DatumRule };
 let shapeWorker: Worker | null = null;
-const shapeQueue: { key: string; outline: Contour[] }[] = [];
+let shapeWorkerAsked = false;
+const shapeQueue: ShapeJob[] = [];
 function askShape(key: string, outline: Contour[]) {
-  shapeQueue.push({ key, outline });
-  if (shapeWorker) return void shapeWorker.postMessage({ kind: 'valleys', key, outline });
+  sendShape({ kind: 'valleys', key, outline });
+}
+function askDatum(key: string, valleys: ValleyLine[], rule: DatumRule) {
+  sendShape({ kind: 'datum', key, valleys, rule });
+}
+function sendShape(job: ShapeJob) {
+  shapeQueue.push(job);
+  if (shapeWorker) return void shapeWorker.postMessage(job);
+  if (shapeWorkerAsked) return;
+  shapeWorkerAsked = true;
   reliefWorkerSource().then(
     (source) => {
-      if (!shapeWorker) {
-        shapeWorker = new Worker(source, { type: 'module' });
-        shapeWorker.onmessage = (e: MessageEvent<{ kind?: string; key: string; valleys?: ValleyLine[]; error?: string }>) => {
-          if (e.data.kind !== 'valleys' || !store) return;
-          const i = shapeQueue.findIndex((q) => q.key === e.data.key);
-          if (i >= 0) shapeQueue.splice(i, 1);
-          if (e.data.valleys) store.putValleys(e.data.key, e.data.valleys);
-          else {
-            console.error('The worker could not work out linked letters:', e.data.error);
-            store.valleysNow(e.data.key);
-          }
-          shapesArrived();
-        };
-        shapeWorker.onerror = (e) => {
-          console.error('The linked letters worker stopped:', e.message);
-          shapeWorker = null;
-          shapesOnPage();
-        };
-        for (const q of shapeQueue) shapeWorker.postMessage({ kind: 'valleys', key: q.key, outline: q.outline });
-      }
+      shapeWorker = new Worker(source, { type: 'module' });
+      shapeWorker.onmessage = (e: MessageEvent<{ kind?: string; key: string; valleys?: ValleyLine[]; datum?: Contour[]; error?: string }>) => {
+        const d = e.data;
+        if ((d.kind !== 'valleys' && d.kind !== 'datum') || !store) return;
+        const i = shapeQueue.findIndex((q) => q.key === d.key && q.kind === d.kind);
+        const job = i >= 0 ? shapeQueue.splice(i, 1)[0] : null;
+        if (d.valleys) store.putValleys(d.key, d.valleys);
+        else if (d.datum) store.putDatum(d.key, d.datum);
+        else {
+          console.error('The worker could not work out linked letters:', d.error);
+          if (job) shapeOnPage(job);
+        }
+        shapesArrived();
+      };
+      shapeWorker.onerror = (e) => {
+        console.error('The linked letters worker stopped:', e.message);
+        shapeWorker = null;
+        shapesOnPage();
+      };
+      for (const q of shapeQueue) shapeWorker.postMessage(q);
     },
     () => shapesOnPage(),
   );
+}
+
+function shapeOnPage(job: ShapeJob) {
+  if (!store) return;
+  if (job.kind === 'valleys') store.valleysNow(job.key);
+  else store.putDatum(job.key, datumLines(job.valleys, job.rule));
 }
 
 /** Without the worker: whatever is waiting is worked out here, one at a time. */
 function shapesOnPage() {
   const next = shapeQueue.shift();
   if (!next || !store) return;
-  store.valleysNow(next.key);
+  shapeOnPage(next);
   shapesArrived();
   if (shapeQueue.length) window.setTimeout(shapesOnPage, 0);
 }
@@ -4043,6 +4061,7 @@ async function start() {
   store = new LetterStore(alphabet);
   // Linked letters' valley lines are worked out by a worker, so the page never waits on them.
   store.ask = askShape;
+  store.askDatum = askDatum;
   alphabetName = alphabet.name;
   loadAlphabetSettings();
   syncControls();
