@@ -12,9 +12,14 @@
 //     dragged: the joined shapes' valley lines are worked out in a worker,
 //     so linking adds no more than LINK_EXTRA ms to the longest the page goes
 //     without answering, over the same line unlinked; and the shapes arrive;
-//   - on the carver's layout, linked at AM and MA, the problems list names the
-//     joints too thin to chisel, with "Overlap them N mm more", tried first in
-//     slices of at most MAX_SLICE ms; and the fix cures them;
+//   - on the carver's layout, linked at AM and MA, the joined feet are filled:
+//     the problems list names no thin joint, and the gap box reads the joint as
+//     wood, "joined N mm thick (filled)"; "Link them" for the A and M that touch
+//     in line 1, tried first in slices of at most MAX_SLICE ms, links and fills
+//     them too;
+//   - a joint no fill can build up (the tip of an S's tail against a 0) is
+//     named, with "Overlap them N mm more" and "Unlink them", and the first
+//     cures it;
 //   - the 3D view, marked out and finished, shows the board with links, with
 //     no page errors.
 //
@@ -187,31 +192,45 @@ try {
         await page.click(`#world [data-gap="${gap}"]`, { force: true });
         await page.keyboard.press('l');
       }
+      const t1 = Date.now();
       const ok = await page
         .waitForFunction(() => document.querySelectorAll('#labels .link-mark').length === 4 && document.querySelectorAll('#world path.valley').length === 1 && document.querySelector('#world path.valley').getAttribute('d').length > 100, null, { timeout: SHAPES_LIMIT, polling: 50 })
         .then(() => true, () => false);
-      check(ok, `${name}, KAXYW linked one gap after another (four new shapes), ${slowed ? `CPU ${SLOWDOWN}× slower` : 'CPU NOT SLOWED'}: the joined letter's valley lines came in ${Date.now() - t0} ms (limit ${SHAPES_LIMIT})`);
+      check(ok, `${name}, KAXYW linked one gap after another (four new shapes), ${slowed ? `CPU ${SLOWDOWN}× slower` : 'CPU NOT SLOWED'}: the joined letter's valley lines came ${Date.now() - t1} ms after the last link (limit ${SHAPES_LIMIT}), ${Date.now() - t0} ms after the first`);
       await page.close();
     }
 
-    // The carver's layout, linked at AM and MA: the problems list.
+    // The carver's layout, linked at AM and MA: filled feet, the gap box, the problems list.
     {
       const links = { '4:1': { pair: 'AM', overlap: 0.3 }, '4:2': { pair: 'MA', overlap: 0.3 } };
       const { page, slowed } = await openWith({ ...BRIAN, links });
       const what = `${name}, the carver's layout linked at AM and MA, ${slowed ? `CPU ${SLOWDOWN}× slower` : 'CPU NOT SLOWED'}`;
+      await page.keyboard.press('2'); // Space
+      for (const gap of ['4:0', '4:1']) {
+        await page.click(`#world [data-gap="${gap}"]`, { force: true });
+        await page.waitForTimeout(300);
+        const said = await page.evaluate(() => document.querySelector('#kern-pop .breakdown').textContent);
+        check(/^cut as one letter, joined 0\.7\d mm thick \(filled\)/.test(said), `${what}: the gap box reads the joint as wood (“${said}”)`);
+      }
+      await page.keyboard.press('Escape');
       await page.click('#st-warn');
-      await page.waitForFunction(() => [...document.querySelectorAll('#warn-pop li')].some((li) => /joined by only/.test(li.textContent)) && !document.querySelector('#warn-pop .trying'), null, { timeout: 60000, polling: 50 });
-      const list = await page.evaluate(() => [...document.querySelectorAll('#warn-pop li')].map((li) => ({ text: li.querySelector('span').textContent, fixes: [...li.querySelectorAll('[data-fix]')].map((b) => b.textContent) })));
-      const thin = list.filter((q) => /are joined by only/.test(q.text));
-      check(thin.length === 2 && thin.every((q) => q.fixes.join() === 'Overlap them 0.4 mm more'), `${what}: ${thin.map((q) => `“${q.text}” → ${q.fixes.join(', ')}`).join('; ')}`);
+      const settled = () => page.waitForFunction(() => document.querySelectorAll('#warn-pop li').length && !document.querySelector('#warn-pop .trying'), null, { timeout: 60000, polling: 50 });
+      const problems = () => page.evaluate(() => [...document.querySelectorAll('#warn-pop li')].map((li) => ({ text: li.querySelector('span').textContent, fixes: [...li.querySelectorAll('[data-fix]')].map((b) => b.textContent) })));
+      await settled();
+      const list = await problems();
+      check(!list.some((q) => /joined by only/.test(q.text)), `${what}: no joint is named too thin (${list.map((q) => `“${q.text}”`).join(', ')})`);
       check(list.some((q) => q.text === 'The J in line 2 runs into the M of the linked AMA in line 3.'), `${what}: the J runs into “the M of the linked AMA”`);
+      const touch = list.find((q) => q.text === 'The A and M in line 1 touch.');
+      check(!!touch?.fixes.includes('Link them'), `${what}: the A and M that touch in line 1 offer “Link them” (${touch?.fixes.join(', ')})`);
       await startTiming(page);
-      await page.click('#warn-pop button >> text=Overlap them 0.4 mm more');
-      await page.waitForFunction(() => !document.querySelector('#warn-pop .trying'), null, { timeout: 60000, polling: 50 });
+      await page.click('#warn-pop li:has-text("The A and M in line 1 touch.") button >> text=Link them');
+      await page.waitForTimeout(500);
+      await page.click('#st-warn');
+      await settled();
       await page.waitForTimeout(800);
       const timed = await stopTiming(page);
-      const after = await page.evaluate(() => [...document.querySelectorAll('#warn-pop li span')].map((s) => s.textContent));
-      check(after.filter((t) => /joined by only/.test(t)).length === 1, `${what}: “Overlap them 0.4 mm more” cures its joint (one left)`);
+      const after = await problems();
+      check((await linkMarks(page)) === 3 && !after.some((q) => /line 1 touch|joined by only/.test(q.text)), `${what}: “Link them” links the A and M in line 1, filled, with no thin joint (${after.map((q) => `“${q.text}”`).join(', ')})`);
       check(timed.slices > 0 && timed.slice <= MAX_SLICE, `${what}: the fixes were tried in ${timed.slices} slices, the longest ${timed.slice} ms (limit ${MAX_SLICE})`);
       console.log(`  ${what}: the longest the page went without answering, its redraw and the G-code checks included: ${timed.held} ms`);
 
@@ -226,6 +245,21 @@ try {
         check(shown, `${what}: the 3D view, ${state === 'marked' ? 'marked out' : 'finished'}, shows the board with links (${Date.now() - t0} ms)`);
         await page.click('#stages [data-stage="write"]');
       }
+      await page.close();
+    }
+
+    // A joint no fill can build up: the tip of an S's tail against the side of a 0.
+    {
+      const { page } = await openWith({ text: '0S', capHeight: 30, panelWidth: 200, panelHeight: 80, links: { '0:1': { pair: '0S', overlap: 0.3 } } }, false);
+      const what = `${name}, 0 and S linked`;
+      await page.click('#st-warn');
+      await page.waitForFunction(() => [...document.querySelectorAll('#warn-pop li')].some((li) => /joined by only/.test(li.textContent)) && !document.querySelector('#warn-pop .trying'), null, { timeout: 60000, polling: 50 });
+      const thin = await page.evaluate(() => [...document.querySelectorAll('#warn-pop li')].filter((li) => /joined by only/.test(li.textContent)).map((li) => ({ text: li.querySelector('span').textContent, fixes: [...li.querySelectorAll('[data-fix]')].map((b) => b.textContent) })));
+      check(thin.length === 1 && /^The 0 and S in line 1 are joined by only 0\.\d\d mm of wood\.$/.test(thin[0].text) && /^Overlap them [\d.]+ mm more,Unlink them$/.test(thin[0].fixes.join()), `${what}: ${thin.map((q) => `“${q.text}” → ${q.fixes.join(', ')}`).join('; ')}`);
+      await page.click('#warn-pop button >> text=/^Overlap them/');
+      await page.waitForTimeout(800);
+      const after = await page.evaluate(() => [...document.querySelectorAll('#warn-pop li span')].map((s) => s.textContent));
+      check(!after.some((t) => /joined by only/.test(t)), `${what}: “${thin[0]?.fixes[0]}” cures it`);
       await page.close();
     }
     await browser.close();

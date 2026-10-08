@@ -257,8 +257,12 @@ export interface PlacedLetter {
   valleys: ValleyLine[];
   datum: Contour[];
   box: Box;
-  /** Linked letters: each joint between two neighbours, how wide (mm) and where. */
-  joints?: { width: number; at: Pt }[];
+  /**
+   * Linked letters: each joint between two neighbours: how thick the wood is
+   * across it at its thinnest (mm), where it is, at the feet, the heads or
+   * elsewhere, and the fill that built it up, if any.
+   */
+  joints?: { width: number; at: Pt; place: 'foot' | 'head' | 'elsewhere'; fill: Contour | null; fills: Contour[] }[];
   /** Linked letters: each character's own box, so what touches it can be named by the character it touches. */
   parts?: { char: string; pos: number; box: Box }[];
 }
@@ -481,7 +485,7 @@ export function layoutPanel(store: LetterStore, p: Project, quick = false, shape
               valleys: r.valleys.map((v) => v.map((q) => ({ x: q.x + dx, y: q.y + dy, r: q.r }))),
               datum: (r.datum ?? []).map(move),
               box: { x0: r.box.x0 + dx, x1: r.box.x1 + dx, y0: r.box.y0 + dy, y1: r.box.y1 + dy },
-              joints: r.joints.map((j) => ({ width: j.width, at: { x: j.at.x + dx, y: j.at.y + dy } })),
+              joints: r.joints.map((j) => ({ width: j.width, at: { x: j.at.x + dx, y: j.at.y + dy }, place: j.place, fill: j.fill ? move(j.fill) : null, fills: j.fills.map(move) })),
               parts: run.map((c, n) => {
                 const b = store.marks(c, k, rule, true)?.box ?? { x0: 0, x1: 0, y0: 0, y1: 0 };
                 const x = x0 + pens[i + n];

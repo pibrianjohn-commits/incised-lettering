@@ -737,7 +737,7 @@ function applyView() {
     if (g.link && document.activeElement !== ov) ov.value = String(round(g.link.overlap, 2));
     const joint = g.link ? g.left.joints?.[Number(g.key.split(':')[1]) - g.left.pos - 1] : undefined;
     const parts = g.link
-      ? [`cut as one letter${joint ? `, joined ${joint.width.toFixed(2)} mm` : ''}`, 'no kerning or spacing acts here']
+      ? [`cut as one letter${joint ? `, joined ${joint.width.toFixed(2)} mm thick${joint.fill ? ' (filled)' : ''}` : ''}`, 'no kerning or spacing acts here']
       : [
           groupName ? `group ${signed(g.groupKern)}${g.pairFrom === 'pair' ? ' (overridden)' : ''}` : null,
           g.pairFrom === 'pair' ? `${pairName} ${signed(g.pairKern)}` : null,

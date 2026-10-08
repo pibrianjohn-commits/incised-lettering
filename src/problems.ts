@@ -469,13 +469,13 @@ function* collisionCandidates(layout: Layout, c: Collision, clearance: number, a
 }
 
 /**
- * Link neighbours that touch into one shape. They go in deep enough for a
- * joint that can be chiselled (the starting overlap, or more if the joint
- * would be too thin), so the link causes no new problem of its own.
+ * Link neighbours that touch into one shape, at the starting overlap; where
+ * they join thin, the link fills the join (links.ts), so it causes no new
+ * problem of its own. (Tried first all the same.)
  */
 function linkFix(layout: Layout, pairs: Collision[]): Fix {
   const p = layout.project;
-  const overlap = Math.max(LINK_OVERLAP, THIN_JOINT);
+  const overlap = LINK_OVERLAP;
   const links = { ...p.links };
   for (const c of pairs) links[gapKey(c.a.line, c.b.pos)] = { pair: lastChar(c.a) + firstChar(c.b), overlap };
   const by = figure(kernMm(overlap, p.capHeight));
@@ -515,7 +515,7 @@ function linkProblems(layout: Layout): Problem[] {
         level: 'warn',
         stage: 'space',
         kind: 'link',
-        text: `The ${named(chars[n])} and ${named(chars[n + 1])} in line ${lineNumber(layout, l.line)} are joined by only ${mm(j.width)}.`,
+        text: `The ${named(chars[n])} and ${named(chars[n + 1])} in line ${lineNumber(layout, l.line)} are joined by only ${j.width.toFixed(2)} mm of wood.`,
         fixes: [],
         key: `thin:${key}`,
         facts: [`thin:${key}`],
@@ -540,8 +540,15 @@ function linkProblems(layout: Layout): Problem[] {
   return out;
 }
 
-/** The fixes worth trying for a problem with linked letters. */
-function linkCandidates(layout: Layout, key: string): { fix: Fix }[] {
+/**
+ * How much deeper to try a joint the fill could not build up (letters
+ * meeting at a slant or a point), mm as at KERN_CAP: the least that cures it
+ * is offered (BRIEF.md, Decisions: "Linked letters", rule 8).
+ */
+const DEEPER = [0.5, 1, 1.5, 2, 3];
+
+/** The fixes worth trying for a problem with linked letters; those of one `group` are alternatives, the first that works offered. */
+function linkCandidates(layout: Layout, key: string): { fix: Fix; group?: string }[] {
   const p = layout.project;
   const [what, gap] = [key.slice(0, key.indexOf(':')), key.slice(key.indexOf(':') + 1)];
   const link = p.links[gap];
@@ -552,22 +559,22 @@ function linkCandidates(layout: Layout, key: string): { fix: Fix }[] {
   delete links[gap];
   const unlink: Fix = { id: `unlink:${gap}`, label: 'Unlink them', change: { links }, done: `The ${named(a)} and ${named(b)} in line ${line} are no longer linked. Ctrl+Z undoes it.` };
   if (what === 'unjoined') return [{ fix: unlink }];
-  // Too thin: in deeper, to the next 0.1 mm at this size, until the joint is wide enough.
+  // Too thin where the fill could not build it up: in deeper, as little as cures it (the trials find which),
+  // or else parted again (where they meet at a point, no overlap makes enough wood).
   const k = p.capHeight;
-  const l = layout.letters.find((x) => x.joints && x.line === Number(gap.split(':')[0]) && x.pos < Number(gap.split(':')[1]) && x.pos + x.span > Number(gap.split(':')[1]));
-  const j = l?.joints?.[Number(gap.split(':')[1]) - l.pos - 1];
-  if (!j) return [];
-  const more = Math.ceil(((THIN_JOINT * k) / KERN_CAP - j.width) / KERN_STEP - 1e-9) * KERN_STEP;
-  return [
-    {
+  const deeper = DEEPER.map((d) => {
+    const more = Math.round(kernMm(d, k) * 10) / 10;
+    return {
+      group: 'deeper',
       fix: {
         id: `overlap:${gap}:${figure(more)}`,
         label: `Overlap them ${figure(more)} mm more`,
         change: { links: { ...p.links, [gap]: { ...link, overlap: Math.round((link.overlap + kernKept(more, k)) * 1e4) / 1e4 } } },
         done: `The ${named(a)} and ${named(b)} in line ${line} overlap ${figure(more)} mm more. Ctrl+Z undoes it.`,
       },
-    },
-  ];
+    };
+  });
+  return [...deeper, { fix: unlink }];
 }
 
 /**
@@ -617,10 +624,12 @@ export function* tryFixes(layout: Layout, hasLetter: (ch: string) => boolean, re
   // or it makes a problem there was already worse (a line further past a side).
   const tried = new Map<string, Set<string> | null>();
   /** Try each candidate once, and keep for the problem `key` those that cure it and cause nothing new. */
-  function* judge(key: string, candidates: { fix: Fix; unlock?: boolean }[]): Generator<void, void, void> {
+  function* judge(key: string, candidates: { fix: Fix; unlock?: boolean; group?: string }[]): Generator<void, void, void> {
     const offered: Fix[] = [];
     const unlocks: Fix[] = [];
-    for (const { fix, unlock } of candidates) {
+    const settled = new Set<string>();
+    for (const { fix, unlock, group } of candidates) {
+      if (group && settled.has(group)) continue; // the first of these alternatives that works is enough
       if (!tried.has(fix.id)) {
         yield;
         let after: Set<string> | null = null;
@@ -638,6 +647,7 @@ export function* tryFixes(layout: Layout, hasLetter: (ch: string) => boolean, re
       const after = tried.get(fix.id);
       if (!after || after.has(key) || [...after].some((f) => !before.has(f))) continue;
       (unlock ? unlocks : offered).push(fix);
+      if (group) settled.add(group);
     }
     // A locked line is freed only when nothing else puts it right.
     fixes.set(key, offered.length ? offered : unlocks);

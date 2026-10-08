@@ -13,7 +13,8 @@
 import type { Alphabet } from './alphabet';
 import { datumLines, type DatumRule } from './datum';
 import type { Contour, Pt } from './geometry';
-import { touchAdvance, unitRun, type UnitRun } from './links';
+import { KERN_CAP } from './layout';
+import { THIN_JOINT, touchAdvance, unitRun, type JointPlace, type UnitRun } from './links';
 import { letterValleyOptions, valleyLines, type ValleyLine } from './valley';
 
 export interface Box {
@@ -43,8 +44,12 @@ type Sized = Omit<LetterMarks, 'datum'>;
 export interface RunMarks extends LetterMarks {
   /** Each letter's pen from the first's, mm. */
   pens: number[];
-  /** The narrowest joint between each two neighbours, mm, and where it is (from the first letter's pen). */
-  joints: { width: number; at: Pt }[];
+  /**
+   * Each joint between two neighbours (from the first letter's pen): how
+   * thick the wood is across it at its thinnest, mm; where it is; at the
+   * feet, the heads or elsewhere; and the fill that built it up, if any.
+   */
+  joints: { width: number; at: Pt; place: JointPlace; fill: Contour | null; fills: Contour[] }[];
   /** Its valley lines are still being worked out: the outline is ready, the valleys and datum are not. */
   pending: boolean;
 }
@@ -122,7 +127,7 @@ export class LetterStore {
     let unit = this.runs.get(key);
     if (unit === undefined) {
       const shapes = chars.map((ch) => this.alphabet.letter(ch)?.contours ?? []);
-      unit = shapes.every((s) => s.length) ? unitRun(shapes, overlaps, (i) => this.touch(chars[i - 1], chars[i])) : null;
+      unit = shapes.every((s) => s.length) ? unitRun(shapes, overlaps, (i) => this.touch(chars[i - 1], chars[i]), THIN_JOINT / KERN_CAP) : null;
       if (this.runs.size > 500) this.runs.clear();
       this.runs.set(key, unit);
     }
@@ -156,7 +161,13 @@ export class LetterStore {
       datum,
       box: boxOf(outline),
       pens: unit.pens.map((x) => x * k),
-      joints: unit.joints.map((w, i) => ({ width: w * k, at: { x: unit.jointSpots[i].x * k, y: unit.jointSpots[i].y * k } })),
+      joints: unit.joints.map((j) => ({
+        width: j.width * k,
+        at: { x: j.at.x * k, y: j.at.y * k },
+        place: j.place,
+        fill: j.fill ? j.fill.map((p) => ({ x: p.x * k, y: p.y * k })) : null,
+        fills: j.fills.map((f) => f.map((p) => ({ x: p.x * k, y: p.y * k }))),
+      })),
       pending: !valleys,
     };
   }

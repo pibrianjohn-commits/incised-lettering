@@ -7,6 +7,14 @@
 // Firefox is Playwright's own build if it is installed, or an ordinary Firefox
 // (as Brian has) at FIREFOX, driven over WebDriver BiDi.
 //
+// Where Mozilla's and Playwright's downloads are shut off (as in a cloud
+// session, 8 Oct 2026), Ubuntu 20.04's Firefox, an ordinary package rather
+// than a snap, unpacks and runs: from archive.ubuntu.com, pool/main/f/firefox/
+// firefox_136.0+build3-0ubuntu0.20.04.1_amd64.deb, unpacked with dpkg-deb -x,
+// FIREFOX=<there>/usr/lib/firefox/firefox. Firefox 136 needs Playwright 1.50
+// to drive it (later ones ask it for things it does not have): install
+// playwright@1.50.1 somewhere apart and set PLAYWRIGHT to it, for BROWSERS=firefox.
+//
 // With no screen (a server), Firefox only draws 3D on a virtual one, so if
 // DISPLAY is not set and Xvfb is installed, one is started for it.
 

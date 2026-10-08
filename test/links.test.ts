@@ -10,7 +10,9 @@ import { insideShape, type Pt } from '../src/geometry';
 import { toGcode } from '../src/gcode';
 import { defaultProject, kernKept, layoutPanel, type Layout, type PlacedLetter, type Project } from '../src/layout';
 import { LetterStore } from '../src/letters';
-import { LINK_OVERLAP, middleOf, overlapOf, THIN_JOINT } from '../src/links';
+import { benchSheet } from '../src/benchsheet';
+import { LINK_OVERLAP, middleOf, overlapOf, THIN_JOINT, touchAdvance, unitRun } from '../src/links';
+import { bedFit } from '../src/panel';
 import { attachFixes, layoutProblems, triedFixes, type Problem } from '../src/problems';
 import { normaliseProject, projectFileText, readProjectFile } from '../src/projectfile';
 import { finishedInput, packCuts, packShapes } from '../src/relief';
@@ -42,6 +44,32 @@ const letter = (l: Layout, char: string) => l.letters.find((x) => x.char === cha
 /** Contours that are not inside another: the outer shapes. */
 const outers = (l: PlacedLetter) => l.outline.filter((c, i) => !l.outline.some((o, j) => j !== i && insideShape(c[0], [o])));
 const near = (a: Pt, b: Pt, d: number) => Math.hypot(a.x - b.x, a.y - b.y) <= d;
+/** The least distance from a point to a line made of straight steps. */
+const toLine = (p: Pt, line: Pt[]) =>
+  Math.min(
+    ...line.slice(1).map((b, i) => {
+      const a = line[i];
+      const [ux, uy] = [b.x - a.x, b.y - a.y];
+      const len2 = ux * ux + uy * uy;
+      const t = len2 ? Math.max(0, Math.min(1, ((p.x - a.x) * ux + (p.y - a.y) * uy) / len2)) : 0;
+      return Math.hypot(p.x - (a.x + t * ux), p.y - (a.y + t * uy));
+    }),
+    line.length === 1 ? Math.hypot(p.x - line[0].x, p.y - line[0].y) : Infinity,
+  );
+/** The wood straight up and down through (x, y) in a shape: its top and bottom, or null. */
+function bandAt(outline: Pt[][], x: number, y: number): [number, number] | null {
+  const ys: number[] = [];
+  for (const c of outline)
+    for (let i = 0, j = c.length - 1; i < c.length; j = i++) {
+      const [a, b] = [c[j], c[i]];
+      if (a.x > x !== b.x > x) ys.push(a.y + ((x - a.x) / (b.x - a.x)) * (b.y - a.y));
+    }
+  ys.sort((m, n) => m - n);
+  for (let i = 0; i + 1 < ys.length; i += 2) if (y >= ys[i] && y <= ys[i + 1]) return [ys[i], ys[i + 1]];
+  return null;
+}
+const xRange = (c: Pt[]) => [Math.min(...c.map((q) => q.x)), Math.max(...c.map((q) => q.x))];
+const yRange = (c: Pt[]) => [Math.min(...c.map((q) => q.y)), Math.max(...c.map((q) => q.y))];
 /** The narrow end of each fork: where it runs out to a corner or serif tip. */
 const forkTips = (l: PlacedLetter) => l.valleys.filter(isFork).map((v) => (v[0].r < v[v.length - 1].r ? v[0] : v[v.length - 1]));
 
@@ -90,7 +118,7 @@ describe('a linked pair is one letter', () => {
       // Thin before thick across the whole joined shape; the bridge across the join is numbered before the thickest stroke.
       const strokes = strokesOf(run.valleys);
       for (let i = 1; i < strokes.length; i++) expect(strokes[i].width).toBeGreaterThanOrEqual(strokes[i - 1].width * (1 - EQUAL_WIDTH) - 1e-9);
-      const bridge = strokes.findIndex((s) => s.parts.some((v) => v.some((q) => joints.some((j) => near(q, j, 0.6)))));
+      const bridge = strokes.findIndex((s) => s.parts.some((v) => joints.some((j) => toLine(j, v) <= 0.6)));
       expect(bridge).toBeGreaterThanOrEqual(0);
       const thickest = strokes.reduce((b, s, i) => (s.width > strokes[b].width ? i : b), 0);
       expect(bridge).toBeLessThan(thickest);
@@ -139,6 +167,164 @@ describe('a linked pair is one letter', () => {
       const b = box({ ...base, ...change });
       expect(b.x1 - b.x0).toBeCloseTo(w, 6);
     }
+  });
+});
+
+describe('the joint, measured as wood and filled', () => {
+  const k = 25;
+  const at25 = (text: string, keys = ['0:1']) => {
+    const l = lay(proj({ text, capHeight: k, links: linked(text, keys) }));
+    return Object.assign(l.letters.find((x) => x.span > 1)!, { base: l.lines[0].baselineY });
+  };
+  const T = (THIN_JOINT * k) / 25;
+
+  it("measured as the adviser did: Cinzel's serif tip is 0.36 mm, and A and M's joined foot stays about that until they overlap 1.5 mm, nearing 0.6 mm only at 3 mm", () => {
+    const [a, m] = ['A', 'M'].map((c) => store.alphabet.letter(c)!.contours);
+    const t = touchAdvance(a, m)!;
+    const unfilled = (mm: number) => unitRun([a, m], [mm / 25], () => t, THIN_JOINT / 25, false)!.joints[0].width * 25;
+    expect(unfilled(0.3)).toBeCloseTo(0.36, 2);
+    expect(unfilled(1)).toBeCloseTo(0.36, 2);
+    expect(unfilled(1.5)).toBeLessThan(0.4);
+    expect(unfilled(3)).toBeGreaterThan(0.5);
+    expect(unfilled(3)).toBeLessThan(0.6);
+  });
+
+  it('A and M: the joined foot is filled, standing on the baseline, from where each letter is already 0.6 mm thick', () => {
+    const run = at25('AM');
+    const j = run.joints![0];
+    expect(j.place).toBe('foot');
+    const base = run.base;
+    const fill = j.fill!;
+    const [fy0, fy1] = yRange(fill);
+    expect(fy1).toBeCloseTo(base, 6); // stands on the baseline
+    expect(base - fy0).toBeCloseTo(T, 2); // up to 0.6 mm
+    const [fx0, fx1] = xRange(fill);
+    expect(fx1 - fx0).toBeGreaterThan(2.5); // about 1.5 mm into each serif
+    expect(fx1 - fx0).toBeLessThan(3.5);
+    // Straight up and down anywhere along the fill, the joined shape is at least 0.6 mm thick from the baseline up.
+    for (let x = fx0 + 0.05; x < fx1 - 0.05; x += 0.1) {
+      const b = bandAt(run.outline, x, base - 0.01)!;
+      expect(base - b[0]).toBeGreaterThanOrEqual(T - 0.002);
+    }
+    expect(j.width).toBeGreaterThanOrEqual(T - 0.001);
+  });
+
+  it('H and H: joined at the head and the foot, both filled, the head hanging from the cap line', () => {
+    const run = at25('HH');
+    const fills = run.joints![0].fills;
+    expect(fills).toHaveLength(2);
+    const base = run.base;
+    const cap = base - k;
+    const [foot, head] = [...fills].sort((p, q) => yRange(q)[1] - yRange(p)[1]);
+    expect(yRange(foot)[1]).toBeCloseTo(base, 6);
+    expect(yRange(head)[0]).toBeCloseTo(cap, 6);
+    for (const [f, y, down] of [
+      [foot, base - 0.01, false],
+      [head, cap + 0.01, true],
+    ] as const) {
+      const [x0, x1] = xRange(f);
+      for (let x = x0 + 0.05; x < x1 - 0.05; x += 0.1) {
+        const b = bandAt(run.outline, x, y)!;
+        expect(down ? b[1] - cap : base - b[0]).toBeGreaterThanOrEqual(T - 0.002);
+      }
+    }
+    expect(run.joints![0].width).toBeGreaterThanOrEqual(T - 0.001);
+  });
+
+  it('L and L: the first L’s arm is already thick at the join, so the fill runs from there to where the second L’s serif is', () => {
+    const run = at25('LL');
+    const j = run.joints![0];
+    expect(j.place).toBe('foot');
+    const [fx0, fx1] = xRange(j.fill!);
+    expect(fx1 - fx0).toBeGreaterThan(1);
+    expect(fx1 - fx0).toBeLessThan(2);
+    expect(j.width).toBeGreaterThanOrEqual(T - 0.001);
+  });
+
+  it('a join away from both lines (a Q’s tail against a J) is measured through its band, and needs no fill when already thick', () => {
+    const run = at25('QJ');
+    const j = run.joints![0];
+    expect(j.place).toBe('elsewhere');
+    expect(j.fill).toBeNull();
+    expect(j.width).toBeGreaterThan(T);
+    expect(j.at.y).toBeGreaterThan(run.base); // below the baseline, where the tails meet
+  });
+
+  it('a bowl against the side of a stem (B B) is measured through the neck between them, not up the stem', () => {
+    const j = at25('BB').joints![0];
+    expect(j.place).toBe('elsewhere');
+    expect(j.fill).toBeNull();
+    expect(j.width).toBeGreaterThan(3);
+    expect(j.width).toBeLessThan(6);
+  });
+
+  it('a G’s beard against a stem is filled centred on the join, not slanting off to the middle of the stem', () => {
+    const run = at25('GB');
+    const j = run.joints![0];
+    expect(j.place).toBe('elsewhere');
+    const [fy0, fy1] = yRange(j.fill!);
+    expect(fy1 - fy0).toBeLessThan(T + 0.3);
+    expect(Math.abs((fy0 + fy1) / 2 - j.at.y)).toBeLessThan(0.2);
+    expect(j.width).toBeGreaterThanOrEqual(T - 0.001);
+  });
+
+  it('letters the alphabet draws the other way round (Cinzel’s 1 and 7) still join into one shape, with no hole where they overlap', () => {
+    for (const pair of ['E1', '71', '17', 'B7', 'H1', '77']) {
+      const [a, b] = [...pair].map((c) => store.alphabet.letter(c)!.contours);
+      const t = touchAdvance(a, b)!;
+      const run = unitRun([a, b], [LINK_OVERLAP / 25], () => t, THIN_JOINT / 25, false)!;
+      const pieces = overlapOf(a, b.map((c) => c.map((q) => ({ x: q.x + run.pens[1], y: q.y }))), 0);
+      expect(pieces.length).toBeGreaterThan(0);
+      for (const piece of pieces) expect(insideShape(middleOf([piece])!, run.outline), pair).toBe(true);
+    }
+  });
+
+  it('every pair of capitals and figures, linked at the starting overlap: each join is filled to 0.6 mm, or else measured and left to the Problems list', () => {
+    const chars = [...'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789&'];
+    let filled = 0;
+    let thin = 0;
+    for (const x of chars)
+      for (const y of chars) {
+        const [a, b] = [x, y].map((c) => store.alphabet.letter(c)!.contours);
+        const t = touchAdvance(a, b);
+        if (t === null) continue;
+        const j = unitRun([a, b], [LINK_OVERLAP / 25], () => t, THIN_JOINT / 25)!.joints[0];
+        expect(j.width, x + y).toBeGreaterThan(0.004); // never nothing: 0.1 mm at 25 mm
+        expect(j.width, x + y).toBeLessThan(1);
+        if (j.fill) {
+          filled++;
+          expect(j.width, x + y).toBeGreaterThanOrEqual(THIN_JOINT / 25 - 1e-6);
+        } else if (j.width < THIN_JOINT / 25) thin++;
+      }
+    expect(filled).toBeGreaterThan(300);
+    // Left thin only where a tail runs out to a point against a round letter (0 S and 5 S), cured by overlapping 0.5 mm more.
+    expect(thin).toBeLessThanOrEqual(2);
+  }, 60000);
+
+  it('the joint mark sits at the fill, and the gap tools and bench sheet read the thickness', () => {
+    const p = proj({ text: 'AMAZBALLS', capHeight: 31.5, machine, links: linked('AMAZBALLS', ['0:1', '0:2']) });
+    const l = lay(p);
+    for (const g of l.gaps.filter((x) => x.link)) {
+      const j = g.left.joints![Number(g.key.split(':')[1]) - g.left.pos - 1];
+      const [fx0, fx1] = xRange(j.fill!);
+      expect(g.x).toBeGreaterThan(fx0);
+      expect(g.x).toBeLessThan(fx1);
+    }
+    const passes = buildPasses(l, machine);
+    const sheet = benchSheet({ project: p, layout: l, strokes: passes.find((q) => q.name === 'slit')!, passes, checks: checkPasses(l, passes, machine, bedFit(p.panelWidth, p.panelHeight)), alphabet: 'Cinzel', fileName: null, date: new Date('2026-10-08T12:00:00Z') });
+    expect(sheet.html).toMatch(/A M on line 1, joined 0\.7\d mm thick, filled, overlap 0\.4 mm; M A on line 1, joined 0\.7\d mm thick, filled, overlap 0\.4 mm/);
+  });
+
+  it('the filled foot is one slab: no stop cuts at the join, one valley along it', () => {
+    const run = at25('AM');
+    const [fx0, fx1] = xRange(run.joints![0].fill!);
+    const base = run.base;
+    // No fork runs out to a point under the fill.
+    const tips = run.valleys.filter(isFork).map((v) => (v[0].r < v[v.length - 1].r ? v[0] : v[v.length - 1]));
+    expect(tips.filter((t) => t.x > fx0 && t.x < fx1 && t.y > base - 1)).toEqual([]);
+    // A valley line runs along the slab, through the middle of the fill.
+    const mid = { x: (fx0 + fx1) / 2, y: base - T / 2 };
+    expect(Math.min(...run.valleys.map((v) => toLine(mid, v)))).toBeLessThan(T / 2);
   });
 });
 
@@ -224,19 +410,43 @@ describe('problems with linked letters', () => {
     expect(layoutProblems(l, has).filter((q) => q.kind === 'link' || q.kind === 'collision')).toEqual([]);
   });
 
-  it('a joint too thin to chisel is named, with a fix that overlaps them more', () => {
-    // At the starting overlap (0.3 mm at 25 mm) the joint is under the 0.6 mm minimum.
-    const p = proj({ text: 'AMAZBALLS', capHeight: 25, links: linked('AMAZBALLS', ['0:1', '0:2']) });
+  it('the three A–M joins in the carver’s layout, linked at the starting overlap, are filled: no thin joint', () => {
+    const BRIAN = proj({
+      text: 'AMBER IS....\n\nJUST\n\nAMAZBALLS',
+      capHeight: 31.5,
+      letterSpacing: -0.5,
+      lineSpacing: 20,
+      panelWidth: 300,
+      panelHeight: 200,
+      lines: { '2': { x: 130, align: 'centre', baseline: 114.8 }, '4': { x: 150, align: 'centre', baseline: 154.9 } },
+    });
+    const p = { ...BRIAN, links: { ...linked(BRIAN.text, ['0:1', '4:1', '4:2']) } };
+    const l = lay(p);
+    expect(layoutProblems(l, has).filter((q) => q.kind === 'link')).toEqual([]);
+    const thick = (THIN_JOINT * 31.5) / 25;
+    const joints = l.letters.flatMap((x) => x.joints ?? []);
+    expect(joints).toHaveLength(3);
+    for (const j of joints) {
+      expect(j.place).toBe('foot');
+      expect(j.fill).not.toBeNull();
+      expect(j.width).toBeGreaterThanOrEqual(thick - 0.001);
+    }
+  });
+
+  it('a join the fill cannot build up (the tip of an S’s tail meeting the side of a 0) is still named, with a fix that overlaps them more, or one that parts them', () => {
+    // The S's tail runs out to a point before it is 0.6 mm thick: there is nothing to fill from.
+    const p = proj({ text: '0S', capHeight: 25, links: linked('0S', ['0:1']) });
     const thin = everyFixCures(p).filter((q) => q.kind === 'link');
-    expect(thin.map((q) => q.text)).toEqual(['The A and M in line 1 are joined by only 0.3 mm.', 'The M and A in line 1 are joined by only 0.3 mm.']);
-    expect(thin.map((q) => q.fixes.map((f) => f.label))).toEqual([['Overlap them 0.3 mm more'], ['Overlap them 0.3 mm more']]);
+    expect(thin.map((q) => q.text)).toEqual(['The 0 and S in line 1 are joined by only 0.30 mm of wood.']);
+    // The least of the deeper overlaps that cures it, tried first; or part them again.
+    expect(thin[0].fixes.map((f) => f.label)).toEqual(['Overlap them 0.5 mm more', 'Unlink them']);
+  });
+
+  it('the thin-joint minimum scales with the letters: 0.6 mm at 25 mm is 1.2 mm at 50 mm', () => {
     expect(THIN_JOINT).toBe(0.6);
-    // Deep enough, nothing is said.
-    const deep = proj({ text: 'AMAZBALLS', capHeight: 25, links: linked('AMAZBALLS', ['0:1', '0:2'], 0.6) });
-    expect(layoutProblems(lay(deep), has).filter((q) => q.kind === 'link')).toEqual([]);
-    // The minimum scales with the letters: 0.6 mm at 25 mm is 1.2 mm at 50 mm, and so is the overlap.
-    const big = proj({ text: 'AM', capHeight: 50, panelWidth: 300, panelHeight: 120, links: linked('AM', ['0:1'], 0.6) });
-    expect(layoutProblems(lay(big), has).filter((q) => q.kind === 'link')).toEqual([]);
+    const big = lay(proj({ text: 'AM', capHeight: 50, panelWidth: 300, panelHeight: 120, links: linked('AM', ['0:1']) }));
+    expect(big.letters[0].joints![0].width).toBeGreaterThanOrEqual(1.2 - 0.002);
+    expect(layoutProblems(big, has).filter((q) => q.kind === 'link')).toEqual([]);
     expect(kernKept(1.2, 50)).toBeCloseTo(0.6, 9);
   });
 
@@ -268,7 +478,7 @@ describe('real inscriptions with linked letters, through the whole job', () => {
       panelWidth: 200,
       panelHeight: 120,
       machine,
-      links: linked(text, ['0:1', '0:2', '1:3', '2:3', '4:1', '4:2', '4:3'], 0.6),
+      links: linked(text, ['0:1', '0:2', '1:3', '2:3', '4:1', '4:2', '4:3']),
     });
     const l = lay(p);
     expect(l.failed).toEqual([]);
