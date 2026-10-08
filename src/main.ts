@@ -2762,7 +2762,7 @@ function shapesArrived() {
   clearTimeout(shapesTimer);
   shapesTimer = window.setTimeout(() => {
     relayout();
-    if (cam?.layout.shapesPending && cam.project === project) openCam();
+    if ((cam?.layout.shapesPending || cam?.layout.datumPending) && cam?.project === project) openCam();
   }, 30);
 }
 
@@ -3026,8 +3026,10 @@ function showBoard({ result, job }: { result: ReliefResult; job: NonNullable<typ
 /** Work out the board's surface for what's chosen, and show it once ready. */
 function build3d() {
   if (!v3d.open || !store) return;
-  // Linked letters still being worked out: the board is worked out once they come (shapesArrived lays out afresh).
+  // Linked letters still being worked out (their valleys, or their datum lines at this size): the
+  // board is worked out once they come (shapesArrived lays out afresh, which brings this back).
   if (layout?.project === project && layout.shapesPending) return;
+  if (layoutPanel(store, project).datumPending) return;
   // Already on show (perhaps being made sharper), or under way: nothing to do.
   if (v3d.shown?.project === project && v3d.shown.state === v3d.state && (!v3d.job || v3d.job.area)) return;
   if (v3d.job && !v3d.job.area && v3d.job.project === project && v3d.job.state === v3d.state) return;
@@ -3350,7 +3352,7 @@ function scheduleChecks() {
         const l = layoutPanel(store, p);
         const passes = buildPasses(l, p.machine);
         const checks = checkPasses(l, passes, p.machine, bedFit(p.panelWidth, p.panelHeight));
-        machineChecks = { project: p, problems: machineProblems(checks, passDepths(passes), p.machine, p.capHeight), passes, pending: l.shapesPending };
+        machineChecks = { project: p, problems: machineProblems(checks, passDepths(passes), p.machine, p.capHeight), passes, pending: l.shapesPending || l.datumPending };
       } catch (err) {
         // Not to be tried again and again: the problem stands until the job changes.
         console.error(err);
@@ -3446,7 +3448,9 @@ const fixButtons = (fixes: Fix[]) =>
 function problemFixes(q: Problem): string {
   if (q.trying) return '<span class="fixes"><small class="trying">Trying the fixes on a copy first…</small></span>';
   if (q.kind === 'collision' && !q.fixes.length)
-    return '<span class="fixes"><small class="trying">No one-click fix parts these without causing a new problem: move a line or open the gap by hand.</small></span>';
+    return '<span class="fixes"><small class="trying">No one-click fix parts these without causing a new problem or making one worse: move a line or open the gap by hand.</small></span>';
+  if (q.kind === 'link' && !q.fixes.length)
+    return '<span class="fixes"><small class="trying">No one-click fix puts this right without causing a new problem or making one worse: set the overlap by hand (Alt+← goes deeper), or unlink them (L).</small></span>';
   return fixButtons(q.fixes);
 }
 
@@ -3753,7 +3757,7 @@ function makeSheet(wait = false) {
   const p = project;
   // Printing can't wait for the worker: any linked letters still to come are worked out on the spot.
   const l = layoutPanel(store, p, false, wait ? 'now' : undefined);
-  if (l.shapesPending) {
+  if (l.shapesPending || l.datumPending) {
     say('Still working out the linked letters: the bench sheet opens in a moment, when they are ready.');
     window.setTimeout(() => {
       if (!layout?.shapesPending) showSheet();
