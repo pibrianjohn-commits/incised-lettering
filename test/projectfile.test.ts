@@ -106,9 +106,17 @@ describe('the warnings badge', () => {
     expect(list.every((q) => q.stage === 'machine')).toBe(true);
   });
 
-  it('letters missing from the alphabet, letters off the panel, and lines that run into each other', () => {
+  it('letters missing from the alphabet, letters off the panel, and letters that run into each other', () => {
     const letter = (char: string, line: number, x0: number, y0: number, x1: number, y1: number) =>
-      ({ char, line, outline: [], valleys: [], datum: [], box: { x0, y0, x1, y1 } }) as never;
+      ({
+        char,
+        line,
+        pos: 0,
+        outline: [[{ x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: y1 }, { x: x0, y: y1 }]],
+        valleys: [],
+        datum: [],
+        box: { x0, y0, x1, y1 },
+      }) as never;
     const layout = {
       project: { ...defaultProject, text: 'Aé\nB' },
       letters: [letter('A', 0, 10, 20, 30, 45), letter('B', 1, 15, 40, 35, 65)],
@@ -126,6 +134,6 @@ describe('the warnings badge', () => {
     const texts = layoutProblems(layout, (ch) => ch !== 'é').map((q) => q.text);
     expect(texts).toContain('Not in the alphabet, so left as a space: é');
     expect(texts).toContain('Line 2 runs off the board at the bottom by 5.0 mm.'); // B runs below the 60 mm panel
-    expect(texts).toContain('Lines 1 and 2 run into each other.');
+    expect(texts).toContain('The A in line 1 runs into the B in line 2.');
   });
 });

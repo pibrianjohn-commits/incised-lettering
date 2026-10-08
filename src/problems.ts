@@ -2,7 +2,9 @@
 // the status bar. Each says which stage of the job it is put right in, and
 // offers one-click fixes (carried out by main.ts, each one step to undo).
 
-import { contentBox, isBlank, lineNumber, type Layout } from './layout';
+import { cutWidth, findCollisions, HAIRLINE, parting, type Collision } from './collisions';
+import type { Pt } from './geometry';
+import { contentBox, isBlank, kernKept, lineAnchor, lineNumber, type Layout, type LinePlacement, type PlacedLine, type Project } from './layout';
 import { BED, BED_EXTENDED, bedFit, bedScale, letteringBox, shrinkToFit } from './panel';
 import type { Check, MachineSettings, Pass } from './toolpath';
 
@@ -16,6 +18,14 @@ export type Stage = 'write' | 'space' | 'panel' | 'machine' | '3d';
 export interface Fix {
   id: string;
   label: string;
+  /**
+   * The change to the job that was tried on a copy of the layout before the
+   * fix was offered (CLAUDE.md, "Every fix is tried before it is offered"):
+   * it is exactly what the button does.
+   */
+  change?: Partial<Project>;
+  /** What the status bar says once it is done. */
+  done?: string;
 }
 
 export interface Problem {
@@ -24,10 +34,23 @@ export interface Problem {
   text: string;
   stage: Stage;
   /** What kind of problem, so the G-code checks can borrow its fixes ('app': the app itself, not the job). */
-  kind: 'letters' | 'room' | 'edges' | 'lines' | 'bed' | 'picture' | 'machine' | 'app';
+  kind: 'letters' | 'room' | 'edges' | 'collision' | 'bed' | 'picture' | 'machine' | 'app';
   fixes: Fix[];
   /** The actual reason, folded under "Details", for a problem with the app itself. */
   details?: string;
+  /** Names the problem from one moment to the next (a collision: its pair of letters). */
+  key?: string;
+  /**
+   * The plain facts it is made of (a line past a side, a pair of letters
+   * touching), to tell whether a fix tried on a copy causes a new problem.
+   */
+  facts?: string[];
+  /** How far some facts go, mm (a line past a side by so much), to tell whether a fix makes the problem worse. */
+  sizes?: Record<string, number>;
+  /** Where it is on the panel, mm: marked there when the problem is clicked. */
+  spot?: Pt;
+  /** Its fixes are still being tried; they follow a moment behind. */
+  trying?: boolean;
 }
 
 type Side = 'left' | 'right' | 'top' | 'bottom';
@@ -55,8 +78,12 @@ function sidesPhrase(amounts: Partial<Record<Side, number>>, upTo: boolean, noun
 export const FIT_LETTERING: Fix = { id: 'fit-lettering', label: 'Fit lettering to panel' };
 export const FIT_PANEL: Fix = { id: 'fit-panel', label: 'Fit panel to lettering' };
 
-/** Problems that can be seen from the layout itself. */
-export function layoutProblems(layout: Layout, hasLetter: (ch: string) => boolean): Problem[] {
+/**
+ * Problems that can be seen from the layout itself. With `quick` set, only
+ * which problems there are is wanted (their facts, for trying a fix on a
+ * copy): letters that collide are found but not measured.
+ */
+export function layoutProblems(layout: Layout, hasLetter: (ch: string) => boolean, quick = false): Problem[] {
   const p = layout.project;
   const out: Problem[] = [];
   const hasLettering = layout.lines.some((l) => l.ink);
@@ -75,6 +102,7 @@ export function layoutProblems(layout: Layout, hasLetter: (ch: string) => boolea
       kind: 'letters',
       text: `Not in the alphabet, so left as a space: ${missing.join(' ')}`,
       fixes,
+      facts: missing.map((ch) => `missing:${ch}`),
     });
   }
 
@@ -88,6 +116,7 @@ export function layoutProblems(layout: Layout, hasLetter: (ch: string) => boolea
       kind: 'letters',
       text: `${listed(named)} could not be worked out, so ${named.length > 1 ? 'they are' : 'it is'} left as a space.`,
       fixes: chars.map((ch) => removeChar(ch)),
+      facts: layout.failed.map((f) => `failed:${f.char}:${f.line}`),
     });
   }
 
@@ -100,6 +129,7 @@ export function layoutProblems(layout: Layout, hasLetter: (ch: string) => boolea
       kind: 'room',
       text: 'The border and margins leave no room for the lettering.',
       fixes: hasLettering ? [FIT_PANEL] : [{ id: 'panel-default', label: 'Return the panel, border and margins to the starting sizes' }],
+      facts: ['room'],
     });
   }
 
@@ -118,6 +148,10 @@ export function layoutProblems(layout: Layout, hasLetter: (ch: string) => boolea
     placed: boolean;
     locked: boolean;
     fits: boolean;
+    /** Each line and side it runs past ("edge:…"), and off the board ("off:…" as well). */
+    facts: string[];
+    /** How far past each side, mm. */
+    sizes: Record<string, number>;
   }
   const spills: Spill[] = [];
   for (const line of layout.lines) {
@@ -143,6 +177,11 @@ export function layoutProblems(layout: Layout, hasLetter: (ch: string) => boolea
       else if (margin[s] > 0.01) past[s] = margin[s];
     }
     if (!Object.keys(off).length && !Object.keys(past).length) continue;
+    const facts = [
+      ...SIDES.filter((s) => off[s] !== undefined || past[s] !== undefined).map((s) => `edge:${line.index}:${s}`),
+      ...SIDES.filter((s) => off[s] !== undefined).map((s) => `off:${line.index}:${s}`),
+    ];
+    const sizes = Object.fromEntries(SIDES.filter((s) => off[s] !== undefined || past[s] !== undefined).map((s) => [`edge:${line.index}:${s}`, Math.max(edge[s], margin[s])]));
     const fits = room && line.ink.x1 - line.ink.x0 <= box.x1 - box.x0 + 1e-6 && k <= box.y1 - box.y0 + 1e-6;
     const n = line.number ?? line.index + 1;
     // Lines laid out automatically share one cause (the lettering is too big
@@ -151,11 +190,13 @@ export function layoutProblems(layout: Layout, hasLetter: (ch: string) => boolea
     if (same) {
       same.lines.push(n);
       same.indexes.push(line.index);
+      same.facts.push(...facts);
+      Object.assign(same.sizes, sizes);
       for (const s of SIDES) {
         if (off[s] !== undefined) same.off[s] = Math.max(same.off[s] ?? 0, off[s]!);
         if (past[s] !== undefined) same.past[s] = Math.max(same.past[s] ?? 0, past[s]!);
       }
-    } else spills.push({ lines: [n], indexes: [line.index], off, past, placed: line.placed, locked: line.locked, fits });
+    } else spills.push({ lines: [n], indexes: [line.index], off, past, placed: line.placed, locked: line.locked, fits, facts, sizes });
   }
   // A side off the board for one line needs no mention as past the margin for another.
   for (const g of spills) for (const s of SIDES) if (g.off[s] !== undefined) delete g.past[s];
@@ -181,52 +222,15 @@ export function layoutProblems(layout: Layout, hasLetter: (ch: string) => boolea
       kind: 'edges',
       text: `${who} ${[offText, pastText].filter(Boolean).join(', and ')}.`,
       fixes,
+      facts: g.facts,
+      sizes: g.sizes,
     });
   }
 
-  // Lines whose letters run into each other.
-  const bands = layout.lines
-    .map((line) => {
-      const ls = layout.letters.filter((l) => l.line === line.index);
-      if (!ls.length) return null;
-      return {
-        line,
-        n: line.number ?? line.index + 1,
-        x0: Math.min(...ls.map((l) => l.box.x0)),
-        x1: Math.max(...ls.map((l) => l.box.x1)),
-        y0: Math.min(...ls.map((l) => l.box.y0)),
-        y1: Math.max(...ls.map((l) => l.box.y1)),
-      };
-    })
-    .filter((b): b is NonNullable<typeof b> => !!b);
-  const texts = p.text.replace(/\r/g, '').split('\n');
-  for (let i = 0; i < bands.length; i++)
-    for (let j = i + 1; j < bands.length; j++) {
-      const a = bands[i];
-      const b = bands[j];
-      if (!(a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1)) continue;
-      const fixes: Fix[] = [];
-      for (const q of [a, b]) {
-        if (q.line.placed && !q.line.locked) fixes.push({ id: `auto-line:${q.line.index}`, label: `Return line ${q.n} to auto` });
-      }
-      // Only locked lines placed by hand to blame: offer to free one.
-      if (!fixes.length) {
-        for (const q of [a, b]) {
-          if (q.line.locked) fixes.push({ id: `auto-line:${q.line.index}`, label: `Unlock line ${q.n} and return it to auto` });
-        }
-      }
-      if (!a.line.placed && !b.line.placed) {
-        // Open the line spacing just enough to part them: it acts on every
-        // step between them but blank lines given their own height.
-        const steps = texts.slice(a.line.index, b.line.index).filter((t, n) => !(isBlank(t) && String(a.line.index + n) in p.spacers)).length;
-        const overlap = Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0);
-        if (steps) {
-          const ls = Math.ceil((p.lineSpacing + (overlap + 0.5) / steps) * 2) / 2;
-          fixes.push({ id: `line-spacing:${ls}`, label: `Open the line spacing to ${ls} mm` });
-        }
-      }
-      out.push({ level: 'warn', stage: 'write', kind: 'lines', text: `Lines ${a.n} and ${b.n} run into each other.`, fixes });
-    }
+  // Letters that run into each other, on the same line or different lines.
+  // Their fixes are tried on a copy of the layout before they are offered
+  // (tryCollisionFixes), so they follow a moment behind.
+  out.push(...collisionProblems(layout, clearanceOf(p), quick));
 
   const fit = bedFit(p.panelWidth, p.panelHeight);
   const toStandard: Fix = { id: 'bed-standard', label: `Shrink everything to fit the bed (${BED.width} × ${BED.height} mm)` };
@@ -237,6 +241,7 @@ export function layoutProblems(layout: Layout, hasLetter: (ch: string) => boolea
       kind: 'bed',
       text: `The panel needs the extended bed (${BED_EXTENDED.width} × ${BED_EXTENDED.height} mm).`,
       fixes: [toStandard],
+      facts: ['bed'],
     });
   } else if (fit === 'too-big') {
     out.push({
@@ -249,9 +254,302 @@ export function layoutProblems(layout: Layout, hasLetter: (ch: string) => boolea
         bedScale(p.panelWidth, p.panelHeight, BED_EXTENDED) > bedScale(p.panelWidth, p.panelHeight, BED) + 1e-9
           ? [{ id: 'bed-extended', label: `Shrink everything to fit the extended bed (${BED_EXTENDED.width} × ${BED_EXTENDED.height} mm)` }, toStandard]
           : [toStandard],
+      facts: ['bed', 'bed:too-big'],
     });
   }
   return out;
+}
+
+// ---------------------------------------------------------------- letters that collide
+
+/**
+ * How close two letters may come: the width the hairline cuts, from the job's
+ * own hairline depth and bit, or the starting hairline where there are none
+ * (so the check stands without the machine settings: CLAUDE.md, "One program;
+ * editions later").
+ */
+export function clearanceOf(p: Project): number {
+  const m = p.machine;
+  const w = m ? cutWidth(m.hairlineDepth, m.toolAngle) : NaN;
+  return Number.isFinite(w) && w > 0 ? w : HAIRLINE;
+}
+
+/** Lines moved apart are parted this far, mm, and the move rounded up to the next LINE_STEP. */
+const SPARE = 0.5;
+const LINE_STEP = 0.5;
+/** A gap is opened just enough to part its letters, in kerning's own steps. */
+const KERN_STEP = 0.1;
+
+/** A character named in a sentence: a letter or figure as it is, anything else in quotes. */
+const named = (ch: string) => (/[\p{L}\p{N}]/u.test(ch) ? ch : `“${ch}”`);
+/** A figure for a fix's label, to the step it was worked out in: "1.5", "0", "-0.2". */
+const figure = (v: number) => String(Math.round(v * 100) / 100 || 0);
+const ordinal = (k: number) => `${k}${k % 100 >= 11 && k % 100 <= 13 ? 'th' : ['th', 'st', 'nd', 'rd'][k % 10] ?? 'th'}`;
+
+function collisionText(layout: Layout, c: Collision): string {
+  const la = lineNumber(layout, c.a.line);
+  const lb = lineNumber(layout, c.b.line);
+  const within = `within ${c.gap < 0.01 ? 'less than 0.01' : c.gap.toFixed(2)} mm`;
+  if (c.a.line === c.b.line) {
+    return c.touch
+      ? `The ${named(c.a.char)} and ${named(c.b.char)} in line ${la} touch`
+      : `The ${named(c.a.char)} and ${named(c.b.char)} in line ${la} come ${within} of each other, so their hairlines would run together`;
+  }
+  return c.touch
+    ? `The ${named(c.a.char)} in line ${la} runs into the ${named(c.b.char)} in line ${lb}`
+    : `The ${named(c.a.char)} in line ${la} comes ${within} of the ${named(c.b.char)} in line ${lb}, so their hairlines would run together`;
+}
+
+/**
+ * One problem for each pair of letters that collide (BRIEF.md, Decisions:
+ * "Collisions"), with no fixes yet: those are tried first (tryCollisionFixes).
+ */
+function collisionProblems(layout: Layout, clearance: number, quick = false): Problem[] {
+  const cs = findCollisions(layout, clearance, quick);
+  const texts = cs.map((c) => collisionText(layout, c));
+  const count = new Map<string, number>();
+  for (const t of texts) count.set(t, (count.get(t) ?? 0) + 1);
+  const seen = new Map<string, number>();
+  return cs.map((c, i): Problem => {
+    const t = texts[i];
+    const n = count.get(t)!;
+    const k = (seen.get(t) ?? 0) + 1;
+    seen.set(t, k);
+    return {
+      level: 'warn',
+      // Lines are moved apart in Write; letters on one line are spaced in Space.
+      stage: c.a.line === c.b.line ? 'space' : 'write',
+      kind: 'collision',
+      // The same pair twice over is told apart by its place in reading order.
+      text: `${t}${n > 1 ? ` (${ordinal(k)} of ${n})` : ''}.`,
+      fixes: [],
+      key: `collide:${c.key}`,
+      facts: [`collide:${c.key}`],
+      spot: c.spot,
+      trying: true,
+    };
+  });
+}
+
+/** Where a line is now, as a placement (an auto line's is worked out from its layout). */
+function placementOf(p: Project, line: PlacedLine): LinePlacement {
+  return p.lines[String(line.index)] ?? { x: lineAnchor(line.x0, p.align, line.width), align: p.align, baseline: line.baselineY };
+}
+
+const lineName = (line: PlacedLine) => line.number ?? line.index + 1;
+
+function moveLineFix(p: Project, line: PlacedLine, dy: number): Fix {
+  const place = placementOf(p, line);
+  const n = lineName(line);
+  const way = dy > 0 ? 'down' : 'up';
+  const by = figure(Math.abs(dy));
+  return {
+    id: `move-line:${line.index}:${figure(dy)}`,
+    label: `Move line ${n} ${way} ${by} mm`,
+    change: { lines: { ...p.lines, [String(line.index)]: { ...place, baseline: Math.round((place.baseline + dy) * 1000) / 1000 } } },
+    done: `Line ${n} moved ${way} ${by} mm. Ctrl+Z undoes it.`,
+  };
+}
+
+function autoLineFix(p: Project, line: PlacedLine): Fix {
+  const lines = { ...p.lines };
+  delete lines[String(line.index)];
+  const n = lineName(line);
+  return {
+    id: `auto-line:${line.index}`,
+    label: line.locked ? `Unlock line ${n} and return it to auto` : `Return line ${n} to auto`,
+    change: { lines },
+    done: `Line ${n} returned to auto: it follows the line spacing and alignment again. Ctrl+Z undoes it.`,
+  };
+}
+
+/** The two lines of a pair of letters on different lines, the upper first. */
+function linesOf(layout: Layout, c: Collision): [PlacedLine, PlacedLine] {
+  const a = layout.lines[c.a.line];
+  const b = layout.lines[c.b.line];
+  return a.baselineY <= b.baselineY ? [a, b] : [b, a];
+}
+
+/**
+ * How far two lines must be moved apart to part every pair of their letters
+ * that collide, with SPARE to spare: to the next LINE_STEP (`n`), and as
+ * worked out (`raw`, for the line spacing). It pauses after each pair.
+ */
+function* partLines(layout: Layout, pairs: Collision[], clearance: number): Generator<void, { n: number | null; raw: number | null }, void> {
+  const limit = Math.max(50, 3 * layout.project.capHeight);
+  const target = Math.max(SPARE, clearance + 0.05);
+  let n: number | null = 0;
+  let raw: number | null = 0;
+  for (const c of pairs) {
+    const [up] = linesOf(layout, c);
+    const [upper, lower] = c.a.line === up.index ? [c.a, c.b] : [c.b, c.a];
+    const exact = parting(upper, lower, { x: 0, y: 1 }, target, 0.01, limit);
+    yield;
+    raw = exact === null || raw === null ? null : Math.max(raw, exact);
+  }
+  // Rounded up to the step; the fix is tried before it is offered all the same.
+  if (raw !== null) n = Math.ceil(raw / LINE_STEP - 1e-9) * LINE_STEP;
+  else n = null;
+  return { n, raw };
+}
+
+/**
+ * The fixes worth trying for one pair of letters; `unlock` marks those that
+ * free a locked line, offered only if nothing else works. Lines are moved
+ * apart by `apart` (partLines, for every pair between the same two lines).
+ * It pauses (yields) after each search for how far to part the letters.
+ */
+function* collisionCandidates(layout: Layout, c: Collision, clearance: number, apart: { n: number | null; raw: number | null } | null): Generator<void, { fix: Fix; unlock?: boolean }[], void> {
+  const p = layout.project;
+  const limit = Math.max(50, 3 * p.capHeight);
+  const out: { fix: Fix; unlock?: boolean }[] = [];
+  if (c.a.line !== c.b.line) {
+    // Between lines: part them up and down, with SPARE to spare.
+    const [up, down] = linesOf(layout, c);
+    const n = apart?.n;
+    if (n) {
+      if (!down.locked) out.push({ fix: moveLineFix(p, down, n) });
+      if (!up.locked) out.push({ fix: moveLineFix(p, up, -n) });
+    }
+    if (!up.placed && !down.placed) {
+      // Opening the line spacing acts on every step between them but blank lines given their own height.
+      const texts = p.text.replace(/\r/g, '').split('\n');
+      const i0 = Math.min(up.index, down.index);
+      const steps = texts.slice(i0, Math.max(up.index, down.index)).filter((t, j) => !(isBlank(t) && String(i0 + j) in p.spacers)).length;
+      const raw = steps ? apart?.raw : null;
+      const ls = raw ? Math.ceil((p.lineSpacing + raw / steps) / LINE_STEP - 1e-9) * LINE_STEP : 0;
+      if (raw && ls <= 250) {
+        // (Within the line-spacing setting's limit.)
+        out.push({
+          fix: { id: `line-spacing:${figure(ls)}`, label: `Open the line spacing to ${figure(ls)} mm`, change: { lineSpacing: ls }, done: `Line spacing opened to ${figure(ls)} mm. Ctrl+Z undoes it.` },
+        });
+      }
+    }
+    for (const q of [up, down]) if (q.placed && !q.locked) out.push({ fix: autoLineFix(p, q) });
+    for (const q of [up, down]) if (q.locked) out.push({ fix: autoLineFix(p, q), unlock: true });
+  } else {
+    // On one line: open the gap after the first letter, just enough to part them.
+    const g = layout.gaps.find((x) => x.left === c.a);
+    const n = g ? parting(c.a, c.b, { x: 1, y: 0 }, clearance + 0.02, KERN_STEP, limit) : null;
+    yield;
+    if (g && n) {
+      const gapKerning = { ...p.gapKerning, [g.key]: { pair: g.pair, mm: kernKept(g.gapKern + n, p.capHeight) } };
+      const line = lineName(layout.lines[c.a.line]);
+      out.push({
+        fix: {
+          id: `open-gap:${g.key}:${figure(n)}`,
+          label: g.right === c.b ? `Open this gap ${figure(n)} mm` : `Open the gap after the ${named(c.a.char)} ${figure(n)} mm`,
+          change: { gapKerning },
+          done: `The gap after the ${named(c.a.char)} in line ${line} opened ${figure(n)} mm. Ctrl+Z undoes it.`,
+        },
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * Where several gaps collide for one reason, such as letter spacing set
+ * tight: the letter spacing opened just enough to part every pair on a line.
+ */
+function* letterSpacingFix(layout: Layout, sameLine: Collision[], clearance: number): Generator<void, Fix | null, void> {
+  const p = layout.project;
+  const limit = Math.max(50, 3 * p.capHeight);
+  let need = 0;
+  for (const c of sameLine) {
+    const s = parting(c.a, c.b, { x: 1, y: 0 }, clearance + 0.02, 0.01, limit);
+    yield;
+    if (s === null) return null;
+    // Letter spacing is added after every character between them, spaces too.
+    need = Math.max(need, s / Math.max(1, c.b.pos - c.a.pos));
+  }
+  const ls = Math.ceil((p.letterSpacing + need) / KERN_STEP - 1e-9) * KERN_STEP;
+  if (ls > 15) return null; // past the letter-spacing setting's limit
+  return { id: `letter-spacing:${figure(ls)}`, label: `Open the letter spacing to ${figure(ls)} mm`, change: { letterSpacing: Number(figure(ls)) }, done: `Letter spacing opened to ${figure(ls)} mm. Ctrl+Z undoes it.` };
+}
+
+/**
+ * Tries each fix for the letters that collide on a copy of the layout, and
+ * keeps only those that cure the problem they are listed under without
+ * causing a new one (CLAUDE.md, "Every fix is tried before it is offered").
+ * It yields after each step, so the page can do it a little at a time, and
+ * puts the fixes for each problem in `fixes` by its key as soon as they are
+ * known, so they can be shown as they come. `relayout` lays out a changed
+ * copy of the job.
+ */
+export function* tryCollisionFixes(layout: Layout, hasLetter: (ch: string) => boolean, relayout: (p: Project) => Layout, fixes = new Map<string, Fix[]>()): Generator<void, Map<string, Fix[]>, void> {
+  const p = layout.project;
+  const clearance = clearanceOf(p);
+  // Which letters collide is all that is needed here, not how far.
+  const collisions = findCollisions(layout, clearance, true);
+  if (!collisions.length) return fixes;
+  yield;
+  const now = layoutProblems(layout, hasLetter, true);
+  const before = new Set(now.flatMap((q) => q.facts ?? []));
+  const sizes: Record<string, number> = Object.assign({}, ...now.map((q) => q.sizes ?? {}));
+  yield;
+  const sameLine = collisions.filter((c) => c.a.line === c.b.line);
+  const wide = sameLine.length > 1 ? yield* letterSpacingFix(layout, sameLine, clearance) : null;
+  // Lines are parted from each other as a whole: how far, for each two lines that meet.
+  const apart = new Map<string, { n: number | null; raw: number | null }>();
+  const between = (c: Collision) => linesOf(layout, c).map((l) => l.index).join('|');
+  // What each fix leaves, by its id: the facts of every problem after it, or null if it could not be worked out
+  // or it makes a problem there was already worse (a line further past a side).
+  const tried = new Map<string, Set<string> | null>();
+  for (const c of collisions) {
+    let part: { n: number | null; raw: number | null } | null = null;
+    if (c.a.line !== c.b.line) {
+      const key = between(c);
+      if (!apart.has(key)) apart.set(key, yield* partLines(layout, collisions.filter((x) => x.a.line !== x.b.line && between(x) === key), clearance));
+      part = apart.get(key)!;
+    }
+    const candidates = yield* collisionCandidates(layout, c, clearance, part);
+    if (wide && c.a.line === c.b.line) candidates.push({ fix: wide });
+    const offered: Fix[] = [];
+    const unlocks: Fix[] = [];
+    for (const { fix, unlock } of candidates) {
+      if (!tried.has(fix.id)) {
+        yield;
+        let after: Set<string> | null = null;
+        try {
+          const copy = relayout({ ...p, ...fix.change });
+          yield;
+          const then = layoutProblems(copy, hasLetter, true);
+          const worse = then.some((q) => Object.entries(q.sizes ?? {}).some(([f, v]) => v > (sizes[f] ?? 0) + 0.05));
+          after = worse ? null : new Set(then.flatMap((q) => q.facts ?? []));
+        } catch (err) {
+          console.error(`Could not try “${fix.label}”:`, err);
+        }
+        tried.set(fix.id, after);
+      }
+      const after = tried.get(fix.id);
+      if (!after || after.has(`collide:${c.key}`) || [...after].some((f) => !before.has(f))) continue;
+      (unlock ? unlocks : offered).push(fix);
+    }
+    // A locked line is freed only when nothing else puts it right.
+    fixes.set(`collide:${c.key}`, offered.length ? offered : unlocks);
+  }
+  return fixes;
+}
+
+/** Every fix tried at once, for when there is no page to keep moving (the tests). */
+export function triedFixes(layout: Layout, hasLetter: (ch: string) => boolean, relayout: (p: Project) => Layout): Map<string, Fix[]> {
+  const run = tryCollisionFixes(layout, hasLetter, relayout);
+  for (;;) {
+    const r = run.next();
+    if (r.done) return r.value;
+  }
+}
+
+/** Puts the tried fixes on the problems they belong to. */
+export function attachFixes(list: Problem[], fixes: Map<string, Fix[]>): Problem[] {
+  for (const q of list) {
+    const f = q.key ? fixes.get(q.key) : undefined;
+    if (!f) continue;
+    q.fixes = f;
+    q.trying = false;
+  }
+  return list;
 }
 
 /** How deep the passes go, by what is cut: the letters' slits, the border, and the fixed-depth lines. */

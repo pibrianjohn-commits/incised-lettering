@@ -30,7 +30,7 @@ import { defaultGroups, type Side } from './groups';
 import { defaultBox, evenUp, fitBlock, fitLine, type EvenUp, type FitBy } from './spacing';
 import { AIR_GAP, toGcode } from './gcode';
 import { openPalette, type Command } from './palette';
-import { checkFixes, layoutProblems, machineProblems, passDepths, problemSummary, type Fix, type Problem, type Stage } from './problems';
+import { attachFixes, checkFixes, layoutProblems, machineProblems, passDepths, problemSummary, tryCollisionFixes, type Fix, type Problem, type Stage } from './problems';
 import { alphabetDifferences, FILE_EXTENSION, FILE_TYPE, fileNameFor, normaliseProject, PlainError, projectFileText, readProjectFile } from './projectfile';
 import { AppFileError, fetchAppFile, onFileLaunch, refreshApp, savedCopies, startApp } from './pwa';
 import { enableScrub } from './scrub';
@@ -151,6 +151,18 @@ let file: { name: string; handle: FileHandle | null; saved: Project | null } | n
 /** The G-code checks for a project, and its passes (the 3D view uses them too). */
 let machineChecks: { project: Project; problems: Problem[]; passes: Pass[] } | null = null;
 let checkTimer = 0;
+/**
+ * The fixes for letters that collide, tried on copies of the layout for the
+ * job as it was (problems.ts, tryCollisionFixes). They follow a moment behind.
+ */
+let fixTrials: { project: Project; fixes: Map<string, Fix[]>; done: boolean } | null = null;
+/** The job whose collision fixes are being tried now, and which round of trying it is. */
+let trialFor: Project | null = null;
+let trialRound = 0;
+let trialTimer = 0;
+const TRIAL_SLICE = 'Trying the fixes for letters that collide';
+/** The problem marked on the panel (its key), from clicking it in the problems list or pressing P. */
+let marked: string | null = null;
 
 const $ = <T extends Element = HTMLElement>(id: string) => document.getElementById(id) as unknown as T;
 const work = $('work');
@@ -925,7 +937,11 @@ function onKey(e: KeyboardEvent) {
     selected = null;
     selectedLine = null;
     selectedSpacer = null;
+    marked = null;
     draw();
+  } else if (!e.altKey && e.key.toLowerCase() === 'p') {
+    // P marks the next problem on the panel; Shift+P the one before.
+    stepProblem(e.shiftKey ? -1 : 1);
   } else return;
   e.preventDefault();
 }
@@ -1144,6 +1160,17 @@ function drawOverlay() {
           `<text x="${Number(sx(p.panelWidth)) - 6}" y="${Number(c) - 5}" text-anchor="end">${esc(lineSnaps.y.target.label)}</text></g>`,
       );
     }
+  }
+  // The problem picked from the problems list, marked where it is.
+  const spotted = marked ? problems.find((q) => q.key === marked && q.spot) : undefined;
+  if (spotted?.spot) {
+    const x = Number(sx(spotted.spot.x));
+    const y = Number(sy(spotted.spot.y));
+    out.push(
+      `<g class="spot ${spotted.level}"><circle class="pulse" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="16"/><circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="16"/>` +
+        `<line x1="${(x - 24).toFixed(1)}" y1="${y.toFixed(1)}" x2="${(x - 19).toFixed(1)}" y2="${y.toFixed(1)}"/><line x1="${(x + 19).toFixed(1)}" y1="${y.toFixed(1)}" x2="${(x + 24).toFixed(1)}" y2="${y.toFixed(1)}"/>` +
+        `<line x1="${x.toFixed(1)}" y1="${(y - 24).toFixed(1)}" x2="${x.toFixed(1)}" y2="${(y - 19).toFixed(1)}"/><line x1="${x.toFixed(1)}" y1="${(y + 19).toFixed(1)}" x2="${x.toFixed(1)}" y2="${(y + 24).toFixed(1)}"/></g>`,
+    );
   }
   overlay.innerHTML = out.join('');
   drawRulers();
@@ -2976,7 +3003,10 @@ function wireChrome() {
     const li = (e.target as HTMLElement).closest<HTMLElement>('[data-stage]');
     if (!li) return;
     closeMenus();
-    setStage(li.dataset.stage as Stage);
+    // To its stage, and a problem with a place on the panel is marked there.
+    const q = li.dataset.key ? problems.find((x) => x.key === li.dataset.key) : undefined;
+    if (q) showProblem(q);
+    else setStage(li.dataset.stage as Stage);
   });
   $('st-msg').textContent = HINT;
   // Which version this is, where every screenshot shows it.
@@ -3109,6 +3139,13 @@ let problems: Problem[] = [];
 function refreshProblems() {
   if (!layout || !store) return;
   const list = layoutProblems(layout, hasLetter);
+  // Letters that collide: their fixes are offered once tried, a moment behind.
+  if (fixTrials?.project === project && layout.project === project) {
+    attachFixes(list, fixTrials.fixes);
+    // Any the trials could not get to are left with none rather than untried ones.
+    if (fixTrials.done) for (const q of list) if (q.trying) (q.trying = false), (q.fixes = []);
+  } else if (list.some((q) => q.trying)) scheduleFixTrials();
+  if (marked && !list.some((q) => q.key === marked)) marked = null; // put right: nothing left to mark
   if (project.refImage && !refUrl) {
     list.push({
       level: 'warn',
@@ -3163,15 +3200,97 @@ function scheduleChecks() {
   }, 500);
 }
 
+/**
+ * Tries the fixes for letters that collide on copies of the layout, a little
+ * at a time once the job has been still for a moment, so the page never
+ * stalls; each is offered once it is known to cure its problem without
+ * causing a new one (CLAUDE.md, "Every fix is tried before it is offered").
+ */
+function scheduleFixTrials() {
+  if (trialFor === project) return; // already under way for the job as it is
+  trialFor = project;
+  const round = ++trialRound;
+  clearTimeout(trialTimer);
+  trialTimer = window.setTimeout(() => {
+    const p = project;
+    const l = layout;
+    const s = store;
+    // A preview of spacing suggestions is showing: tried once it is put away.
+    if (round !== trialRound || !s || !l || l.project !== p) {
+      if (round === trialRound) trialFor = null;
+      return;
+    }
+    // Each problem's fixes are shown as soon as they are known.
+    const trials = { project: p, fixes: new Map<string, Fix[]>(), done: false };
+    fixTrials = trials;
+    const steps = tryCollisionFixes(l, hasLetter, (q) => layoutPanel(s, q, true), trials.fixes);
+    const slice = () => {
+      if (round !== trialRound || p !== project) return; // changed again: the next round tries afresh
+      const start = performance.now();
+      const known = trials.fixes.size;
+      try {
+        for (;;) {
+          if (steps.next().done) {
+            trials.done = true;
+            break;
+          }
+          if (performance.now() > start + 6) break;
+        }
+      } catch (err) {
+        // Nothing offered rather than anything untried; the problems still stand.
+        console.error('The fixes for letters that collide could not be tried:', err);
+        trials.done = true;
+      } finally {
+        // Each slice shows in the browser's own timeline, and the browser tests time it.
+        performance.measure(TRIAL_SLICE, { start });
+      }
+      if (trials.done || trials.fixes.size !== known) refreshProblems();
+      if (!trials.done) window.setTimeout(slice, 0);
+    };
+    slice();
+  }, 200);
+}
+
+/** Go to a problem's stage and mark it on the panel, bringing it into view if it is off the screen. */
+function showProblem(q: Problem) {
+  setStage(q.stage);
+  if (!q.key || !q.spot) return;
+  marked = q.key;
+  const v = view.v;
+  const r = work.getBoundingClientRect();
+  const x = v.tx + q.spot.x * v.scale;
+  const y = v.ty + q.spot.y * v.scale;
+  if (x < 60 || y < 60 || x > r.width - 60 || y > r.height - 60) view.set({ ...v, tx: r.width / 2 - q.spot.x * v.scale, ty: r.height / 2 - q.spot.y * v.scale });
+  drawOverlay();
+}
+
+/** P and Shift+P: the next or previous problem that has a place on the panel, marked there. */
+function stepProblem(dir: 1 | -1) {
+  const placed = problems.filter((q) => q.key && q.spot);
+  if (!placed.length) return say(problems.length ? 'None of the problems has a place on the panel to show.' : 'Nothing needs putting right.');
+  const at = placed.findIndex((q) => q.key === marked);
+  const q = placed[at < 0 ? (dir > 0 ? 0 : placed.length - 1) : (at + dir + placed.length) % placed.length];
+  showProblem(q);
+  say(q.text);
+}
+
 const fixButtons = (fixes: Fix[]) =>
   fixes.length ? `<span class="fixes">${fixes.map((f) => `<button type="button" data-fix="${esc(f.id)}">${esc(f.label)}</button>`).join('')}</span>` : '';
+
+/** A problem's fixes, or why there are none yet. */
+function problemFixes(q: Problem): string {
+  if (q.trying) return '<span class="fixes"><small class="trying">Trying the fixes on a copy first…</small></span>';
+  if (q.kind === 'collision' && !q.fixes.length)
+    return '<span class="fixes"><small class="trying">No one-click fix parts these without causing a new problem: move a line or open the gap by hand.</small></span>';
+  return fixButtons(q.fixes);
+}
 
 function showProblemList() {
   $('warn-pop').querySelector('ul')!.innerHTML = problems.length
     ? problems
         .map(
           (q) =>
-            `<li class="${q.level}" data-stage="${q.stage}" title="Go to ${STAGE_NAMES[q.stage]}"><b>${q.level === 'bad' ? '✗' : '!'}</b><span>${esc(q.text)}</span><small>${STAGE_NAMES[q.stage]}</small>${fixButtons(q.fixes)}${
+            `<li class="${q.level}" data-stage="${q.stage}"${q.key ? ` data-key="${esc(q.key)}"` : ''} title="Go to ${STAGE_NAMES[q.stage]}${q.spot ? ' and mark it on the panel' : ''}"><b>${q.level === 'bad' ? '✗' : '!'}</b><span>${esc(q.text)}</span><small>${STAGE_NAMES[q.stage]}</small>${problemFixes(q)}${
               q.details ? `<details class="why"><summary>Details</summary><pre>${esc(q.details)}</pre></details>` : ''
             }</li>`,
         )
@@ -3204,6 +3323,12 @@ function setText(text: string) {
 /** Carry out a one-click fix from the problems list (problems.ts); each is one step to undo. */
 function runFix(id: string) {
   if (!store || !layout) return;
+  // A fix tried on a copy before it was offered does exactly what was tried.
+  const tried = problems.flatMap((q) => q.fixes).find((f) => f.id === id && f.change);
+  if (tried?.change) {
+    update(tried.change);
+    return say(tried.done ?? `${tried.label}: done. Ctrl+Z undoes it.`);
+  }
   const [what, arg] = id.split(':');
   const n = Number(arg);
   const machine = project.machine;
@@ -3580,6 +3705,8 @@ function commands(): Command[] {
   );
   // Whatever the problems list offers now, by name.
   for (const f of currentFixes()) add(`Put right: ${f.label}`, () => runFix(f.id), 'Problems', 'fix problem warning');
+  for (const q of problems) if (q.key && q.spot) add(`Show on the panel: ${q.text}`, () => showProblem(q), 'P', 'problem where mark find collision touch letters');
+  add('Show the next problem on the panel', () => stepProblem(1), 'P', 'problem where mark find collision touch letters');
   add('Fit the lettering to the panel across its width', () => fitLettering('width'), 'Panel', 'scale size fill');
   add('Fit the lettering to the panel up its height', () => fitLettering('height'), 'Panel', 'scale size fill');
   add('Re-flow all lines', () => $('reflow').click(), 'Write', 'lines auto');

@@ -4,7 +4,7 @@ import { alphabetFromFont } from '../src/alphabet';
 import { contentBox, defaultProject, kernKept, layoutPanel, lineNumber, pairKerning, type Project } from '../src/layout';
 import { LetterStore } from '../src/letters';
 import { BED, bedFit, fitLetteringToPanel, fitToLettering, letteringBox, resizeLettering, shrinkDesignToBed } from '../src/panel';
-import { layoutProblems, machineProblems, passDepths } from '../src/problems';
+import { attachFixes, layoutProblems, machineProblems, passDepths, triedFixes } from '../src/problems';
 import { buildPasses, checkPasses } from '../src/toolpath';
 import { normaliseProject } from '../src/projectfile';
 import { remapForEdit } from '../src/remap';
@@ -156,13 +156,14 @@ describe('problems and their fixes', () => {
     expect(edges({ ...p, lines: {} })).toEqual([]);
   });
 
-  it('lines that run into each other: open the line spacing just enough', () => {
+  it('letters of two lines that run into each other: open the line spacing just enough', () => {
     const p = proj({ text: 'MOON\nMOON', capHeight: 20, lineSpacing: 15, panelWidth: 200, panelHeight: 100 });
-    const q = layoutProblems(lay(p), has).find((x) => x.kind === 'lines')!;
-    const fix = q.fixes.find((f) => f.id.startsWith('line-spacing:'))!;
+    const l = lay(p);
+    const list = attachFixes(layoutProblems(l, has), triedFixes(l, has, (q) => layoutPanel(store, q, true)));
+    const fix = list.flatMap((x) => (x.kind === 'collision' ? x.fixes : [])).find((f) => f.id.startsWith('line-spacing:'))!;
     const ls = Number(fix.id.split(':')[1]);
     expect(ls).toBeGreaterThan(15);
-    expect(layoutProblems(lay({ ...p, lineSpacing: ls }), has).some((x) => x.kind === 'lines')).toBe(false);
+    expect(layoutProblems(lay({ ...p, lineSpacing: ls }), has).some((x) => x.kind === 'collision')).toBe(false);
   });
 
   it('small letters with an alphabet of capitals only: offered as capitals', () => {

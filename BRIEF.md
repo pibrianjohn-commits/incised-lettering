@@ -138,12 +138,23 @@ What has been built so far. From here on, work follows the **Roadmap** below.
 10. **Done: simpler, modern interface** (7 Oct 2026): stage tabs, context tools, "More" folds, status bar with a warnings badge, drag-to-change, Ctrl+K search and a ? key list, installable offline app, project files and the bench sheet. See Decisions, "The interface".
 11. **Done: fit and finish** (7 Oct 2026): problems with one-click fixes, fitting the lettering to the panel, blank lines as spacers, each line's own spacing, and a pass over the whole app. See Decisions, "Fit and finish".
 12. **Done: the offline copy put right** (8 Oct 2026): the 3D view failing in the carver's Firefox, the version shown in the status bar, and every browser test run in Firefox and Chrome. See Decisions, "The offline copy".
+13. **Done: the collision check put right** (8 Oct 2026): letters checked against each other, not lines, with every fix tried before it is offered. See Decisions, "Collisions put right".
 
 ## Roadmap
 
 Agreed 5 Oct 2026. Build in this order, one step at a time.
 
 **Change of order** (5 Oct 2026): step 8 (G-code) is built next, before steps 5, 6 and 7, so the method can be tested in wood as soon as the 30° bit arrives. The order from here is 8, then 5, 6, 7.
+
+**Change of order (8 Oct 2026).** The order from here is below. It takes over from the order above for everything not yet built; the plans behind it are recorded under Decisions (8 Oct 2026).
+1. **Collision check put right.** *Done 8 Oct 2026* (see Decisions, "Collisions put right").
+2. **Linked letters.**
+3. **Layout studio, Part A:**
+   - (a) **Measuring system:** a unit ladder (1 unit = the H's stem width; cap height in units, such as 7; heights snap to units), height overlays with snapping, and a proportion key in the corner.
+   - (b) **Single-letter work:** double-click to isolate a letter (its own font, size, alternate and position), non-ranging letters, and corner handles to scale a letter or a line.
+4. **A real panel:** board glue-up; the full-size print with the client proof; tiling the machining.
+5. **Alphabets:** more than one, with mix and match; the letter builder, the carver's blackletter first; drawn letters, once the licence is settled; then step 5 (alphabet setting, alternates, ligatures) and the letter-cutting families.
+6. **Part B:** text on arcs, circles and drawn curves (Stage 2's curved baseline). **Part C:** teaching aids (Roman proportion overlays, an exemplar ghost). Then the rest of step 6. True font blending last.
 
 **Workspace tools** (added and built 5 Oct 2026, ahead of step 1):
 - View presets: **Design** letters filled solid dark, nothing else; **Spacing** letters plus the shaded spaces and their areas; **Setting-out** hairline, datum and valley lines only; **Proof** clean letters with the border, as a client would see them. The individual tick boxes stay for fine control, under Layers. (From 7 Oct 2026 the number keys 1–5 choose the stages of the job, and the presets are on Shift+1 to Shift+4; see Decisions, "The interface".)
@@ -187,8 +198,8 @@ Agreed 5 Oct 2026. Build in this order, one step at a time.
    - Save the carver's own presets.
    - Saved styles, for consistent lettering across a set of pieces.
    - A library of complete finished layouts, saved and reused (not empty templates).
-   - Client proof: export the layout as a clean PDF or image for customer approval.
-   - Full-size printed template: print the layout at 1:1 across several sheets, for transfer or for checking against the wood.
+   - Client proof: export the layout as a clean PDF or image for customer approval. (Gains a sign-off line, 8 Oct 2026.)
+   - ~~Full-size printed template: print the layout at 1:1 across several sheets, for transfer or for checking against the wood.~~ Replaced on 8 Oct 2026 by the full-size print on A4 and A3 (see Decisions).
 7. **3D view.** *Done 5 Oct 2026; made quick on an ordinary laptop 7 Oct 2026.* The board at its panel size and real stock thickness; "Marked out by the bit" is stamped from exactly the cuts in the G-code, and "Finished letters" carves every letter to the chisel angle; a plain matte surface or depth colours; a light swept from the left, over the top of the panel, to the right, and raised or lowered, with shadows traced across the cuts; "Sharper" for a close look. Opened with the 3D tab or key 5. See Decisions, "The 3D view".
    - Like Kiri:Moto: orbit, pan and zoom.
    - Set the stock size.
@@ -197,12 +208,10 @@ Agreed 5 Oct 2026. Build in this order, one step at a time.
 8. **G-code.** *Done 5 Oct 2026.* Generate the marking-out passes for the Genmitsu 3020-PRO Ultra as set out under Machine and G-code, taking the strokes within each pass in cutting order: thin strokes first, then thick. Every pass is shown on screen (the slit at its true cut width, strokes numbered in cutting order, travel moves dashed, X0 Y0 marked), with safety checks; the G-code can be saved only after every pass has been looked at and every blocking check is passed, and any change to the layout closes the preview. Each file starts with the bit raised and a pause to start the spindle by hand; an Air cut option saves the same file lifted 5 mm clear of the board for a dry run (added 7 Oct 2026).
 
 **Later, not yet scheduled:**
-- Per-line cap height and scaling.
-- Non-ranging letters.
-- The carver's own alphabet, loaded from SVG files.
-- Curved baselines and carved banner scrolls (Stages 2 and 3).
-- Double-click a letter to select it on its own.
+- Carved banner scrolls (Stage 3).
 - Variants: save versions of a layout and compare them side by side.
+
+(Moved on 8 Oct 2026 into the order above: "Double-click a letter to select it on its own", "Non-ranging letters", "Per-line cap height and scaling" and "The carver's own alphabet, loaded from SVG files", and the curved-baseline half of "Curved baselines and carved banner scrolls".)
 
 ## Technology and setup
 
@@ -254,7 +263,7 @@ Answers from the carver, recorded as they are given.
   1. **Stage tabs** across the top in job order: **Write, Space, Panel, Machine, 3D**, on keys 1 to 5. Each shows only its own tools in the side panel. Write: the inscription, cap height, letter and line spacing, alignment, lines (word stops under More). Space: kerning, even-up spacing (measuring depth, fit to a width and kerning groups under More). Panel: size, border, margins (reference picture and the screen-scale check under More). Machine: stock thickness, the passes, the preview and the G-code (safe floor, chisel angle, slit margin, zero corner, datum line, and the bit, speeds and depths under More). 3D: the board, the light and the views, with the 3D view filling the workspace; Esc goes back. Each stage opens with its own view (Write and Panel: the letters solid with their lines and margins; Space: Spacing; Machine: Setting-out) and remembers any change made there. The view presets stay as buttons above the panel, now on Shift+1 to Shift+4, and the tick boxes under Layers. Leaving Machine closes the toolpath preview.
   2. **Context tools.** Clicking a line shows its tools floating beside it: left end, centre and baseline, its own letter and word spacing, return to auto, lock, and fit to width. Clicking a gap shows its kerning controls floating beside it. Each box sits above what it belongs to, or below if there is no room, with a small pointer to it.
   3. **More.** Rarely used settings are folded under "More" at the foot of each stage, keeping their starting values. A fold says how many of its settings differ from the starting values, so nothing hidden is a surprise. Search (Ctrl+K) opens the fold when it goes to a setting inside one.
-  4. **Status bar** along the bottom: the pointer's position in mm (from the panel's top-left corner, like the rulers), the zoom (click for true size, − and + to zoom), snapping on or off (also key S), short messages, and one warnings badge. The badge lists every problem when clicked: letters not in the alphabet, lines running into each other, lettering past the margins or off the panel, a panel too big for the bed or needing the extended bed, the reference picture missing, and every G-code safety check that fails. Clicking a problem goes to the stage where it is put right, and each has buttons that put it right at once (see "Fit and finish"). A missing stock thickness counts as a warning, not a fault, until the G-code is wanted.
+  4. **Status bar** along the bottom: the pointer's position in mm (from the panel's top-left corner, like the rulers), the zoom (click for true size, − and + to zoom), snapping on or off (also key S), short messages, and one warnings badge. The badge lists every problem when clicked: letters not in the alphabet, letters running into each other (from 8 Oct 2026 letter by letter: see "Collisions put right"), lettering past the margins or off the panel, a panel too big for the bed or needing the extended bed, the reference picture missing, and every G-code safety check that fails. Clicking a problem goes to the stage where it is put right, and each has buttons that put it right at once (see "Fit and finish"). A missing stock thickness counts as a warning, not a fault, until the G-code is wanted.
   5. **Drag to change.** Dragging sideways on a setting's name changes its value: right to increase, left to decrease, one step of the setting every few pixels, ten with Shift, held within its limits. A plain click still goes to the box for typing, and the whole drag is one step to undo.
   6. **Ctrl+K** finds any command or setting by name and does it or goes to it. **?** lists every key and mouse action.
   7. **Installable and offline.** In Chrome or Edge, "Install app" (top right, when offered) installs the tool with its own window and icon. Every file is kept on the laptop, so it opens and works with no internet; when online it always loads the newest published version (in every browser, Firefox included; see "The offline copy"). Double-clicking a project file opens it in the installed app.
@@ -280,7 +289,7 @@ Answers from the carver, recorded as they are given.
 - **Fit and finish** (7 Oct 2026). A pass over the whole app as a letterer would use it:
   - **Problems, every side, every fix.** Lettering is checked against all four margins (to the letters' ends, and from cap line to baseline) and all four edges of the board (to the letters themselves, overshoots and word stops included), line by line. Lines laid out automatically make one problem between them, since they share one cause; each line placed by hand makes its own. Each problem says which lines, which sides and by how much. Every problem has buttons that put it right at once, each one step to undo:
     - lettering past a margin or off the board: **Fit lettering to panel** (when it is too big for the space), **Fit panel to lettering**, and for a line placed by hand **Move line inside the margins** and **Return line to auto**;
-    - lines running into each other: **Open the line spacing** just enough to part them, or **Return line to auto** (or unlock it, if it is locked);
+    - lines running into each other: **Open the line spacing** just enough to part them, or **Return line to auto** (or unlock it, if it is locked) (replaced 8 Oct 2026 by the letter-by-letter check: see "Collisions put right");
     - letters not in the alphabet: **Change them to capitals** (when the alphabet has only capitals), or **Take them out of the text**, with the space each leaves;
     - no room inside the border and margins: **Fit panel to lettering**;
     - a panel too big for the machine or needing the extended bed: **Shrink everything to fit the bed**, the panel, border, margins, guides, picture and lettering all together so the design keeps its look (and to the extended bed, when that lets it stay bigger);
@@ -319,6 +328,69 @@ Answers from the carver, recorded as they are given.
   - **The version shows.** The status bar reads, for example, "Version 22, published 8 Oct 2026, 21:40": the number of the last change merged, and when it was published, UK time. It is also at the top of the ? list, in the credit line and in every Details, so every screenshot says which version was running, and an out-of-date copy is plain to see. On a narrow window the status bar shows just the number.
   - **Tested as the carver's browser lives.** Every browser test now runs in Firefox as well as Chrome (CLAUDE.md). The offline copy is tested by publishing versions in quick succession to a stand-in for GitHub Pages, keeping one browser profile throughout: two published with the page open then reloaded, then offline; a page left open across two updates, its own files gone everywhere, with the 3D view opened for the first time; the worker's file missing; and a copy made by the old offline worker, from the versions of 7 Oct 2026, putting itself right (browser-tests/updates.mjs). The 3D speed check runs in Firefox too, its page and worker held to a quarter of one processor core (browser-tests/perf3d.mjs).
 
+- **One program; editions later** (8 Oct 2026). Everything stays in one program. A School edition, a gift to the City & Guilds of London Art School where the carver trained, will be made later by switching off the machine functions: the Machine stage, the G-code, and the machine's own passes such as the datum line and slit. So layout, spacing, printing and teaching tools never depend on the machine functions, and can be switched off from them cleanly (a standing rule, in CLAUDE.md).
+
+- **Collisions** (8 Oct 2026). A collision is a collision: two letters whose outlines touch or overlap, or come closer than the hairline cut is wide (so their hairlines would run together), whether in different lines or on the same line. The one exception will be letters the carver links on purpose (next decision).
+
+- **Linked letters** (8 Oct 2026; planned, next after the collision check). Letters joined on purpose, such as the feet of A and M touching, are not a collision. How a joint is marked out and cut is the carver's decision, still to come (see Open questions).
+
+- **Every fix is tried before it is offered** (8 Oct 2026). A one-click fix appears only if, tried on a copy of the layout, it cures the problem it is listed under without causing a new one (a standing rule, in CLAUDE.md). Found 8 Oct 2026, in a rebuild of the carver's layout: "Return line 2 to auto" moved line 2 less than 1 mm and left its problem in place.
+  - The fixes for letters that collide follow it (see "Collisions put right"). Older fixes found on 8 Oct 2026 to fail it, still to be put right, each found by carrying it out on a test layout:
+    - **Return line N to auto**, for a line past the margins: where the lettering is too big for the space, the auto place runs past them too.
+    - **Move line N inside the margins**: it can move the line into another ("The J in line 1 runs into the A in line 2").
+    - **Fit panel to lettering**: on lettering too big for the machine, it makes a panel too big for the machine; and with a line placed off the board, it left line 1 0.5 mm past the top margin.
+    - **Fit lettering to panel**: letters made smaller come closer together, but the hairline does not get narrower, so close pairs can then collide (an A and M at ordinary spacing, made small enough).
+    - **Run every pass**: on thin stock it brings in a cut too deep for it.
+    - Buttons that only go to a setting or open something (**Enter the stock thickness**, **Change the stock thickness**, **Change the bit**, **Change the border**, **Load the picture again**, **Go to Machine**) cure nothing by themselves.
+
+- **Board glue-up** (8 Oct 2026; planned). In the Panel stage:
+  - the number and widths of the boards, or worked out from the widest board the carver can buy;
+  - the direction of the grain;
+  - the joints shown on the layout, in the 3D view and in the Proof view's oak;
+  - a problem when a joint runs through a letter or too close to one, with fixes that move joints into the space between lines or re-divide the widths;
+  - a cutting list on the bench sheet.
+
+- **Full-size print on A4 and A3** (8 Oct 2026; planned). It replaces "Full-size printed template" in Roadmap step 6, and serves as Part C's tracing print.
+  - A PDF tiled across A4 or A3 sheets, portrait or landscape, joined either by overlap (a repeated strip with a line to lay to) or edge to edge (trimmed on cut marks).
+  - Grid labels and a key map of the sheets; match marks across every join; a 100 mm check bar on every sheet, with a reminder to print at actual size, never "fit to page". Nothing falls in the printer's unprintable edge.
+  - The carver chooses what prints: outlines for carbon transfer, the setting-out lines for marking out by hand, or filled letters for a proof.
+  - There is also one full-size PDF for a print shop.
+  - In the School edition this print is the marking-out.
+  - The client proof gains a sign-off line, and the inscription a spelling check.
+
+- **Tiling the machining** (8 Oct 2026; planned). Panels bigger than the bed (300 × 205 mm, or 300 × 400 mm extended) are marked out in sections, either as separate tiles or by feeding the board through in steps, with registration between sections.
+
+- **Alphabets** (8 Oct 2026; planned).
+  - More than one alphabet in a job, including the carver's own letters loaded from SVG files.
+  - Letters can be mixed from different fonts into one alphabet, matched for cap height and stem weight.
+  - A font can be made heavier, lighter, wider or narrower.
+  - True blending of two fonts comes last, as research: it needs letters whose outlines correspond point for point.
+
+- **The letter builder** (8 Oct 2026; planned). The carver's own cutting alphabets, built from rules: heights in units, pen angle, how curves are formed and where strokes break. It starts with the carver's own blackletter. A letter built from strokes comes with its strokes, junctions and cutting order known, rather than worked out from an outline.
+
+- **Drawn letters** (8 Oct 2026; planned).
+  - The app prints a template sheet with a box per character (cap line, baseline and unit ladder printed in each), corner marks to square up a photo, and a 100 mm check bar.
+  - The carver draws the letters, then scans the sheet (300 to 600 dpi, greyscale) or photographs it. The app squares it up, finds each box, traces the letter, sets its spacing and adds it to an alphabet.
+  - The same tool matches an existing inscription, such as adding a name to a lodge board.
+  - The tracer waits on the program's licence: Potrace's browser versions are GPL, which would make the whole program GPL; imagetracerjs is public domain.
+
+- **Letter-cutting families** (8 Oct 2026; planned). Uncial, half-uncial, Textura, Rotunda, Fraktur, Schwabacher and others.
+  - Free OFL stand-ins: UnifrakturMaguntia, UnifrakturCook, Pirata One, MedievalSharp and Grenze Gotisch (Google Fonts), the Freie Fraktur collection, and Uncial Antiqua. No usable free Rotunda was found.
+  - The true families come from the builder and from drawn letters.
+  - Every new alphabet goes through test/everychar.test.ts.
+
+- **Collisions put right** (8 Oct 2026). The check of whole lines ("Lines 2 and 3 run into each other") compared a box round each line, so a tail falling into a gap in the line below was flagged, it never said which letters, and its fixes might not cure it. It is replaced by a check of the letters themselves, as decided under "Collisions":
+  - **Every pair of letters** that could meet, on the same line or different lines, is checked: their boxes first, and their outlines only where the boxes come within reach. Too close is closer than the hairline cut is wide, worked out from the hairline depth and the bit (0.11 mm at the starting 0.2 mm with the 30° bit), or the starting hairline where the machine settings are not there. Word stops are not checked yet.
+  - **One problem per pair**, in plain words: "The J in line 2 runs into the M in line 3." "The A and M in line 3 touch." Letters that do not touch but come too close say how close: "…come within 0.05 mm of each other, so their hairlines would run together." The same pair twice on a line is told apart: "(1st of 2)".
+  - **Clicking the problem** goes to its stage (Write for letters in different lines, Space for letters on one line) and marks the place on the panel with an amber ring, bringing it into view if it is off the screen. **P** and **Shift+P** step through the problems the same way, Esc takes the mark away, and Ctrl+K has "Show on the panel: …" for each.
+  - **Fixes, each tried first** on a copy of the layout, and offered only if they cure the problem they are listed under without causing a new one or making one worse (no line pushed further past a margin or off the board):
+    - between lines: **Move line 3 down N mm** and **Move line 2 up N mm**, far enough to part the two lines wherever their letters meet, with 0.5 mm to spare, rounded up to the next 0.5 mm; **Open the line spacing to N mm** where both lines are auto; **Return line N to auto** only where that cures it. Locked lines are never moved: **Unlock line N and return it to auto** is offered only where nothing else puts it right, and that cures it.
+    - on one line: **Open this gap N mm** (kerning for that gap only), just enough to part the two letters, to the next 0.1 mm; and where several gaps collide, **Open the letter spacing to N mm**, just enough to part every one.
+    - Fixes appear a moment after each change ("Trying the fixes on a copy first…"), problem by problem. Where nothing works, the list says so.
+  - **Quick on an ordinary laptop.** Checked with the CPU slowed 4× (browser-tests/collisions.mjs): on the carver's layout the fixes are tried in a handful of slices of about 20 ms each, so the page always answers; two long lines laid over each other (28 collisions) take about a second. The page's own redraw after each change still takes 0.3 to 0.6 s slowed 4×, as it did before.
+  - **Found on the way, for the carver** (see Open questions): with the stand-in alphabet (Cinzel) at ordinary letter spacing, the serifs of 28 pairs of capitals already touch, so they are flagged: AA, AX, KA, KV, KW, KX, KY, QJ, RA, RM, RX, VV, VW, VX, VY, WV, WW, WX, WY, XA, XV, XW, XX, XY, YV, YW, YX and YY. And the hairline stays the same width when letters are made smaller, so below a cap height of about 19 mm an A and M at ordinary spacing come closer than it.
+  - Tested on a rebuild of the carver's layout (test/collisions.test.ts): "AMBER IS....", a blank line, "JUST", a blank line, "AMAZBALLS"; Cinzel at 31.5 mm cap height and −0.5 mm letter spacing; line 2 placed at baseline 114.8 mm and line 3 at 154.9 mm. Where the lines sat across the panel was not recorded, so line 2 is placed where its J comes over the M below, as it did. The J's tail runs about 1 mm into the M, and the feet of A and M touch in AMBER and twice in AMAZBALLS; these stay flagged until linked letters exist.
+
 ## Open questions
 
 - Is 60° the right included chisel angle, or does it change with letter size or timber? To be settled with test letters in oak.
@@ -326,8 +398,17 @@ Answers from the carver, recorded as they are given.
 - What is the spindle's actual top speed?
 - How should serifs and bracketing be handled at terminations, beyond the plain fork into the corners?
 - Which stand-in Roman typeface is closest to the letters the carver intends to draw?
-- Even-up factors for round, straight and diagonal sides: they start at 1.0 (pure equal space). Measured with the 6 mm depth limit, round pairs such as H O come out with less space than H H, so at 1.0 the suggestions open them up; a round factor below 1 (try 0.8) brings them closer. What factors look right by eye?
-- Word stops start as triangles with sides 22% of the cap height, centred 45% up, pointing down. Is that the right size, height and direction?
+- Even-up factors for round, straight and diagonal sides: they start at 1.0 (pure equal space). Measured with the 6 mm depth limit, round pairs such as H O come out with less space than H H, so at 1.0 the suggestions open them up; a round factor below 1 (try 0.8) brings them closer. What factors look right by eye? (Added 8 Oct 2026: judge them with control strings such as HHOHHOOHH and HHAHHVHHAVH. HT Letterspacer, the type designers' spacing tool, measures area to a depth as the even-up does, with an extra setting for overshoot: worth comparing.)
+- Word stops start as triangles with sides 22% of the cap height, centred 45% up, pointing down. Is that the right size, height and direction? (Added 8 Oct 2026: judge size and position against a reference photo.)
 - The G-code is written for GRBL and still needs confirming against the machine and its sender before the first cut: run the air cut first, then the real file in scrap.
 - Does the sender show the pause message on screen? The file sends it two ways (a GRBL message and a comment on the pause line); the pause itself happens either way.
 - The negative-space depth limit applies to every letter, so it also trims the space beside the slanting legs of A and V and under the arm of T, not only the bays of open letters. Is that wanted, or should those be left uncut?
+- How is a joint between linked letters marked out and cut (hairline, datum, valley, stop cuts)? (8 Oct 2026)
+- What exactly should "non-ranging letters" do? To settle before Part A (b). (8 Oct 2026)
+- Glue-up: how close may a joint come to a letter, may one ever cross a letter, and what jointing allowances are wanted? (8 Oct 2026)
+- Tiling the machining: how is the board registered between sections? (8 Oct 2026)
+- Which licence for the program? It decides the tracer for drawn letters. (8 Oct 2026)
+- Should full stops be cut as triangles, like Roman stops, automatically? (8 Oct 2026)
+- The letter builder: the carver's proportions and pen rules for the carver's own blackletter. (8 Oct 2026)
+- "Open this gap" parts two letters just past the width of the hairline (to the next 0.1 mm), while lines are parted with 0.5 mm to spare. Should a gap be opened further, so a sliver of wood is left that the chisel can work? (8 Oct 2026)
+- With Cinzel at ordinary spacing, the serifs of 28 pairs of capitals touch (see "Collisions put right"). Open them, or link them on purpose once linked letters exist? (8 Oct 2026)

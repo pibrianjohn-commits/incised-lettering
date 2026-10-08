@@ -233,6 +233,8 @@ export function gapKey(line: number, index: number): string {
 export interface PlacedLetter {
   char: string;
   line: number;
+  /** Its place in its line's text (0 = the first character). */
+  pos: number;
   outline: Contour[];
   valleys: ValleyLine[];
   datum: Contour[];
@@ -417,6 +419,7 @@ export function layoutPanel(store: LetterStore, p: Project, quick = false): Layo
       const L: PlacedLetter = {
         char: ch,
         line: li,
+        pos: i,
         outline: m.outline.map(move),
         valleys: m.valleys.map((v) => v.map((q) => ({ x: q.x + dx, y: q.y + dy, r: q.r }))),
         datum: (m.datum ?? []).map(move),
