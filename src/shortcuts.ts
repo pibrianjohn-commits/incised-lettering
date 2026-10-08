@@ -18,6 +18,7 @@ export const SHORTCUTS: { group: string; items: [string, string][] }[] = [
       ['Ctrl + K', 'Find any command or setting'],
       ['?', 'This list'],
       ['Click the problems badge', 'Every problem, each with buttons that put it right'],
+      ['P / Shift + P', 'The next or previous problem: its stage, with its place marked on the panel'],
     ],
   },
   {

@@ -545,6 +545,13 @@ button.quiet { font-size: 13px; color: var(--muted); box-shadow: none; }
 #overlay .guide line { stroke: var(--guide); stroke-width: 1; shape-rendering: crispEdges; }
 #overlay .guide line.hit { stroke: transparent; stroke-width: 9; cursor: grab; pointer-events: stroke; }
 #overlay .guide.live line { stroke-dasharray: 4 3; }
+#overlay .spot { pointer-events: none; fill: none; stroke: var(--caution); stroke-width: 2.5; }
+#overlay .spot.bad { stroke: var(--bad); }
+#overlay .spot circle:not(.pulse) { paint-order: stroke; filter: drop-shadow(0 0 1.5px var(--card)); }
+#overlay .spot .pulse { stroke-width: 2; transform-box: fill-box; transform-origin: center; animation: spot-pulse 1.2s ease-out 3; opacity: 0; }
+@keyframes spot-pulse { from { transform: scale(0.6); opacity: 0.9; } to { transform: scale(2.2); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { #overlay .spot .pulse { animation: none; } }
+#warn-pop .trying { border: none; padding: 0; font-style: italic; }
 #overlay .guide-label { font: 600 11px var(--font); fill: var(--guide); paint-order: stroke; stroke: var(--card); stroke-width: 3px; }
 #overlay .measure line { stroke: var(--measure); stroke-width: 1.5; }
 #overlay .measure circle { fill: var(--measure); }
