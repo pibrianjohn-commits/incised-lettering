@@ -145,6 +145,16 @@ Agreed 5 Oct 2026. Build in this order, one step at a time.
 
 **Change of order** (5 Oct 2026): step 8 (G-code) is built next, before steps 5, 6 and 7, so the method can be tested in wood as soon as the 30° bit arrives. The order from here is 8, then 5, 6, 7.
 
+**Change of order (8 Oct 2026).** The order from here is below. It takes over from the order above for everything not yet built; the plans behind it are recorded under Decisions (8 Oct 2026).
+1. **Collision check put right** (this task).
+2. **Linked letters.**
+3. **Layout studio, Part A:**
+   - (a) **Measuring system:** a unit ladder (1 unit = the H's stem width; cap height in units, such as 7; heights snap to units), height overlays with snapping, and a proportion key in the corner.
+   - (b) **Single-letter work:** double-click to isolate a letter (its own font, size, alternate and position), non-ranging letters, and corner handles to scale a letter or a line.
+4. **A real panel:** board glue-up; the full-size print with the client proof; tiling the machining.
+5. **Alphabets:** more than one, with mix and match; the letter builder, the carver's blackletter first; drawn letters, once the licence is settled; then step 5 (alphabet setting, alternates, ligatures) and the letter-cutting families.
+6. **Part B:** text on arcs, circles and drawn curves (Stage 2's curved baseline). **Part C:** teaching aids (Roman proportion overlays, an exemplar ghost). Then the rest of step 6. True font blending last.
+
 **Workspace tools** (added and built 5 Oct 2026, ahead of step 1):
 - View presets: **Design** letters filled solid dark, nothing else; **Spacing** letters plus the shaded spaces and their areas; **Setting-out** hairline, datum and valley lines only; **Proof** clean letters with the border, as a client would see them. The individual tick boxes stay for fine control, under Layers. (From 7 Oct 2026 the number keys 1–5 choose the stages of the job, and the presets are on Shift+1 to Shift+4; see Decisions, "The interface".)
 - Keyboard kerning: with the cursor in a gap, Alt+arrow keys close or open it 0.1 mm, Alt+Shift+arrow 1 mm; Tab and Shift+Tab move to the next or previous gap. A toggle shows every kerning value as a small number under its gap.
@@ -187,8 +197,8 @@ Agreed 5 Oct 2026. Build in this order, one step at a time.
    - Save the carver's own presets.
    - Saved styles, for consistent lettering across a set of pieces.
    - A library of complete finished layouts, saved and reused (not empty templates).
-   - Client proof: export the layout as a clean PDF or image for customer approval.
-   - Full-size printed template: print the layout at 1:1 across several sheets, for transfer or for checking against the wood.
+   - Client proof: export the layout as a clean PDF or image for customer approval. (Gains a sign-off line, 8 Oct 2026.)
+   - ~~Full-size printed template: print the layout at 1:1 across several sheets, for transfer or for checking against the wood.~~ Replaced on 8 Oct 2026 by the full-size print on A4 and A3 (see Decisions).
 7. **3D view.** *Done 5 Oct 2026; made quick on an ordinary laptop 7 Oct 2026.* The board at its panel size and real stock thickness; "Marked out by the bit" is stamped from exactly the cuts in the G-code, and "Finished letters" carves every letter to the chisel angle; a plain matte surface or depth colours; a light swept from the left, over the top of the panel, to the right, and raised or lowered, with shadows traced across the cuts; "Sharper" for a close look. Opened with the 3D tab or key 5. See Decisions, "The 3D view".
    - Like Kiri:Moto: orbit, pan and zoom.
    - Set the stock size.
@@ -197,12 +207,10 @@ Agreed 5 Oct 2026. Build in this order, one step at a time.
 8. **G-code.** *Done 5 Oct 2026.* Generate the marking-out passes for the Genmitsu 3020-PRO Ultra as set out under Machine and G-code, taking the strokes within each pass in cutting order: thin strokes first, then thick. Every pass is shown on screen (the slit at its true cut width, strokes numbered in cutting order, travel moves dashed, X0 Y0 marked), with safety checks; the G-code can be saved only after every pass has been looked at and every blocking check is passed, and any change to the layout closes the preview. Each file starts with the bit raised and a pause to start the spindle by hand; an Air cut option saves the same file lifted 5 mm clear of the board for a dry run (added 7 Oct 2026).
 
 **Later, not yet scheduled:**
-- Per-line cap height and scaling.
-- Non-ranging letters.
-- The carver's own alphabet, loaded from SVG files.
-- Curved baselines and carved banner scrolls (Stages 2 and 3).
-- Double-click a letter to select it on its own.
+- Carved banner scrolls (Stage 3).
 - Variants: save versions of a layout and compare them side by side.
+
+(Moved on 8 Oct 2026 into the order above: "Double-click a letter to select it on its own", "Non-ranging letters", "Per-line cap height and scaling" and "The carver's own alphabet, loaded from SVG files", and the curved-baseline half of "Curved baselines and carved banner scrolls".)
 
 ## Technology and setup
 
@@ -319,6 +327,50 @@ Answers from the carver, recorded as they are given.
   - **The version shows.** The status bar reads, for example, "Version 22, published 8 Oct 2026, 21:40": the number of the last change merged, and when it was published, UK time. It is also at the top of the ? list, in the credit line and in every Details, so every screenshot says which version was running, and an out-of-date copy is plain to see. On a narrow window the status bar shows just the number.
   - **Tested as the carver's browser lives.** Every browser test now runs in Firefox as well as Chrome (CLAUDE.md). The offline copy is tested by publishing versions in quick succession to a stand-in for GitHub Pages, keeping one browser profile throughout: two published with the page open then reloaded, then offline; a page left open across two updates, its own files gone everywhere, with the 3D view opened for the first time; the worker's file missing; and a copy made by the old offline worker, from the versions of 7 Oct 2026, putting itself right (browser-tests/updates.mjs). The 3D speed check runs in Firefox too, its page and worker held to a quarter of one processor core (browser-tests/perf3d.mjs).
 
+- **One program; editions later** (8 Oct 2026). Everything stays in one program. A School edition, a gift to the City & Guilds of London Art School where the carver trained, will be made later by switching off the machine functions: the Machine stage, the G-code, and the machine's own passes such as the datum line and slit. So layout, spacing, printing and teaching tools never depend on the machine functions, and can be switched off from them cleanly (a standing rule, in CLAUDE.md).
+
+- **Collisions** (8 Oct 2026). A collision is a collision: two letters whose outlines touch or overlap, or come closer than the hairline cut is wide (so their hairlines would run together), whether in different lines or on the same line. The one exception will be letters the carver links on purpose (next decision).
+
+- **Linked letters** (8 Oct 2026; planned, next after the collision check). Letters joined on purpose, such as the feet of A and M touching, are not a collision. How a joint is marked out and cut is the carver's decision, still to come (see Open questions).
+
+- **Every fix is tried before it is offered** (8 Oct 2026). A one-click fix appears only if, tried on a copy of the layout, it cures the problem it is listed under without causing a new one (a standing rule, in CLAUDE.md). Found 8 Oct 2026, in a rebuild of the carver's layout: "Return line 2 to auto" moved line 2 less than 1 mm and left its problem in place.
+
+- **Board glue-up** (8 Oct 2026; planned). In the Panel stage:
+  - the number and widths of the boards, or worked out from the widest board the carver can buy;
+  - the direction of the grain;
+  - the joints shown on the layout, in the 3D view and in the Proof view's oak;
+  - a problem when a joint runs through a letter or too close to one, with fixes that move joints into the space between lines or re-divide the widths;
+  - a cutting list on the bench sheet.
+
+- **Full-size print on A4 and A3** (8 Oct 2026; planned). It replaces "Full-size printed template" in Roadmap step 6, and serves as Part C's tracing print.
+  - A PDF tiled across A4 or A3 sheets, portrait or landscape, joined either by overlap (a repeated strip with a line to lay to) or edge to edge (trimmed on cut marks).
+  - Grid labels and a key map of the sheets; match marks across every join; a 100 mm check bar on every sheet, with a reminder to print at actual size, never "fit to page". Nothing falls in the printer's unprintable edge.
+  - The carver chooses what prints: outlines for carbon transfer, the setting-out lines for marking out by hand, or filled letters for a proof.
+  - There is also one full-size PDF for a print shop.
+  - In the School edition this print is the marking-out.
+  - The client proof gains a sign-off line, and the inscription a spelling check.
+
+- **Tiling the machining** (8 Oct 2026; planned). Panels bigger than the bed (300 × 205 mm, or 300 × 400 mm extended) are marked out in sections, either as separate tiles or by feeding the board through in steps, with registration between sections.
+
+- **Alphabets** (8 Oct 2026; planned).
+  - More than one alphabet in a job, including the carver's own letters loaded from SVG files.
+  - Letters can be mixed from different fonts into one alphabet, matched for cap height and stem weight.
+  - A font can be made heavier, lighter, wider or narrower.
+  - True blending of two fonts comes last, as research: it needs letters whose outlines correspond point for point.
+
+- **The letter builder** (8 Oct 2026; planned). The carver's own cutting alphabets, built from rules: heights in units, pen angle, how curves are formed and where strokes break. It starts with the carver's own blackletter. A letter built from strokes comes with its strokes, junctions and cutting order known, rather than worked out from an outline.
+
+- **Drawn letters** (8 Oct 2026; planned).
+  - The app prints a template sheet with a box per character (cap line, baseline and unit ladder printed in each), corner marks to square up a photo, and a 100 mm check bar.
+  - The carver draws the letters, then scans the sheet (300 to 600 dpi, greyscale) or photographs it. The app squares it up, finds each box, traces the letter, sets its spacing and adds it to an alphabet.
+  - The same tool matches an existing inscription, such as adding a name to a lodge board.
+  - The tracer waits on the program's licence: Potrace's browser versions are GPL, which would make the whole program GPL; imagetracerjs is public domain.
+
+- **Letter-cutting families** (8 Oct 2026; planned). Uncial, half-uncial, Textura, Rotunda, Fraktur, Schwabacher and others.
+  - Free OFL stand-ins: UnifrakturMaguntia, UnifrakturCook, Pirata One, MedievalSharp and Grenze Gotisch (Google Fonts), the Freie Fraktur collection, and Uncial Antiqua. No usable free Rotunda was found.
+  - The true families come from the builder and from drawn letters.
+  - Every new alphabet goes through test/everychar.test.ts.
+
 ## Open questions
 
 - Is 60° the right included chisel angle, or does it change with letter size or timber? To be settled with test letters in oak.
@@ -326,8 +378,15 @@ Answers from the carver, recorded as they are given.
 - What is the spindle's actual top speed?
 - How should serifs and bracketing be handled at terminations, beyond the plain fork into the corners?
 - Which stand-in Roman typeface is closest to the letters the carver intends to draw?
-- Even-up factors for round, straight and diagonal sides: they start at 1.0 (pure equal space). Measured with the 6 mm depth limit, round pairs such as H O come out with less space than H H, so at 1.0 the suggestions open them up; a round factor below 1 (try 0.8) brings them closer. What factors look right by eye?
-- Word stops start as triangles with sides 22% of the cap height, centred 45% up, pointing down. Is that the right size, height and direction?
+- Even-up factors for round, straight and diagonal sides: they start at 1.0 (pure equal space). Measured with the 6 mm depth limit, round pairs such as H O come out with less space than H H, so at 1.0 the suggestions open them up; a round factor below 1 (try 0.8) brings them closer. What factors look right by eye? (Added 8 Oct 2026: judge them with control strings such as HHOHHOOHH and HHAHHVHHAVH. HT Letterspacer, the type designers' spacing tool, measures area to a depth as the even-up does, with an extra setting for overshoot: worth comparing.)
+- Word stops start as triangles with sides 22% of the cap height, centred 45% up, pointing down. Is that the right size, height and direction? (Added 8 Oct 2026: judge size and position against a reference photo.)
 - The G-code is written for GRBL and still needs confirming against the machine and its sender before the first cut: run the air cut first, then the real file in scrap.
 - Does the sender show the pause message on screen? The file sends it two ways (a GRBL message and a comment on the pause line); the pause itself happens either way.
 - The negative-space depth limit applies to every letter, so it also trims the space beside the slanting legs of A and V and under the arm of T, not only the bays of open letters. Is that wanted, or should those be left uncut?
+- How is a joint between linked letters marked out and cut (hairline, datum, valley, stop cuts)? (8 Oct 2026)
+- What exactly should "non-ranging letters" do? To settle before Part A (b). (8 Oct 2026)
+- Glue-up: how close may a joint come to a letter, may one ever cross a letter, and what jointing allowances are wanted? (8 Oct 2026)
+- Tiling the machining: how is the board registered between sections? (8 Oct 2026)
+- Which licence for the program? It decides the tracer for drawn letters. (8 Oct 2026)
+- Should full stops be cut as triangles, like Roman stops, automatically? (8 Oct 2026)
+- The letter builder: the carver's proportions and pen rules for his blackletter. (8 Oct 2026)
