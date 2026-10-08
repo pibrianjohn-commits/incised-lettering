@@ -8,7 +8,9 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:browser": "node browser-tests/perf3d.mjs"
+    "test:browser": "node browser-tests/perf3d.mjs && node browser-tests/updates.mjs",
+    "test:updates": "node browser-tests/updates.mjs",
+    "test:perf3d": "node browser-tests/perf3d.mjs"
   },
   "dependencies": {
     "clipper-lib": "^6.4.2",

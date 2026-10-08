@@ -32,11 +32,13 @@ import { AIR_GAP, toGcode } from './gcode';
 import { openPalette, type Command } from './palette';
 import { checkFixes, layoutProblems, machineProblems, passDepths, problemSummary, type Fix, type Problem, type Stage } from './problems';
 import { alphabetDifferences, FILE_EXTENSION, FILE_TYPE, fileNameFor, normaliseProject, PlainError, projectFileText, readProjectFile } from './projectfile';
-import { onFileLaunch, startApp } from './pwa';
+import { AppFileError, fetchAppFile, onFileLaunch, refreshApp, savedCopies, startApp } from './pwa';
 import { enableScrub } from './scrub';
 import { SHORTCUTS } from './shortcuts';
 import { chooseRes, finishedInput, packCuts, packShapes, type Area } from './relief';
 import type { ReliefJob, ReliefResult } from './relief-job';
+import reliefWorkerUrl from './relief.worker.ts?worker&url';
+import { APP_PUBLISHED, APP_VERSION, VERSION_TEXT } from './version';
 import type { Board3D, Colouring } from './view3d';
 import { buildPasses, checkPasses, CORNER_NAMES, MAX_SCRIBE_DEPTH, type Check, type MachineSettings, type Pass, type PassName } from './toolpath';
 import { LetterStore } from './letters';
@@ -99,6 +101,8 @@ const v3d = {
   lastId: 0,
   /** What the board on show was worked out for, and its cell size. */
   shown: null as { project: Project; state: 'marked' | 'finished'; res: number; maxDepth: number } | null,
+  /** What "Try again" on the card does after a failure: the drawing, the board, or a sharper area of it. */
+  retry: null as { board: true } | { area: Area | null } | null,
 };
 /** The alphabet's own settings are saved under its name. */
 let alphabetName = '';
@@ -2457,7 +2461,8 @@ function wire3d() {
   $('v3d-working').addEventListener('click', (e) => {
     const b = (e.target as HTMLElement).closest<HTMLElement>('[data-v3d]');
     if (b?.dataset.v3d === 'cancel') cancel3d();
-    if (b?.dataset.v3d === 'again') startJob(null);
+    if (b?.dataset.v3d === 'again') retry3d();
+    if (b?.dataset.v3d === 'refresh') void refreshApp();
   });
   new ResizeObserver(() => v3d.board?.resize()).observe($('v3d'));
 }
@@ -2470,25 +2475,71 @@ async function open3d() {
   sync3d();
   // Start the sums at once, while three.js is fetched (the first time only).
   build3d();
-  if (!v3d.board) {
-    const { Board3D } = await import('./view3d');
-    if (v3d.board) return;
-    v3d.board = new Board3D($('v3d-canvas'));
-    v3d.board.setLight(v3d.across, v3d.height);
-    v3d.board.setColouring(v3d.colour);
-    await new Promise((r) => setTimeout(r)); // let the page breathe between the two
-    await v3d.board.prepare();
-    if (pendingBoard) {
-      const r = pendingBoard;
-      pendingBoard = null;
-      showBoard(r);
+  await ensureBoard();
+}
+
+/** The 3D drawing, made the first time it is wanted. Anything stopping it is said on the card, with the details. */
+async function ensureBoard() {
+  if (v3d.board) return;
+  let view3d: typeof import('./view3d');
+  try {
+    view3d = await import('./view3d');
+  } catch (err) {
+    // Once more, in case it was a passing fault; if not, this copy of the app is out of date.
+    try {
+      view3d = await import('./view3d');
+    } catch {
+      const problem = setOutOfDate('the 3D drawing (three.js)', err);
+      if (v3d.open) {
+        cancel3d(true);
+        showOutOfDate(problem);
+      }
+      return;
     }
   }
+  clearOutOfDate('the 3D drawing (three.js)');
+  if (v3d.board) return;
+  try {
+    v3d.board = new view3d.Board3D($('v3d-canvas'));
+  } catch (err) {
+    console.error(err);
+    if (!v3d.open) return;
+    cancel3d(true);
+    v3d.retry = { board: true };
+    showFailure(
+      'The 3D view could not start drawing.',
+      'This browser’s 3D graphics (WebGL) are off or not available. Check that hardware acceleration is on in the browser’s settings, then try again.',
+      false,
+      [`Reason: ${err instanceof Error ? err.message : String(err)}`],
+    );
+    return;
+  }
+  v3d.board.setLight(v3d.across, v3d.height);
+  v3d.board.setColouring(v3d.colour);
+  await new Promise((r) => setTimeout(r)); // let the page breathe between the two
+  await v3d.board.prepare();
+  if (pendingBoard) {
+    const r = pendingBoard;
+    pendingBoard = null;
+    showBoard(r);
+  }
+}
+
+/** "Try again" on the card: whatever failed last. */
+function retry3d() {
+  const r = v3d.retry;
+  v3d.retry = null;
+  if (r && 'board' in r) {
+    showWorking(null);
+    build3d();
+    void ensureBoard();
+  } else startJob(r?.area ?? null);
 }
 
 function close3d() {
   stopSweep();
   cancel3d(true);
+  showWorking(null);
   v3d.open = false;
   $('v3d').hidden = true;
 }
@@ -2501,34 +2552,135 @@ function schedule3d() {
 /** A board worked out before three.js had arrived, to show once it has. */
 let pendingBoard: { result: ReliefResult; job: NonNullable<typeof v3d.job> } | null = null;
 
-/** The worker, made when first needed. */
-function reliefWorker(): Worker {
-  if (v3d.worker) return v3d.worker;
-  const w = new Worker(new URL('./relief.worker.ts', import.meta.url), { type: 'module' });
-  w.onmessage = (e: MessageEvent<{ id?: number; progress?: number; error?: string; result?: ReliefResult }>) => {
+/**
+ * The 3D worker's program, fetched once and kept for as long as the page is
+ * open, so every worker the page makes is of the page's own version, even
+ * after a newer version has been published and this one's files are gone
+ * (BRIEF.md, Decisions: "The offline copy"). If it can't be had the usual
+ * way it is fetched fresh from the server; failing that, this copy of the app
+ * is out of date, and the problems say so, with a button to refresh it.
+ */
+let workerSource: Promise<string> | null = null;
+function reliefWorkerSource(): Promise<string> {
+  // The development server's worker fetches its parts by their addresses, so it is used as it is.
+  if (import.meta.env.DEV) return Promise.resolve(reliefWorkerUrl);
+  if (!workerSource) {
+    const source = fetchAppFile(reliefWorkerUrl).then(async (res) => URL.createObjectURL(new Blob([await res.text()], { type: 'text/javascript' })));
+    workerSource = source;
+    source.then(
+      () => clearOutOfDate('the 3D worker'),
+      (err) => {
+        if (workerSource === source) workerSource = null; // tried again next time
+        setOutOfDate('the 3D worker', err);
+      },
+    );
+  }
+  return workerSource;
+}
+
+type WorkerMessage = { id?: number; progress?: number; error?: string; stack?: string; version?: string; result?: ReliefResult };
+
+/** A worker running the program fetched above. */
+function makeWorker(source: string): Worker {
+  const w = new Worker(source, { type: 'module' });
+  w.onmessage = (e: MessageEvent<WorkerMessage>) => {
     const msg = e.data;
     const job = v3d.job;
     const id = msg.result?.id ?? msg.id;
     if (!job || id !== job.id) return; // an answer to work since replaced
     if (msg.progress !== undefined) return showWorking(msg.progress);
     v3d.job = null;
+    if (msg.version) document.body.dataset.worker3d = msg.version; // for the browser tests
     if (msg.error) {
-      showWorking(null);
-      console.error('3D board:', msg.error);
-      return say('The 3D board could not be worked out; the board shown is from before. Change a setting to try again, and see the Problems badge.');
+      console.error('3D board:', msg.error, msg.stack);
+      v3d.retry = { area: job.area };
+      return showFailure(
+        job.area ? 'The sharper detail could not be worked out.' : 'The 3D board could not be worked out.',
+        `${v3d.shown ? 'The board shown is from before. ' : ''}Change a setting, or try again.`,
+        false,
+        [`Reason: ${msg.error}`, ...stackLines(msg.stack), jobLine(job), `3D worker: version ${msg.version ?? 'not known'}`],
+      );
     }
     showBoard({ result: msg.result!, job });
   };
-  w.onerror = () => {
+  w.onerror = (e: ErrorEvent | Event) => {
+    e.preventDefault();
     w.terminate();
     if (v3d.worker !== w) return;
-    v3d.job = null;
     v3d.worker = null;
-    showWorking(null);
-    say('The board could not be worked out. Change a setting to try again.');
+    const job = v3d.job;
+    v3d.job = null;
+    if (!v3d.open) return;
+    v3d.retry = { area: job?.area ?? null };
+    const err = e instanceof ErrorEvent ? e : null;
+    showFailure(
+      'The 3D worker stopped unexpectedly.',
+      `${v3d.shown ? 'The board shown is from before. ' : ''}Change a setting, or try again.`,
+      false,
+      [
+        `Reason: ${err?.message || 'none given by the browser'}`,
+        ...(err?.filename ? [`Where: ${shortUrl(err.filename)}, line ${err.lineno}, column ${err.colno}`] : []),
+        ...(job ? [jobLine(job)] : []),
+      ],
+    );
   };
-  v3d.worker = w;
   return w;
+}
+
+/** A program's address, shorter: the 3D worker's program in memory has a long one. */
+const shortUrl = (u: string) => u.replace(/^blob:\S+/, 'the 3D worker').replace(/^.*\/assets\//, '');
+
+/** The first few lines of where an error happened. */
+const stackLines = (stack?: string) =>
+  (stack ?? '')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .slice(0, 5)
+    .map((l) => `  at ${l.replace(/^at /, '').replace(/blob:[^\s)]+/g, 'the 3D worker').replace(/\S*\/assets\//g, '')}`);
+
+const jobLine = (job: NonNullable<typeof v3d.job>) =>
+  `Board: ${job.state === 'marked' ? 'marked out by the bit' : 'finished letters'}, ${job.area ? 'sharper detail of part of it' : 'the whole board'}, ${job.project.panelWidth} × ${job.project.panelHeight} mm`;
+
+/** The facts under a problem's Details, so it can be put right from a screenshot. */
+async function diagnosis(lines: string[]): Promise<string> {
+  return [
+    ...lines,
+    `App: ${VERSION_TEXT}`,
+    `Offline copy: ${await savedCopies()}`,
+    `Internet: ${navigator.onLine ? 'connected' : 'not connected'}`,
+    `Browser: ${navigator.userAgent}`,
+  ].join('\n');
+}
+
+/** Part of the app that could not be loaded, either way: this copy is out of date. */
+let outOfDate: { part: string; problem: Problem } | null = null;
+
+function setOutOfDate(part: string, err: unknown): Problem {
+  const lines =
+    err instanceof AppFileError ? [`Could not load: ${part} (${shortUrl(err.url)})`, ...err.tries] : [`Could not load: ${part}`, `Reason: ${err instanceof Error ? err.message : String(err)}`];
+  const problem: Problem = {
+    level: 'bad',
+    stage: '3d',
+    kind: 'app',
+    text: 'The saved copy of the app is out of date: part of the 3D view could not be loaded. Refresh the app to get the newest version (this needs the internet).',
+    fixes: [{ id: 'refresh-app', label: 'Refresh the app' }],
+    details: 'Gathering the details…',
+  };
+  outOfDate = { part, problem };
+  refreshProblems();
+  void diagnosis(lines).then((d) => {
+    problem.details = d;
+    if (outOfDate?.problem === problem) refreshProblems();
+    if (cardProblem === problem) $('v3d-working').querySelector('pre')!.textContent = d;
+  });
+  return problem;
+}
+
+function clearOutOfDate(part: string) {
+  if (outOfDate?.part !== part) return;
+  outOfDate = null;
+  refreshProblems();
 }
 
 /**
@@ -2551,8 +2703,19 @@ function startJob(area: Area | null) {
     Object.assign(job, { shapes: packShapes(f.shapes), border: f.border, datum: f.datum, widest: f.widest });
   }
   v3d.job = { id: job.id, area, project: p, state: v3d.state };
-  reliefWorker().postMessage(job, [job.cuts?.buffer, job.shapes?.buffer].filter((b): b is ArrayBuffer => !!b));
   showWorking(0);
+  reliefWorkerSource().then(
+    (source) => {
+      if (v3d.job?.id !== job.id) return; // stopped or replaced meanwhile
+      v3d.worker ??= makeWorker(source);
+      v3d.worker.postMessage(job, [job.cuts?.buffer, job.shapes?.buffer].filter((b): b is ArrayBuffer => !!b));
+    },
+    () => {
+      if (v3d.job?.id !== job.id) return;
+      v3d.job = null;
+      if (outOfDate) showOutOfDate(outOfDate.problem);
+    },
+  );
 }
 
 /** Stop the work under way; the board shown stays as it was. */
@@ -2570,10 +2733,17 @@ function cancel3d(quiet = false): boolean {
   return true;
 }
 
+/** The problem the card is showing, if it is showing one from the problems list. */
+let cardProblem: Problem | null = null;
+
 /** The progress card: how far through (0 to 1), cancelled (with a button to start again), or hidden (null). */
 function showWorking(done: number | 'cancelled' | null) {
   const card = $('v3d-working');
   card.hidden = done === null;
+  cardProblem = null;
+  card.classList.remove('failed');
+  card.querySelector<HTMLElement>('details')!.hidden = true;
+  card.querySelector<HTMLElement>('[data-v3d="refresh"]')!.hidden = true;
   if (done === null) return;
   const cancelled = done === 'cancelled';
   card.classList.toggle('idle', cancelled);
@@ -2590,7 +2760,48 @@ function showWorking(done: number | 'cancelled' | null) {
       ? 'The board shown stays until the new one is ready.'
       : 'This takes a moment the first time.';
   card.querySelector<HTMLElement>('[data-v3d="cancel"]')!.hidden = cancelled;
-  card.querySelector<HTMLElement>('[data-v3d="again"]')!.hidden = !cancelled;
+  const again = card.querySelector<HTMLElement>('[data-v3d="again"]')!;
+  again.hidden = !cancelled;
+  again.textContent = 'Work it out';
+  if (cancelled) v3d.retry = null;
+}
+
+/**
+ * The card, saying in plain words what went wrong and what to do, with the
+ * actual reason folded under Details so it can be put right from a
+ * screenshot. `details` are the lines particular to this failure; the
+ * versions, the offline copy and the browser are added.
+ */
+function showFailure(what: string, next: string, refresh: boolean, details: string[] | string) {
+  const retry = v3d.retry;
+  showWorking('cancelled');
+  v3d.retry = retry;
+  const card = $('v3d-working');
+  card.classList.add('failed');
+  card.querySelector('.v3d-what')!.textContent = what;
+  card.querySelector('.v3d-foot span')!.textContent = next;
+  const again = card.querySelector<HTMLElement>('[data-v3d="again"]')!;
+  again.hidden = refresh;
+  again.textContent = 'Try again';
+  card.querySelector<HTMLElement>('[data-v3d="refresh"]')!.hidden = !refresh;
+  const fold = card.querySelector<HTMLDetailsElement>('details')!;
+  fold.hidden = false;
+  const pre = fold.querySelector('pre')!;
+  if (typeof details === 'string') pre.textContent = details;
+  else {
+    pre.textContent = 'Gathering the details…';
+    void diagnosis(details).then((d) => {
+      if (card.classList.contains('failed') && card.querySelector('.v3d-what')!.textContent === what) pre.textContent = d;
+    });
+  }
+  say(what);
+}
+
+/** The card for a part of the app that could not be loaded: the same words and fix as the problems list. */
+function showOutOfDate(problem: Problem) {
+  if (!v3d.open) return;
+  showFailure('The saved copy of the app is out of date.', 'Part of the 3D view could not be loaded. Refresh the app to get the newest version (this needs the internet).', true, problem.details ?? '');
+  cardProblem = problem;
 }
 
 /** Put a finished piece of work on show. */
@@ -2761,12 +2972,17 @@ function wireChrome() {
     // A fix is carried out where you are, and the list stays open to show what is left.
     const fix = (e.target as HTMLElement).closest<HTMLElement>('[data-fix]');
     if (fix) return runFix(fix.dataset.fix!);
+    if ((e.target as HTMLElement).closest('details')) return; // opening the Details stays put
     const li = (e.target as HTMLElement).closest<HTMLElement>('[data-stage]');
     if (!li) return;
     closeMenus();
     setStage(li.dataset.stage as Stage);
   });
   $('st-msg').textContent = HINT;
+  // Which version this is, where every screenshot shows it.
+  $('st-version').innerHTML = `Version ${esc(APP_VERSION)}${APP_PUBLISHED ? `<span class="st-pub">, published ${esc(APP_PUBLISHED)}</span>` : ''}`;
+  $('st-version').title = `${VERSION_TEXT}. ${$('st-version').title}`;
+  $('keys-version').textContent = VERSION_TEXT;
 
   // Drag a setting's name to change it; the whole drag is one step to undo.
   const hooks = {
@@ -2905,6 +3121,7 @@ function refreshProblems() {
       ],
     });
   }
+  if (outOfDate) list.push(outOfDate.problem);
   // The G-code checks take longer, so they follow a moment behind; the last ones stand till then.
   if (machineChecks) list.push(...machineChecks.problems);
   if (machineChecks?.project !== project) scheduleChecks();
@@ -2954,7 +3171,9 @@ function showProblemList() {
     ? problems
         .map(
           (q) =>
-            `<li class="${q.level}" data-stage="${q.stage}" title="Go to ${STAGE_NAMES[q.stage]}"><b>${q.level === 'bad' ? '✗' : '!'}</b><span>${esc(q.text)}</span><small>${STAGE_NAMES[q.stage]}</small>${fixButtons(q.fixes)}</li>`,
+            `<li class="${q.level}" data-stage="${q.stage}" title="Go to ${STAGE_NAMES[q.stage]}"><b>${q.level === 'bad' ? '✗' : '!'}</b><span>${esc(q.text)}</span><small>${STAGE_NAMES[q.stage]}</small>${fixButtons(q.fixes)}${
+              q.details ? `<details class="why"><summary>Details</summary><pre>${esc(q.details)}</pre></details>` : ''
+            }</li>`,
         )
         .join('')
     : '<li class="ok"><b>✓</b><span>Nothing needs putting right.</span></li>';
@@ -3067,6 +3286,8 @@ function runFix(id: string) {
     }
     case 'go-machine':
       return setStage('machine');
+    case 'refresh-app':
+      return void refreshApp();
     case 'word-stops-off':
       update({ wordStops: { ...project.wordStops, on: false } });
       return say('Word stops turned off. Ctrl+Z undoes it.');
@@ -3328,6 +3549,7 @@ function commands(): Command[] {
   add('Save project', () => void saveProjectFile(false), 'Ctrl+S', 'file');
   add('Save project as…', () => void saveProjectFile(true), 'Ctrl+Shift+S', 'file copy');
   add('Bench sheet, to print', showSheet, 'Ctrl+P', 'print cutting order stroke numbers');
+  add('Refresh the app (the newest version)', () => void refreshApp(), 'F5', 'reload update out of date offline copy');
   add(measuring ? 'Stop measuring' : 'Measure between two points', () => setMeasuring(!measuring), 'M', 'ruler distance');
   add(`${inspectOpen ? 'Hide' : 'Show'} the inspection panel`, () => setInspect(!inspectOpen), 'I', 'overview balance');
   add(`Turn snapping ${snapping ? 'off' : 'on'}`, () => setSnapping(!snapping), 'S');
@@ -3532,7 +3754,8 @@ async function start() {
   $('credit').innerHTML =
     `Stand-in alphabet: <b>${esc(alphabet.name)}</b> by Natanael Gama, ${alphabet.licence} ` +
     `(<a href="./fonts/OFL.txt">licence</a>). Interface type: <b>Inter</b> by Rasmus Andersson, SIL Open Font License 1.1 ` +
-    `(<a href="./fonts/Inter-OFL.txt">licence</a>).`;
+    `(<a href="./fonts/Inter-OFL.txt">licence</a>). ${esc(VERSION_TEXT)}.`;
+  document.body.dataset.version = APP_VERSION; // for the browser tests
   layout = layoutPanel(store, project);
   if (project.refImage) {
     const blob = await loadImage();
@@ -3547,9 +3770,10 @@ async function start() {
   draw();
   // Fetch the 3D view's parts while nothing else is happening, so it opens quickly when wanted.
   const idle = (f: () => void) => ('requestIdleCallback' in window ? requestIdleCallback(f, { timeout: 8000 }) : setTimeout(f, 3000));
+  // Once fetched they are kept for as long as the page is open, so they stay of its own version.
   setTimeout(() => idle(() => {
-    reliefWorker();
-    void import('./view3d').catch(() => {});
+    reliefWorkerSource().then((source) => (v3d.worker ??= makeWorker(source)), () => {});
+    void import('./view3d').catch((err) => setOutOfDate('the 3D drawing (three.js)', err));
   }), 3000);
 }
 

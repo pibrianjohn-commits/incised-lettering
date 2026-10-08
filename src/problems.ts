@@ -23,9 +23,11 @@ export interface Problem {
   level: 'bad' | 'warn';
   text: string;
   stage: Stage;
-  /** What kind of problem, so the G-code checks can borrow its fixes. */
-  kind: 'letters' | 'room' | 'edges' | 'lines' | 'bed' | 'picture' | 'machine';
+  /** What kind of problem, so the G-code checks can borrow its fixes ('app': the app itself, not the job). */
+  kind: 'letters' | 'room' | 'edges' | 'lines' | 'bed' | 'picture' | 'machine' | 'app';
   fixes: Fix[];
+  /** The actual reason, folded under "Details", for a problem with the app itself. */
+  details?: string;
 }
 
 type Side = 'left' | 'right' | 'top' | 'bottom';

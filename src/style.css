@@ -576,6 +576,10 @@ body[data-stage='3d'] #st-cursor, body[data-stage='3d'] .st-zoom, body[data-stag
 #st-snap.on { background: transparent; color: var(--ok); border-color: color-mix(in srgb, var(--ok) 50%, transparent); }
 #st-msg { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #st-msg.fresh { color: var(--ink); font-weight: 600; }
+#st-version { white-space: nowrap; font-variant-numeric: tabular-nums; }
+/* On a narrow window just the number; the whole of it is in the ? list and on hover. */
+@media (max-width: 1000px) { .st-pub { display: none; } }
+#st-warn, #st-snap { flex: none; white-space: nowrap; }
 #st-warn { font-weight: 600; border-radius: 999px; padding: 1px 12px; }
 #st-warn.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 50%, transparent); background: transparent; }
 #st-warn.warn { color: var(--on-caution); background: var(--caution); border-color: var(--caution); }
@@ -606,6 +610,7 @@ body[data-stage='3d'] #st-cursor, body[data-stage='3d'] .st-zoom, body[data-stag
 .fixes { display: flex; flex-wrap: wrap; gap: 6px; }
 .fixes button { margin: 0; padding: 3px 9px; font-size: 12px; font-weight: 500; color: var(--ink); cursor: pointer; }
 #warn-pop .fixes { grid-column: 2 / -1; margin-top: 2px; }
+#warn-pop details.why { grid-column: 2 / -1; margin-top: 0; cursor: default; }
 #cam-checks .fixes { margin: 4px 0 6px 16px; }
 
 /* ---------------------------------------------------------- boxes over everything: search, keys, bench sheet, questions */
@@ -866,6 +871,14 @@ button.primary:disabled { background: var(--card); color: var(--muted); border-c
 #v3d-working .v3d-foot { color: var(--muted); font-size: 12px; }
 #v3d-working .v3d-foot button { margin: 0; flex: none; }
 #v3d-working.idle .v3d-bar { display: none; }
+#v3d-working.idle .v3d-foot { margin-top: 6px; }
+#v3d-working.failed { width: min(440px, calc(100% - 32px)); }
+#v3d-working.failed .v3d-what { font-weight: 600; color: var(--bad); }
+#v3d-working.failed .v3d-foot { align-items: flex-end; }
+/* The actual reason for a problem, folded away under its plain words (3D card and problems list). */
+details.why { margin-top: 6px; font-size: 12px; }
+details.why summary { cursor: pointer; color: var(--muted); }
+details.why pre { margin: 4px 0 0; padding: 6px 8px; max-height: 40vh; overflow: auto; white-space: pre-wrap; word-break: break-word; font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--ink); background: var(--hover); border: 1px solid var(--rule); border-radius: 6px; user-select: text; cursor: text; }
 #v3d-sharper { margin-top: 8px; }
 #v3d-detail { margin: 6px 0 0; }
 #v3d-detail:empty { display: none; }
