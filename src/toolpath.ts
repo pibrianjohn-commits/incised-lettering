@@ -251,7 +251,9 @@ export function itemWords(id: string): string {
   if (id === 'border') return 'the border';
   const [, what, line] = /^(.*) \(line (\d+)\)#\d+$/.exec(id) ?? [];
   if (!what) return id.split('#')[0];
-  return what === 'word stop' ? `the word stop on line ${line}` : `“${what}” on line ${line}`;
+  if (what === 'word stop') return `the word stop on line ${line}`;
+  // Letters linked into one shape are cut as one letter (BRIEF.md, Decisions: "Linked letters").
+  return [...what].length > 1 ? `the linked “${what}” on line ${line}` : `“${what}” on line ${line}`;
 }
 
 /**
@@ -431,6 +433,7 @@ export function checkPasses(layout: Layout, passes: Pass[], m: MachineSettings, 
     checks.push({ id: 'failed', ok: false, blocking: true, text: `The cuts for ${listed} could not be worked out, so ${failed.length > 1 ? 'they are' : 'it is'} left out of the marking-out.` });
   }
   if (!passes.length) checks.push({ id: 'passes', ok: false, blocking: true, text: 'Choose at least one pass to run.' });
-  if (layout.datumPending) checks.push({ id: 'pending', ok: false, blocking: true, text: 'Still working out the datum lines; a moment…' });
+  if (layout.shapesPending) checks.push({ id: 'pending', ok: false, blocking: true, text: 'Still working out the linked letters; a moment…' });
+  else if (layout.datumPending) checks.push({ id: 'pending', ok: false, blocking: true, text: 'Still working out the datum lines; a moment…' });
   return checks;
 }

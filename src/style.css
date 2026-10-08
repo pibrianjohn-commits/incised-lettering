@@ -552,6 +552,13 @@ button.quiet { font-size: 13px; color: var(--muted); box-shadow: none; }
 @keyframes spot-pulse { from { transform: scale(0.6); opacity: 0.9; } to { transform: scale(2.2); opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { #overlay .spot .pulse { animation: none; } }
 #warn-pop .trying { border: none; padding: 0; font-style: italic; }
+#kern-pop.linked .mode, #kern-pop.linked .kerning, #kern-pop:not(.linked) .link-edit { display: none; }
+#kern-pop .link-edit input { width: 4.5em; }
+#world .gap.linked { fill: var(--kern); fill-opacity: 0; }
+#world .gap.linked.sel { fill-opacity: 0.16; stroke: var(--accent); }
+#labels .link-mark { fill: none; stroke: var(--kern); stroke-width: 1.6; paint-order: stroke; }
+#labels .link-mark.sel { stroke: var(--accent); }
+#work.proof #labels .link-mark { display: none; }
 #overlay .guide-label { font: 600 11px var(--font); fill: var(--guide); paint-order: stroke; stroke: var(--card); stroke-width: 3px; }
 #overlay .measure line { stroke: var(--measure); stroke-width: 1.5; }
 #overlay .measure circle { fill: var(--measure); }

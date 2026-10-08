@@ -9,7 +9,7 @@
 import { gapKey, type LinePlacement, type Project } from './layout';
 
 /** The changes to apply to the project alongside `newText`. */
-export function remapForEdit(p: Project, newText: string): Pick<Project, 'gapKerning' | 'lines' | 'lineExtras' | 'spacers'> {
+export function remapForEdit(p: Project, newText: string): Pick<Project, 'gapKerning' | 'links' | 'lines' | 'lineExtras' | 'spacers'> {
   const before = [...p.text.replace(/\r/g, '')];
   const after = [...newText.replace(/\r/g, '')];
 
@@ -32,19 +32,24 @@ export function remapForEdit(p: Project, newText: string): Pick<Project, 'gapKer
   };
   const lineEnd = (chars: string[], starts: number[], li: number) => (li + 1 < starts.length ? starts[li + 1] - 1 : chars.length);
 
-  // One-gap kerning follows its pair of letters, if both survive and still sit side by side.
-  const gapKerning: Project['gapKerning'] = {};
-  for (const [key, g] of Object.entries(p.gapKerning)) {
-    const [li, i] = key.split(':').map(Number);
-    if (li >= startsOld.length) continue;
-    const right = startsOld[li] + i;
-    const a = map(right - 1);
-    const b = map(right);
-    if (a === null || b === null || b !== a + 1) continue;
-    const nl = lineOf(startsNew, b);
-    if (lineOf(startsNew, a) !== nl) continue;
-    gapKerning[gapKey(nl, b - startsNew[nl])] = g;
-  }
+  // One-gap kerning and links follow their pair of letters, if both survive and still sit side by side.
+  const followGaps = <T>(rec: Record<string, T>): Record<string, T> => {
+    const out: Record<string, T> = {};
+    for (const [key, g] of Object.entries(rec)) {
+      const [li, i] = key.split(':').map(Number);
+      if (li >= startsOld.length) continue;
+      const right = startsOld[li] + i;
+      const a = map(right - 1);
+      const b = map(right);
+      if (a === null || b === null || b !== a + 1) continue;
+      const nl = lineOf(startsNew, b);
+      if (lineOf(startsNew, a) !== nl) continue;
+      out[gapKey(nl, b - startsNew[nl])] = g;
+    }
+    return out;
+  };
+  const gapKerning = followGaps(p.gapKerning);
+  const links = followGaps(p.links ?? {});
 
   // Anything kept per line (placement, fitted spacing) follows the line's
   // letters: the first of them that survives the edit.
@@ -89,7 +94,7 @@ export function remapForEdit(p: Project, newText: string): Pick<Project, 'gapKer
     if (n !== null && n < newLines.length && !newLines[n].trim()) spacers[String(n)] = h;
   }
 
-  return { gapKerning, lines: followLine<LinePlacement>(p.lines), lineExtras: followLine(p.lineExtras), spacers };
+  return { gapKerning, links, lines: followLine<LinePlacement>(p.lines), lineExtras: followLine(p.lineExtras), spacers };
 }
 
 /** Position of the first character of each line. */

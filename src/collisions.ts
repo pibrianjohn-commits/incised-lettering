@@ -20,11 +20,18 @@ export function cutWidth(depth: number, angleDeg: number): number {
 export const HAIRLINE = cutWidth(0.2, 30);
 
 export interface Collision {
-  /** The two letters by line and place in the line's text, "2:0|4:1": the same pair from one moment to the next. */
+  /**
+   * The two characters that meet, by line and place in the line's text,
+   * "2:0|4:1": the same pair from one moment to the next, whether or not
+   * either is linked into a longer shape.
+   */
   key: string;
-  /** The first of the two in reading order, and the second. */
+  /** The first of the two in reading order, and the second (for linked letters, the whole shape). */
   a: PlacedLetter;
   b: PlacedLetter;
+  /** The characters that meet: in linked letters, the one nearest where they meet. */
+  ca: { char: string; pos: number };
+  cb: { char: string; pos: number };
   /** The outlines touch or overlap; else they only come closer than the hairline is wide. */
   touch: boolean;
   /** The closest the outlines come, mm (0 when they touch or overlap). */
@@ -49,7 +56,9 @@ export function findCollisions(layout: Layout, clearance = HAIRLINE, first = fal
       if (!near(a.box, b.box, clearance)) continue;
       const c = contact(a, b, clearance, 0, 0, first);
       if (!c.spot || c.gap >= clearance) continue;
-      out.push({ key: `${a.line}:${a.pos}|${b.line}:${b.pos}`, a, b, touch: c.gap < 1e-6, gap: c.gap, spot: c.spot });
+      const ca = partAt(a, c.spot);
+      const cb = partAt(b, c.spot);
+      out.push({ key: `${a.line}:${ca.pos}|${b.line}:${cb.pos}`, a, b, ca, cb, touch: c.gap < 1e-6, gap: c.gap, spot: c.spot });
     }
   return out;
 }
@@ -82,6 +91,13 @@ export function parting(a: PlacedLetter, b: PlacedLetter, dir: Pt, target: numbe
     if (clear(r)) return Number(r.toFixed(6));
   }
   return null;
+}
+
+/** The character of a letter nearest a point: itself, or in linked letters, the one whose box is nearest. */
+function partAt(l: PlacedLetter, at: Pt): { char: string; pos: number } {
+  if (!l.parts?.length) return { char: l.char, pos: l.pos };
+  const away = (b: Box) => Math.hypot(Math.max(b.x0 - at.x, 0, at.x - b.x1), Math.max(b.y0 - at.y, 0, at.y - b.y1));
+  return l.parts.reduce((best, p) => (away(p.box) < away(best.box) ? p : best));
 }
 
 /** Two boxes come within `reach` of each other. */

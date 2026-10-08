@@ -4,7 +4,8 @@
 
 import { cutWidth, findCollisions, HAIRLINE, parting, type Collision } from './collisions';
 import type { Pt } from './geometry';
-import { contentBox, isBlank, kernKept, lineAnchor, lineNumber, type Layout, type LinePlacement, type PlacedLine, type Project } from './layout';
+import { contentBox, gapKey, isBlank, KERN_CAP, kernKept, kernMm, lineAnchor, lineNumber, type Layout, type LinePlacement, type PlacedLetter, type PlacedLine, type Project } from './layout';
+import { LINK_OVERLAP, THIN_JOINT } from './links';
 import { BED, BED_EXTENDED, bedFit, bedScale, letteringBox, shrinkToFit } from './panel';
 import type { Check, MachineSettings, Pass } from './toolpath';
 
@@ -34,7 +35,7 @@ export interface Problem {
   text: string;
   stage: Stage;
   /** What kind of problem, so the G-code checks can borrow its fixes ('app': the app itself, not the job). */
-  kind: 'letters' | 'room' | 'edges' | 'collision' | 'bed' | 'picture' | 'machine' | 'app';
+  kind: 'letters' | 'room' | 'edges' | 'collision' | 'link' | 'bed' | 'picture' | 'machine' | 'app';
   fixes: Fix[];
   /** The actual reason, folded under "Details", for a problem with the app itself. */
   details?: string;
@@ -229,8 +230,10 @@ export function layoutProblems(layout: Layout, hasLetter: (ch: string) => boolea
 
   // Letters that run into each other, on the same line or different lines.
   // Their fixes are tried on a copy of the layout before they are offered
-  // (tryCollisionFixes), so they follow a moment behind.
+  // (tryFixes), so they follow a moment behind.
   out.push(...collisionProblems(layout, clearanceOf(p), quick));
+  // Linked letters: a joint too thin to chisel, and letters that could not be joined.
+  out.push(...linkProblems(layout));
 
   const fit = bedFit(p.panelWidth, p.panelHeight);
   const toStandard: Fix = { id: 'bed-standard', label: `Shrink everything to fit the bed (${BED.width} × ${BED.height} mm)` };
@@ -287,6 +290,15 @@ const partTarget = (clearance: number) => Math.max(SPARE, clearance + 0.05);
 
 /** A character named in a sentence: a letter or figure as it is, anything else in quotes. */
 const named = (ch: string) => (/[\p{L}\p{N}]/u.test(ch) ? ch : `“${ch}”`);
+/** A placed letter named in a sentence: letters linked into one shape as "linked AM". */
+const letterName = (l: PlacedLetter) => (l.span > 1 ? `linked ${[...l.char].map(named).join('')}` : named(l.char));
+/** The character that meets another, named in a sentence: in linked letters, "M of the linked AMA". */
+const partName = (l: PlacedLetter, c: { char: string }) => (l.span > 1 ? `${named(c.char)} of the ${letterName(l)}` : named(c.char));
+/** The last and first characters of two placed letters side by side (linked letters are several). */
+const lastChar = (l: PlacedLetter) => [...l.char].at(-1)!;
+const firstChar = (l: PlacedLetter) => [...l.char][0];
+/** Two letters side by side on a line, with nothing between them: a pair that could be linked. */
+const neighbours = (c: Collision) => c.a.line === c.b.line && c.b.pos === c.a.pos + c.a.span;
 /** A figure for a fix's label, to the step it was worked out in: "1.5", "0", "-0.2". */
 const figure = (v: number) => String(Math.round(v * 100) / 100 || 0);
 const ordinal = (k: number) => `${k}${k % 100 >= 11 && k % 100 <= 13 ? 'th' : ['th', 'st', 'nd', 'rd'][k % 10] ?? 'th'}`;
@@ -295,19 +307,20 @@ function collisionText(layout: Layout, c: Collision): string {
   const la = lineNumber(layout, c.a.line);
   const lb = lineNumber(layout, c.b.line);
   const within = `within ${c.gap < 0.01 ? 'less than 0.01' : c.gap.toFixed(2)} mm`;
+  const [a, b] = [partName(c.a, c.ca), partName(c.b, c.cb)];
   if (c.a.line === c.b.line) {
     return c.touch
-      ? `The ${named(c.a.char)} and ${named(c.b.char)} in line ${la} touch`
-      : `The ${named(c.a.char)} and ${named(c.b.char)} in line ${la} come ${within} of each other, so their hairlines would run together`;
+      ? `The ${a} and ${b} in line ${la} touch`
+      : `The ${a} and ${b} in line ${la} come ${within} of each other, so their hairlines would run together`;
   }
   return c.touch
-    ? `The ${named(c.a.char)} in line ${la} runs into the ${named(c.b.char)} in line ${lb}`
-    : `The ${named(c.a.char)} in line ${la} comes ${within} of the ${named(c.b.char)} in line ${lb}, so their hairlines would run together`;
+    ? `The ${a} in line ${la} runs into the ${b} in line ${lb}`
+    : `The ${a} in line ${la} comes ${within} of the ${b} in line ${lb}, so their hairlines would run together`;
 }
 
 /**
  * One problem for each pair of letters that collide (BRIEF.md, Decisions:
- * "Collisions"), with no fixes yet: those are tried first (tryCollisionFixes).
+ * "Collisions"), with no fixes yet: those are tried first (tryFixes).
  */
 function collisionProblems(layout: Layout, clearance: number, quick = false): Problem[] {
   const cs = findCollisions(layout, clearance, quick);
@@ -434,7 +447,7 @@ function* collisionCandidates(layout: Layout, c: Collision, clearance: number, a
     for (const q of [up, down]) if (q.locked) out.push({ fix: autoLineFix(p, q), unlock: true });
   } else {
     // On one line: open the gap after the first letter, enough to part them with SPARE to spare.
-    const g = layout.gaps.find((x) => x.left === c.a);
+    const g = layout.gaps.find((x) => x.left === c.a && !x.link);
     const n = g ? parting(c.a, c.b, { x: 1, y: 0 }, partTarget(clearance), KERN_STEP, limit) : null;
     yield;
     if (g && n) {
@@ -443,14 +456,118 @@ function* collisionCandidates(layout: Layout, c: Collision, clearance: number, a
       out.push({
         fix: {
           id: `open-gap:${g.key}:${figure(n)}`,
-          label: g.right === c.b ? `Open this gap ${figure(n)} mm` : `Open the gap after the ${named(c.a.char)} ${figure(n)} mm`,
+          label: g.right === c.b ? `Open this gap ${figure(n)} mm` : `Open the gap after the ${letterName(c.a)} ${figure(n)} mm`,
           change: { gapKerning },
-          done: `The gap after the ${named(c.a.char)} in line ${line} opened ${figure(n)} mm. Ctrl+Z undoes it.`,
+          done: `The gap after the ${letterName(c.a)} in line ${line} opened ${figure(n)} mm. Ctrl+Z undoes it.`,
         },
       });
     }
+    // Neighbours may be linked on purpose instead (BRIEF.md, Decisions: "Linked letters", rule 7).
+    if (neighbours(c)) out.push({ fix: linkFix(layout, [c]) });
   }
   return out;
+}
+
+/**
+ * Link neighbours that touch into one shape. They go in deep enough for a
+ * joint that can be chiselled (the starting overlap, or more if the joint
+ * would be too thin), so the link causes no new problem of its own.
+ */
+function linkFix(layout: Layout, pairs: Collision[]): Fix {
+  const p = layout.project;
+  const overlap = Math.max(LINK_OVERLAP, THIN_JOINT);
+  const links = { ...p.links };
+  for (const c of pairs) links[gapKey(c.a.line, c.b.pos)] = { pair: lastChar(c.a) + firstChar(c.b), overlap };
+  const by = figure(kernMm(overlap, p.capHeight));
+  if (pairs.length === 1) {
+    const c = pairs[0];
+    return {
+      id: `link:${gapKey(c.a.line, c.b.pos)}`,
+      label: 'Link them',
+      change: { links },
+      done: `The ${lastChar(c.a)} and ${firstChar(c.b)} in line ${lineName(layout.lines[c.a.line])} are linked, overlapping ${by} mm: Unlink in the gap's tools parts them. Ctrl+Z undoes it.`,
+    };
+  }
+  return {
+    id: `link-every:${pairs.map((c) => gapKey(c.a.line, c.b.pos)).join(',')}`,
+    label: 'Link every pair that touches',
+    change: { links },
+    done: `${pairs.length} pairs of letters linked, each overlapping ${by} mm. Ctrl+Z undoes it.`,
+  };
+}
+
+/**
+ * Linked letters (BRIEF.md, Decisions: "Linked letters"): a joint too thin
+ * to chisel (rule 6), and links whose letters could not be joined, which are
+ * cut as separate letters.
+ */
+function linkProblems(layout: Layout): Problem[] {
+  const p = layout.project;
+  const thin = (THIN_JOINT * p.capHeight) / KERN_CAP;
+  const out: Problem[] = [];
+  for (const l of layout.letters) {
+    if (!l.joints) continue;
+    const chars = [...l.char];
+    l.joints.forEach((j, n) => {
+      if (j.width >= thin - 1e-6) return;
+      const key = gapKey(l.line, l.pos + n + 1);
+      out.push({
+        level: 'warn',
+        stage: 'space',
+        kind: 'link',
+        text: `The ${named(chars[n])} and ${named(chars[n + 1])} in line ${lineNumber(layout, l.line)} are joined by only ${mm(j.width)}.`,
+        fixes: [],
+        key: `thin:${key}`,
+        facts: [`thin:${key}`],
+        spot: j.at,
+        trying: true,
+      });
+    });
+  }
+  for (const u of layout.unjoined) {
+    const [a, b] = [...u.pair];
+    out.push({
+      level: 'warn',
+      stage: 'space',
+      kind: 'link',
+      text: `The linked ${named(a)} and ${named(b)} in line ${lineNumber(layout, u.line)} could not be joined into one shape, so they are cut as separate letters.`,
+      fixes: [],
+      key: `unjoined:${u.key}`,
+      facts: [`unjoined:${u.key}`],
+      trying: true,
+    });
+  }
+  return out;
+}
+
+/** The fixes worth trying for a problem with linked letters. */
+function linkCandidates(layout: Layout, key: string): { fix: Fix }[] {
+  const p = layout.project;
+  const [what, gap] = [key.slice(0, key.indexOf(':')), key.slice(key.indexOf(':') + 1)];
+  const link = p.links[gap];
+  if (!link) return [];
+  const [a, b] = [...link.pair];
+  const line = lineName(layout.lines[Number(gap.split(':')[0])]);
+  const links = { ...p.links };
+  delete links[gap];
+  const unlink: Fix = { id: `unlink:${gap}`, label: 'Unlink them', change: { links }, done: `The ${named(a)} and ${named(b)} in line ${line} are no longer linked. Ctrl+Z undoes it.` };
+  if (what === 'unjoined') return [{ fix: unlink }];
+  // Too thin: in deeper, to the next 0.1 mm at this size, until the joint is wide enough.
+  const k = p.capHeight;
+  const l = layout.letters.find((x) => x.joints && x.line === Number(gap.split(':')[0]) && x.pos < Number(gap.split(':')[1]) && x.pos + x.span > Number(gap.split(':')[1]));
+  const j = l?.joints?.[Number(gap.split(':')[1]) - l.pos - 1];
+  if (!j) return [];
+  const more = Math.ceil(((THIN_JOINT * k) / KERN_CAP - j.width) / KERN_STEP - 1e-9) * KERN_STEP;
+  return [
+    {
+      fix: {
+        id: `overlap:${gap}:${figure(more)}`,
+        label: `Overlap them ${figure(more)} mm more`,
+        change: { links: { ...p.links, [gap]: { ...link, overlap: Math.round((link.overlap + kernKept(more, k)) * 1e4) / 1e4 } } },
+        done: `The ${named(a)} and ${named(b)} in line ${line} overlap ${figure(more)} mm more. Ctrl+Z undoes it.`,
+      },
+    },
+  ];
 }
 
 /**
@@ -465,8 +582,8 @@ function* letterSpacingFix(layout: Layout, sameLine: Collision[], clearance: num
     const s = parting(c.a, c.b, { x: 1, y: 0 }, partTarget(clearance), 0.01, limit);
     yield;
     if (s === null) return null;
-    // Letter spacing is added after every character between them, spaces too.
-    need = Math.max(need, s / Math.max(1, c.b.pos - c.a.pos));
+    // Letter spacing is added after every character between them, spaces too (but not inside linked letters).
+    need = Math.max(need, s / Math.max(1, c.b.pos - (c.a.pos + c.a.span - 1)));
   }
   const ls = Math.ceil((p.letterSpacing + need) / KERN_STEP - 1e-9) * KERN_STEP;
   if (ls > 15) return null; // past the letter-spacing setting's limit
@@ -474,42 +591,33 @@ function* letterSpacingFix(layout: Layout, sameLine: Collision[], clearance: num
 }
 
 /**
- * Tries each fix for the letters that collide on a copy of the layout, and
- * keeps only those that cure the problem they are listed under without
- * causing a new one (CLAUDE.md, "Every fix is tried before it is offered").
- * It yields after each step, so the page can do it a little at a time, and
- * puts the fixes for each problem in `fixes` by its key as soon as they are
- * known, so they can be shown as they come. `relayout` lays out a changed
- * copy of the job.
+ * Tries each fix for the letters that collide, and for linked letters, on a
+ * copy of the layout, and keeps only those that cure the problem they are
+ * listed under without causing a new one or making one worse (CLAUDE.md,
+ * "Every fix is tried before it is offered"). It yields after each step, so
+ * the page can do it a little at a time, and puts the fixes for each problem
+ * in `fixes` by its key as soon as they are known, so they can be shown as
+ * they come. `relayout` lays out a changed copy of the job; it must not wait
+ * on working out new linked letters (layoutPanel's 'outline' shapes): their
+ * outlines are all a trial needs.
  */
-export function* tryCollisionFixes(layout: Layout, hasLetter: (ch: string) => boolean, relayout: (p: Project) => Layout, fixes = new Map<string, Fix[]>()): Generator<void, Map<string, Fix[]>, void> {
+export function* tryFixes(layout: Layout, hasLetter: (ch: string) => boolean, relayout: (p: Project) => Layout, fixes = new Map<string, Fix[]>()): Generator<void, Map<string, Fix[]>, void> {
   const p = layout.project;
   const clearance = clearanceOf(p);
   // Which letters collide is all that is needed here, not how far.
   const collisions = findCollisions(layout, clearance, true);
-  if (!collisions.length) return fixes;
+  const linkKeys = linkProblems(layout).map((q) => q.key!);
+  if (!collisions.length && !linkKeys.length) return fixes;
   yield;
   const now = layoutProblems(layout, hasLetter, true);
   const before = new Set(now.flatMap((q) => q.facts ?? []));
   const sizes: Record<string, number> = Object.assign({}, ...now.map((q) => q.sizes ?? {}));
   yield;
-  const sameLine = collisions.filter((c) => c.a.line === c.b.line);
-  const wide = sameLine.length > 1 ? yield* letterSpacingFix(layout, sameLine, clearance) : null;
-  // Lines are parted from each other as a whole: how far, for each two lines that meet.
-  const apart = new Map<string, { n: number | null; raw: number | null }>();
-  const between = (c: Collision) => linesOf(layout, c).map((l) => l.index).join('|');
   // What each fix leaves, by its id: the facts of every problem after it, or null if it could not be worked out
   // or it makes a problem there was already worse (a line further past a side).
   const tried = new Map<string, Set<string> | null>();
-  for (const c of collisions) {
-    let part: { n: number | null; raw: number | null } | null = null;
-    if (c.a.line !== c.b.line) {
-      const key = between(c);
-      if (!apart.has(key)) apart.set(key, yield* partLines(layout, collisions.filter((x) => x.a.line !== x.b.line && between(x) === key), clearance));
-      part = apart.get(key)!;
-    }
-    const candidates = yield* collisionCandidates(layout, c, clearance, part);
-    if (wide && c.a.line === c.b.line) candidates.push({ fix: wide });
+  /** Try each candidate once, and keep for the problem `key` those that cure it and cause nothing new. */
+  function* judge(key: string, candidates: { fix: Fix; unlock?: boolean }[]): Generator<void, void, void> {
     const offered: Fix[] = [];
     const unlocks: Fix[] = [];
     for (const { fix, unlock } of candidates) {
@@ -528,18 +636,40 @@ export function* tryCollisionFixes(layout: Layout, hasLetter: (ch: string) => bo
         tried.set(fix.id, after);
       }
       const after = tried.get(fix.id);
-      if (!after || after.has(`collide:${c.key}`) || [...after].some((f) => !before.has(f))) continue;
+      if (!after || after.has(key) || [...after].some((f) => !before.has(f))) continue;
       (unlock ? unlocks : offered).push(fix);
     }
     // A locked line is freed only when nothing else puts it right.
-    fixes.set(`collide:${c.key}`, offered.length ? offered : unlocks);
+    fixes.set(key, offered.length ? offered : unlocks);
   }
+
+  const sameLine = collisions.filter((c) => c.a.line === c.b.line);
+  const wide = sameLine.length > 1 ? yield* letterSpacingFix(layout, sameLine, clearance) : null;
+  // Neighbours that touch, linked all at once where there are several.
+  const touching = collisions.filter(neighbours);
+  const linkEvery = touching.length > 1 ? linkFix(layout, touching) : null;
+  // Lines are parted from each other as a whole: how far, for each two lines that meet.
+  const apart = new Map<string, { n: number | null; raw: number | null }>();
+  const between = (c: Collision) => linesOf(layout, c).map((l) => l.index).join('|');
+  for (const c of collisions) {
+    let part: { n: number | null; raw: number | null } | null = null;
+    if (c.a.line !== c.b.line) {
+      const key = between(c);
+      if (!apart.has(key)) apart.set(key, yield* partLines(layout, collisions.filter((x) => x.a.line !== x.b.line && between(x) === key), clearance));
+      part = apart.get(key)!;
+    }
+    const candidates = yield* collisionCandidates(layout, c, clearance, part);
+    if (wide && c.a.line === c.b.line) candidates.push({ fix: wide });
+    if (linkEvery && neighbours(c)) candidates.push({ fix: linkEvery });
+    yield* judge(`collide:${c.key}`, candidates);
+  }
+  for (const key of linkKeys) yield* judge(key, linkCandidates(layout, key));
   return fixes;
 }
 
 /** Every fix tried at once, for when there is no page to keep moving (the tests). */
 export function triedFixes(layout: Layout, hasLetter: (ch: string) => boolean, relayout: (p: Project) => Layout): Map<string, Fix[]> {
-  const run = tryCollisionFixes(layout, hasLetter, relayout);
+  const run = tryFixes(layout, hasLetter, relayout);
   for (;;) {
     const r = run.next();
     if (r.done) return r.value;
@@ -615,7 +745,8 @@ export function checkFixes(c: Check, depths: Depths, m: MachineSettings, capHeig
         else if (id.startsWith('word stop')) fixes.set('word-stops-off', { id: 'word-stops-off', label: 'Turn word stops off' });
         else {
           const ch = /^(.*) \(line \d+\)#\d+$/.exec(id)?.[1];
-          if (ch) fixes.set(`remove-char:${ch}`, removeChar(ch));
+          // (Linked letters are one item of several characters: nothing to take out by name.)
+          if (ch && [...ch].length === 1) fixes.set(`remove-char:${ch}`, removeChar(ch));
         }
       }
       return [...fixes.values()];

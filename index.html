@@ -378,14 +378,20 @@
           <button data-mode="pair" title="Just this pair of letters, wherever it occurs, in every job">Every pair</button>
           <button data-mode="gap" title="Just this one gap, in this job">This gap only</button>
         </div>
-        <div class="kern-row">
+        <div class="kern-row kerning">
           <button data-nudge="-1" title="Closer (Alt+←)">◀ Closer</button>
           <output></output>
           <button data-nudge="1" title="Further apart (Alt+→)">Apart ▶</button>
         </div>
+        <div class="kern-row link-edit">
+          <button data-nudge="-1" title="In deeper (Alt+←)">◀ Deeper</button>
+          <label title="How far the right-hand letter goes in past touching">Overlap <input type="number" step="0.1" min="0" data-overlap /> mm</label>
+          <button data-nudge="1" title="Not so deep, as far as touching (Alt+→)">Shallower ▶</button>
+        </div>
         <div class="breakdown"></div>
         <div class="kern-row small">
-          <button data-nudge="0">Back to 0</button>
+          <button data-link></button>
+          <button data-nudge="0" class="back">Back to 0</button>
           <button data-close>Done</button>
         </div>
       </div>

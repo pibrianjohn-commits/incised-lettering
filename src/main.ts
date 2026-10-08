@@ -1,7 +1,9 @@
 import { alphabetFromFont } from './alphabet';
 import { benchSheet, scaleName, strokeLabels } from './benchsheet';
 import { borderMarks } from './border';
-import { contourToSvg, polylineToSvg } from './geometry';
+import { contourToSvg, polylineToSvg, type Contour } from './geometry';
+import { LINK_OVERLAP } from './links';
+import type { ValleyLine } from './valley';
 import {
   contentBox,
   defaultProject,
@@ -30,7 +32,7 @@ import { defaultGroups, type Side } from './groups';
 import { defaultBox, evenUp, fitBlock, fitLine, type EvenUp, type FitBy } from './spacing';
 import { AIR_GAP, toGcode } from './gcode';
 import { openPalette, type Command } from './palette';
-import { attachFixes, checkFixes, layoutProblems, machineProblems, passDepths, problemSummary, tryCollisionFixes, type Fix, type Problem, type Stage } from './problems';
+import { attachFixes, checkFixes, layoutProblems, machineProblems, passDepths, problemSummary, tryFixes, type Fix, type Problem, type Stage } from './problems';
 import { alphabetDifferences, FILE_EXTENSION, FILE_TYPE, fileNameFor, normaliseProject, PlainError, projectFileText, readProjectFile } from './projectfile';
 import { AppFileError, fetchAppFile, onFileLaunch, refreshApp, savedCopies, startApp } from './pwa';
 import { enableScrub } from './scrub';
@@ -149,11 +151,11 @@ const PROJECT_FILE: FileKind = { description: 'Lettering project', type: FILE_TY
 let file: { name: string; handle: FileHandle | null; saved: Project | null } | null = null;
 /** The G-code safety checks for the warnings badge, worked out a moment after things stop changing. */
 /** The G-code checks for a project, and its passes (the 3D view uses them too). */
-let machineChecks: { project: Project; problems: Problem[]; passes: Pass[] } | null = null;
+let machineChecks: { project: Project; problems: Problem[]; passes: Pass[]; pending?: boolean } | null = null;
 let checkTimer = 0;
 /**
  * The fixes for letters that collide, tried on copies of the layout for the
- * job as it was (problems.ts, tryCollisionFixes). They follow a moment behind.
+ * job as it was (problems.ts, tryFixes). They follow a moment behind.
  */
 let fixTrials: { project: Project; fixes: Map<string, Fix[]>; done: boolean } | null = null;
 /** The job whose collision fixes are being tried now, and which round of trying it is. */
@@ -283,10 +285,17 @@ function buildControls() {
     if (b.hasAttribute('data-close')) {
       selected = null;
       draw();
+    } else if (b.hasAttribute('data-link')) {
+      toggleLink(selectedGap());
     } else if (b.dataset.mode) {
       kernMode = b.dataset.mode as 'group' | 'pair' | 'gap';
       applyView();
     } else nudge(Number(b.dataset.nudge));
+  });
+  pop.querySelector<HTMLInputElement>('[data-overlap]')!.addEventListener('input', (e) => {
+    const gap = selectedGap();
+    const input = e.target as HTMLInputElement;
+    if (gap?.link && input.value !== '') setOverlap(gap, Math.max(0, Number(input.value)), input);
   });
   document.addEventListener('keydown', onKey);
   $('kerning-summary').addEventListener('click', (e) => {
@@ -325,6 +334,39 @@ function update(change: Partial<Project>, source?: Element, group: string | null
   relayout();
 }
 
+/** A linked gap's overlap, mm at the size the letters are now (it is kept as at KERN_CAP and scales with them). */
+function setOverlap(gap: Gap, mm: number, source?: Element) {
+  const link = project.links[gap.key];
+  if (!link || !(mm >= 0)) return;
+  update({ links: { ...project.links, [gap.key]: { ...link, overlap: kernKept(mm, project.capHeight) } } }, source, `overlap:${gap.key}`);
+}
+
+/**
+ * Link the gap's two letters into one shape, or unlink them (L). A pair
+ * that can never meet (no height they share) can't be linked, and says so.
+ */
+function toggleLink(gap: Gap | null) {
+  if (!gap || !store || !layout) return say('Select a gap first: click between two letters, or press Tab.');
+  const [a, b] = [...gap.pair];
+  const line = lineNumber(layout, gap.line);
+  if (gap.link) {
+    const links = { ...project.links };
+    delete links[gap.key];
+    update({ links });
+    return say(`The ${a} and ${b} in line ${line} are no longer linked: they are spaced as before. Ctrl+Z undoes it.`);
+  }
+  if (store.touch(a, b) === null) return say(`The ${a} and ${b} can never meet, so they can't be linked.`);
+  // How far the right-hand letter moves, to say so plainly.
+  const next: Project = { ...project, links: { ...project.links, [gap.key]: { pair: gap.pair, overlap: LINK_OVERLAP } } };
+  const before = gap.right.parts?.find((q) => q.pos === Number(gap.key.split(':')[1]))?.box.x0 ?? gap.right.box.x0;
+  const after = layoutPanel(store, next, true, 'outline').letters.find((l) => l.line === gap.line && l.pos <= Number(gap.key.split(':')[1]) && l.pos + l.span > Number(gap.key.split(':')[1]));
+  const moved = after?.parts?.find((q) => q.pos === Number(gap.key.split(':')[1]))?.box.x0;
+  update({ links: next.links });
+  const by = moved === undefined ? 0 : before - moved;
+  const how = Math.abs(by) < 0.05 ? '' : by > 0 ? ` The ${b} slid ${by.toFixed(1)} mm closer to meet the ${a}.` : ` The ${b} moved ${(-by).toFixed(1)} mm away, to overlap by just the link overlap.`;
+  say(`The ${a} and ${b} in line ${line} are linked into one letter, overlapping ${kernMm(LINK_OVERLAP, project.capHeight).toFixed(2)} mm.${how} Alt+arrows set how deep; L unlinks. Ctrl+Z undoes it.`);
+}
+
 function syncControls(source?: Element) {
   for (const s of sliders) {
     const v = project[s.key];
@@ -352,8 +394,18 @@ function syncControls(source?: Element) {
 function nudge(dir: number, step = 0.1) {
   const gap = selectedGap();
   if (!gap) return;
+  // On a linked gap the letters go in deeper (closer) or not so deep (apart), stopping at touching;
+  // nothing else moves them (BRIEF.md, Decisions: "Linked letters").
+  if (gap.link) {
+    const link = project.links[gap.key];
+    if (!link) return;
+    const now = kernMm(link.overlap, project.capHeight);
+    const v = dir === 0 ? kernMm(LINK_OVERLAP, project.capHeight) : Math.max(0, round(now - dir * step, 2));
+    if (dir > 0 && now <= 0) return say('They only touch now: Unlink (L) to part them.');
+    return setOverlap(gap, v);
+  }
   // Read the current settings, not the last drawing, so quick presses all count.
-  const [a, b] = [gap.left.char, gap.right.char];
+  const [a, b] = [...gap.pair];
   // Kerning is shown and nudged in mm at the size the letters are now, and kept
   // as at 25 mm cap height, so it scales with the letters (layout.ts, KERN_CAP).
   const cap = project.capHeight;
@@ -492,7 +544,7 @@ function draw() {
 
   const showSpace = $<HTMLInputElement>('show-space').checked;
   const spaces = showSpace
-    ? L.gaps.map((g) => negativeSpace(g, L.lines[g.line].baselineY, p.capHeight, p.spaceDepth))
+    ? L.gaps.filter((g) => !g.link).map((g) => negativeSpace(g, L.lines[g.line].baselineY, p.capHeight, p.spaceDepth))
     : [];
   if (showSpace) {
     out.push('<g class="space">');
@@ -552,8 +604,8 @@ function draw() {
     const n = counts.get(g.line) ?? 0;
     counts.set(g.line, n + 1);
     const base = L.lines[g.line].baselineY;
-    const w = Math.max(Math.abs(g.right.box.x0 - g.left.box.x1), p.capHeight * 0.12);
-    const cls = g === sel ? 'gap sel' : g.kern ? 'gap kerned' : 'gap';
+    const w = g.link ? p.capHeight * 0.12 : Math.max(Math.abs(g.right.box.x0 - g.left.box.x1), p.capHeight * 0.12);
+    const cls = `gap${g === sel ? ' sel' : g.kern ? ' kerned' : ''}${g.link ? ' linked' : ''}`;
     out.push(
       `<rect class="${cls}" data-gap="${g.line}:${n}" x="${fmt(g.x - w / 2)}" y="${fmt(base - p.capHeight)}" width="${fmt(w)}" height="${fmt(p.capHeight)}"/>`,
     );
@@ -601,13 +653,25 @@ function applyView() {
   // Pending even-up suggestions, in their own colour.
   const pending = new Map((suggest?.suggestions ?? []).map((s) => [s.pair, tweaks[s.pair] ?? s.change]));
   for (const g of labelData.gaps) {
+    if (g.link) continue;
     const ch = pending.get(g.pair);
     if (ch === undefined) continue;
     const base = layout!.lines[g.line].baselineY;
     out.push(`<text class="suggest" x="${sx(g.x).toFixed(1)}" y="${(sy(base) + 40).toFixed(1)}">${previewSuggest ? '' : '→ '}${signed(ch)}?</text>`);
   }
   const everyKern = $<HTMLInputElement>('show-kerns').checked;
+  const chosen = selectedGap();
   for (const g of labelData.gaps) {
+    // Linked letters: a small link mark under each joint, in place of a kerning figure.
+    if (g.link) {
+      const x = sx(g.x);
+      const y = sy(layout!.lines[g.line].baselineY) + 14;
+      out.push(
+        `<g class="link-mark${g === chosen ? ' sel' : ''}"><title>Linked: cut as one letter, overlapping ${g.link.overlap.toFixed(2)} mm</title>` +
+          `<ellipse cx="${(x - 3.2).toFixed(1)}" cy="${y.toFixed(1)}" rx="4.6" ry="2.9"/><ellipse cx="${(x + 3.2).toFixed(1)}" cy="${y.toFixed(1)}" rx="4.6" ry="2.9"/></g>`,
+      );
+      continue;
+    }
     if (!everyKern && !g.kern && !g.gapKern) continue;
     const base = layout!.lines[g.line].baselineY;
     const y = sy(base) + 14;
@@ -645,8 +709,20 @@ function applyView() {
   if (g) {
     const base = layout!.lines[g.line].baselineY;
     pop.hidden = false;
-    const pairName = `${g.left.char} ${g.right.char}`;
-    pop.querySelector('.pair')!.textContent = pairName;
+    const pairName = [...g.pair].join(' ');
+    pop.classList.toggle('linked', !!g.link);
+    pop.querySelector('.pair')!.textContent = g.link ? `${pairName} · linked` : pairName;
+    const [la, lb] = [...g.pair];
+    const linkBtn = pop.querySelector<HTMLButtonElement>('[data-link]')!;
+    const canLink = !!g.link || store?.touch(la, lb) !== null;
+    linkBtn.textContent = g.link ? 'Unlink' : 'Link';
+    linkBtn.disabled = !canLink;
+    linkBtn.title = g.link
+      ? 'Part them: each its own letter again (L)'
+      : canLink
+        ? 'Join them into one shape, cut as one letter (L)'
+        : 'These two can never meet, so they can’t be linked';
+    pop.querySelector('.back')!.textContent = g.link ? `Back to ${kernMm(LINK_OVERLAP, p.capHeight).toFixed(2)}` : 'Back to 0';
     const groupName = g.groupKey ? `like ${g.groupKey.split('|')[0]} · like ${g.groupKey.split('|')[1]}` : null;
     const mode = kernMode === 'group' && !g.groupKey ? 'pair' : kernMode;
     pop.querySelector('[data-mode="pair"]')!.textContent = `Every ${pairName}`;
@@ -656,13 +732,18 @@ function applyView() {
     pop.querySelectorAll<HTMLElement>('[data-mode]').forEach((b) => b.classList.toggle('on', b.dataset.mode === mode));
     const shown = mode === 'group' ? g.groupKern : mode === 'pair' ? g.pairKern : g.gapKern;
     pop.querySelector('output')!.textContent = `${signed(shown)} mm`;
-    const parts = [
-      groupName ? `group ${signed(g.groupKern)}${g.pairFrom === 'pair' ? ' (overridden)' : ''}` : null,
-      g.pairFrom === 'pair' ? `${pairName} ${signed(g.pairKern)}` : null,
-      `this gap ${signed(g.gapKern)}`,
-      `total ${signed(g.kern)} mm`,
-    ].filter(Boolean);
-    pop.querySelector('.breakdown')!.textContent = parts.join(' · ');
+    const ov = pop.querySelector<HTMLInputElement>('[data-overlap]')!;
+    if (g.link && document.activeElement !== ov) ov.value = String(round(g.link.overlap, 2));
+    const joint = g.link ? g.left.joints?.[Number(g.key.split(':')[1]) - g.left.pos - 1] : undefined;
+    const parts = g.link
+      ? [`cut as one letter${joint ? `, joined ${joint.width.toFixed(2)} mm` : ''}`, 'no kerning or spacing acts here']
+      : [
+          groupName ? `group ${signed(g.groupKern)}${g.pairFrom === 'pair' ? ' (overridden)' : ''}` : null,
+          g.pairFrom === 'pair' ? `${pairName} ${signed(g.pairKern)}` : null,
+          `this gap ${signed(g.gapKern)}`,
+          `total ${signed(g.kern)} mm`,
+        ];
+    pop.querySelector('.breakdown')!.textContent = parts.filter(Boolean).join(' · ');
     placeBeside(pop, sx(g.x), sy(base - p.capHeight), sy(base));
   } else {
     pop.hidden = true;
@@ -939,6 +1020,9 @@ function onKey(e: KeyboardEvent) {
     selectedSpacer = null;
     marked = null;
     draw();
+  } else if (!e.altKey && e.key.toLowerCase() === 'l') {
+    // L links the selected gap's letters into one shape, or unlinks them (or the gap under the pointer).
+    toggleLink(selectedGap() ?? gapAt(hovered));
   } else if (!e.altKey && e.key.toLowerCase() === 'p') {
     // P marks the next problem on the panel; Shift+P the one before.
     stepProblem(e.shiftKey ? -1 : 1);
@@ -1221,7 +1305,9 @@ function lineAlign(line: PlacedLine): Align {
 function letterPairs(line: PlacedLine): number {
   const chars = [...line.text];
   const inked = chars.map((ch, i) => (!/\s/.test(ch) && hasLetter(ch) ? i : -1)).filter((i) => i >= 0);
-  return inked.length ? inked[inked.length - 1] - inked[0] : 0;
+  // Linked letters stay joined, whatever the spacing (BRIEF.md, Decisions: "Linked letters").
+  const linked = layout ? layout.gaps.filter((g) => g.link && g.line === line.index).length : 0;
+  return inked.length ? inked[inked.length - 1] - inked[0] - linked : 0;
 }
 
 /** Close (dir -1) or spread (+1) the selected line's letters by `step` mm between each pair. */
@@ -2204,7 +2290,7 @@ function drawReferenceSample() {
     svg.innerHTML = '';
     return;
   }
-  const solo: Project = { ...project, text: pair, lines: {}, lineExtras: {}, gapKerning: {}, wordStops: { ...project.wordStops, on: false } };
+  const solo: Project = { ...project, text: pair, lines: {}, lineExtras: {}, gapKerning: {}, links: {}, wordStops: { ...project.wordStops, on: false } };
   const l = layoutPanel(store, solo, true);
   const g = l.gaps[0];
   const line = l.lines[0];
@@ -2605,6 +2691,63 @@ function reliefWorkerSource(): Promise<string> {
   return workerSource;
 }
 
+/**
+ * Linked letters' valley lines (letters.ts) are worked out by an instance of
+ * the 3D view's worker program of their own, a run at a time; the page shows
+ * their outlines meanwhile, and lays them out afresh as each arrives. If the
+ * worker can't be had, they are worked out on the page instead.
+ */
+let shapeWorker: Worker | null = null;
+const shapeQueue: { key: string; outline: Contour[] }[] = [];
+function askShape(key: string, outline: Contour[]) {
+  shapeQueue.push({ key, outline });
+  if (shapeWorker) return void shapeWorker.postMessage({ kind: 'valleys', key, outline });
+  reliefWorkerSource().then(
+    (source) => {
+      if (!shapeWorker) {
+        shapeWorker = new Worker(source, { type: 'module' });
+        shapeWorker.onmessage = (e: MessageEvent<{ kind?: string; key: string; valleys?: ValleyLine[]; error?: string }>) => {
+          if (e.data.kind !== 'valleys' || !store) return;
+          const i = shapeQueue.findIndex((q) => q.key === e.data.key);
+          if (i >= 0) shapeQueue.splice(i, 1);
+          if (e.data.valleys) store.putValleys(e.data.key, e.data.valleys);
+          else {
+            console.error('The worker could not work out linked letters:', e.data.error);
+            store.valleysNow(e.data.key);
+          }
+          shapesArrived();
+        };
+        shapeWorker.onerror = (e) => {
+          console.error('The linked letters worker stopped:', e.message);
+          shapeWorker = null;
+          shapesOnPage();
+        };
+        for (const q of shapeQueue) shapeWorker.postMessage({ kind: 'valleys', key: q.key, outline: q.outline });
+      }
+    },
+    () => shapesOnPage(),
+  );
+}
+
+/** Without the worker: whatever is waiting is worked out here, one at a time. */
+function shapesOnPage() {
+  const next = shapeQueue.shift();
+  if (!next || !store) return;
+  store.valleysNow(next.key);
+  shapesArrived();
+  if (shapeQueue.length) window.setTimeout(shapesOnPage, 0);
+}
+
+/** A linked run's valley lines have come: lay the job out again, and anything worked out without them afresh. */
+let shapesTimer = 0;
+function shapesArrived() {
+  clearTimeout(shapesTimer);
+  shapesTimer = window.setTimeout(() => {
+    relayout();
+    if (cam?.layout.shapesPending && cam.project === project) openCam();
+  }, 30);
+}
+
 type WorkerMessage = { id?: number; progress?: number; error?: string; stack?: string; version?: string; result?: ReliefResult };
 
 /** A worker running the program fetched above. */
@@ -2865,6 +3008,8 @@ function showBoard({ result, job }: { result: ReliefResult; job: NonNullable<typ
 /** Work out the board's surface for what's chosen, and show it once ready. */
 function build3d() {
   if (!v3d.open || !store) return;
+  // Linked letters still being worked out: the board is worked out once they come (shapesArrived lays out afresh).
+  if (layout?.project === project && layout.shapesPending) return;
   // Already on show (perhaps being made sharper), or under way: nothing to do.
   if (v3d.shown?.project === project && v3d.shown.state === v3d.state && (!v3d.job || v3d.job.area)) return;
   if (v3d.job && !v3d.job.area && v3d.job.project === project && v3d.job.state === v3d.state) return;
@@ -3161,7 +3306,8 @@ function refreshProblems() {
   if (outOfDate) list.push(outOfDate.problem);
   // The G-code checks take longer, so they follow a moment behind; the last ones stand till then.
   if (machineChecks) list.push(...machineChecks.problems);
-  if (machineChecks?.project !== project) scheduleChecks();
+  // (Worked out while linked letters were still to come: again, now they may have.)
+  if (machineChecks?.project !== project || (machineChecks.pending && !layout.shapesPending)) scheduleChecks();
   problems = list;
   const sum = problemSummary(list);
   const b = $('st-warn');
@@ -3186,7 +3332,7 @@ function scheduleChecks() {
         const l = layoutPanel(store, p);
         const passes = buildPasses(l, p.machine);
         const checks = checkPasses(l, passes, p.machine, bedFit(p.panelWidth, p.panelHeight));
-        machineChecks = { project: p, problems: machineProblems(checks, passDepths(passes), p.machine, p.capHeight), passes };
+        machineChecks = { project: p, problems: machineProblems(checks, passDepths(passes), p.machine, p.capHeight), passes, pending: l.shapesPending };
       } catch (err) {
         // Not to be tried again and again: the problem stands until the job changes.
         console.error(err);
@@ -3223,7 +3369,8 @@ function scheduleFixTrials() {
     // Each problem's fixes are shown as soon as they are known.
     const trials = { project: p, fixes: new Map<string, Fix[]>(), done: false };
     fixTrials = trials;
-    const steps = tryCollisionFixes(l, hasLetter, (q) => layoutPanel(s, q, true), trials.fixes);
+    // Trials lay out copies with the linked letters' outlines only: never waiting on new ones.
+    const steps = tryFixes(l, hasLetter, (q) => layoutPanel(s, q, true, 'outline'), trials.fixes);
     const slice = () => {
       if (round !== trialRound || p !== project) return; // changed again: the next round tries afresh
       const start = performance.now();
@@ -3583,10 +3730,18 @@ function ask(title: string, text: string, options: { value: string; label: strin
 
 // ---------------------------------------------------------------- bench sheet
 
-function makeSheet() {
+function makeSheet(wait = false) {
   if (!store) return null;
   const p = project;
-  const l = layoutPanel(store, p);
+  // Printing can't wait for the worker: any linked letters still to come are worked out on the spot.
+  const l = layoutPanel(store, p, false, wait ? 'now' : undefined);
+  if (l.shapesPending) {
+    say('Still working out the linked letters: the bench sheet opens in a moment, when they are ready.');
+    window.setTimeout(() => {
+      if (!layout?.shapesPending) showSheet();
+    }, 1500);
+    return null;
+  }
   const passes = buildPasses(l, p.machine);
   // Stroke numbers come from the valley slit, even when it is not set to run.
   const strokes =
@@ -3606,7 +3761,7 @@ function showSheet() {
 
 /** Put the bench sheet where printing picks it up (it is the only thing printed). */
 function fillPrint() {
-  const sh = makeSheet();
+  const sh = makeSheet(true);
   if (!sh) return;
   $('print-root').innerHTML = sh.html;
   let style = document.getElementById('page-style');
@@ -3707,6 +3862,18 @@ function commands(): Command[] {
   for (const f of currentFixes()) add(`Put right: ${f.label}`, () => runFix(f.id), 'Problems', 'fix problem warning');
   for (const q of problems) if (q.key && q.spot) add(`Show on the panel: ${q.text}`, () => showProblem(q), 'P', 'problem where mark find collision touch letters');
   add('Show the next problem on the panel', () => stepProblem(1), 'P', 'problem where mark find collision touch letters');
+  add('Link the selected gap’s letters into one shape, or unlink them', () => toggleLink(selectedGap()), 'L', 'link join joined linked unlink ligature serif feet');
+  add(
+    'Unlink every linked pair',
+    () => {
+      const n = Object.keys(project.links).length;
+      if (!n) return say('Nothing is linked.');
+      update({ links: {} });
+      say(`${n} link${n > 1 ? 's' : ''} undone: every letter is its own again. Ctrl+Z undoes it.`);
+    },
+    'Space',
+    'link unlink join joined linked',
+  );
   add('Fit the lettering to the panel across its width', () => fitLettering('width'), 'Panel', 'scale size fill');
   add('Fit the lettering to the panel up its height', () => fitLettering('height'), 'Panel', 'scale size fill');
   add('Re-flow all lines', () => $('reflow').click(), 'Write', 'lines auto');
@@ -3874,6 +4041,8 @@ async function start() {
   if (!res.ok) throw new Error(`font file missing (${res.status})`);
   const alphabet = alphabetFromFont(await res.arrayBuffer(), 'SIL Open Font License 1.1');
   store = new LetterStore(alphabet);
+  // Linked letters' valley lines are worked out by a worker, so the page never waits on them.
+  store.ask = askShape;
   alphabetName = alphabet.name;
   loadAlphabetSettings();
   syncControls();
