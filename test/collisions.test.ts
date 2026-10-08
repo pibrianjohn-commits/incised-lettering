@@ -85,7 +85,9 @@ describe('letters that collide', () => {
   it("the carver's layout: every fix offered cures its own problem, and causes no new one", () => {
     const list = collisions(everyFixCures(BRIAN));
     expect(labels(list[1])).toEqual(['Move line 3 down 1.5 mm', 'Move line 2 up 1.5 mm', 'Return line 2 to auto', 'Return line 3 to auto']);
-    for (const q of [list[0], list[2], list[3]]) expect(labels(q)).toEqual(['Open this gap 0.5 mm', 'Open the letter spacing to 0 mm']);
+    // The feet of A and M overlap 0.32 mm (M and A 0.27 mm): opened that and 0.5 mm, to the next 0.1 mm, they leave 0.5 mm of wood between them.
+    for (const q of [list[0], list[2]]) expect(labels(q)).toEqual(['Open this gap 0.9 mm', 'Open the letter spacing to 0.4 mm']);
+    expect(labels(list[3])).toEqual(['Open this gap 0.8 mm', 'Open the letter spacing to 0.4 mm']);
   });
 
   it('lines are moved just far enough to part the letters with 0.5 mm to spare, to the next 0.5 mm', () => {
@@ -97,13 +99,18 @@ describe('letters that collide', () => {
     expect(at(1.0)).toBe(true); // half a millimetre less would not do
   });
 
-  it('a gap is opened just enough to part its letters, in kerning steps of 0.1 mm', () => {
+  it('a gap is opened enough to leave 0.5 mm of wood between its letters, to the next 0.1 mm', () => {
+    // BRIEF.md, Decisions: "Room between letters".
     const q = collisions(problemsOf(BRIAN))[0];
     const f = q.fixes[0];
-    const after = (p: Project) => findCollisions(lay(p)).some((c) => c.key === q.key!.slice('collide:'.length));
-    expect(after({ ...BRIAN, ...f.change })).toBe(false);
-    const less = { ...BRIAN.gapKerning, '0:1': { pair: 'AM', mm: (0.4 * 25) / BRIAN.capHeight } };
-    expect(after({ ...BRIAN, gapKerning: less })).toBe(true);
+    expect(f.label).toBe('Open this gap 0.9 mm');
+    const within = (p: Project, mm: number) => findCollisions(lay(p), mm).some((c) => c.key === q.key!.slice('collide:'.length));
+    expect(within({ ...BRIAN, ...f.change }, 0.5)).toBe(false); // 0.5 mm apart at least
+    const less = { ...BRIAN.gapKerning, '0:1': { pair: 'AM', mm: (0.8 * 25) / BRIAN.capHeight } };
+    expect(within({ ...BRIAN, gapKerning: less }, 0.5)).toBe(true); // 0.1 mm less would not do
+    // The letter spacing fix leaves as much at every gap it parts.
+    const wide = q.fixes[1];
+    expect(findCollisions(lay({ ...BRIAN, ...wide.change }), 0.5).filter((c) => c.a.line === c.b.line && c.b.pos === c.a.pos + 1 && 'AM'.includes(c.a.char) && 'AM'.includes(c.b.char))).toEqual([]);
   });
 
   it('"Return line 2 to auto" is offered only where it cures: here it moves the line 0.95 mm down, and the J further into the M', () => {
@@ -146,7 +153,7 @@ describe('letters that collide', () => {
     const deep = { ...p, machine: { ...p.machine, hairlineDepth: 0.5 } }; // 0.27 mm wide
     const list = collisions(everyFixCures(deep));
     expect(list.map((q) => q.text)).toEqual(['The A and M in line 1 come within 0.18 mm of each other, so their hairlines would run together.']);
-    expect(labels(list[0])).toEqual(['Open this gap 0.2 mm']); // 0.18 + 0.1 would fall just short of 0.27
+    expect(labels(list[0])).toEqual(['Open this gap 0.4 mm']); // 0.18 apart: 0.32 more leaves 0.5 mm
   });
 
   it('lines laid out automatically: the line spacing opened just enough, or a line moved', () => {
@@ -191,7 +198,7 @@ describe('letters that collide', () => {
     expect(list.map((q) => q.text)).toEqual(['The A and M in line 1 touch (1st of 2).', 'The M and A in line 1 touch.', 'The A and M in line 1 touch (2nd of 2).']);
   });
 
-  it('several gaps colliding for one reason: the letter spacing opened just enough to part every one', () => {
+  it('several gaps colliding for one reason: the letter spacing opened enough to part every one', () => {
     const p = proj({ text: 'AMAZE\nMAMBA', capHeight: 25, letterSpacing: -1, lineSpacing: 40, panelWidth: 250, panelHeight: 120 });
     const list = collisions(everyFixCures(p));
     expect(list.length).toBeGreaterThan(2);
@@ -199,7 +206,7 @@ describe('letters that collide', () => {
     expect(list.every((q) => q.fixes.some((f) => f.id === wide.id))).toBe(true);
     expect(findCollisions(lay({ ...p, ...wide.change }))).toEqual([]);
     // No wider fix for a single collision.
-    expect(collisions(problemsOf(proj({ text: 'AM', letterSpacing: -1 })))[0].fixes.map((f) => f.id)).toEqual(['open-gap:0:1:1']);
+    expect(collisions(problemsOf(proj({ text: 'AM', letterSpacing: -1 })))[0].fixes.map((f) => f.id)).toEqual(['open-gap:0:1:1.4']); // the feet overlap 0.86 mm, and 0.5 mm to spare
   });
 
   it('a clean layout shows no collisions: real inscriptions with punctuation, numerals and blank lines', () => {

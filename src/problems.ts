@@ -274,11 +274,16 @@ export function clearanceOf(p: Project): number {
   return Number.isFinite(w) && w > 0 ? w : HAIRLINE;
 }
 
-/** Lines moved apart are parted this far, mm, and the move rounded up to the next LINE_STEP. */
+/**
+ * Letters moved apart are parted this far, mm, so the wood left between them
+ * can be chiselled (BRIEF.md, Decisions: "Room between letters"); a line's
+ * move is rounded up to the next LINE_STEP, a gap's to the next KERN_STEP.
+ */
 const SPARE = 0.5;
 const LINE_STEP = 0.5;
-/** A gap is opened just enough to part its letters, in kerning's own steps. */
 const KERN_STEP = 0.1;
+/** How far apart two letters are parted: SPARE, or a little more than the hairline is wide where that is wider. */
+const partTarget = (clearance: number) => Math.max(SPARE, clearance + 0.05);
 
 /** A character named in a sentence: a letter or figure as it is, anything else in quotes. */
 const named = (ch: string) => (/[\p{L}\p{N}]/u.test(ch) ? ch : `“${ch}”`);
@@ -377,7 +382,7 @@ function linesOf(layout: Layout, c: Collision): [PlacedLine, PlacedLine] {
  */
 function* partLines(layout: Layout, pairs: Collision[], clearance: number): Generator<void, { n: number | null; raw: number | null }, void> {
   const limit = Math.max(50, 3 * layout.project.capHeight);
-  const target = Math.max(SPARE, clearance + 0.05);
+  const target = partTarget(clearance);
   let n: number | null = 0;
   let raw: number | null = 0;
   for (const c of pairs) {
@@ -428,9 +433,9 @@ function* collisionCandidates(layout: Layout, c: Collision, clearance: number, a
     for (const q of [up, down]) if (q.placed && !q.locked) out.push({ fix: autoLineFix(p, q) });
     for (const q of [up, down]) if (q.locked) out.push({ fix: autoLineFix(p, q), unlock: true });
   } else {
-    // On one line: open the gap after the first letter, just enough to part them.
+    // On one line: open the gap after the first letter, enough to part them with SPARE to spare.
     const g = layout.gaps.find((x) => x.left === c.a);
-    const n = g ? parting(c.a, c.b, { x: 1, y: 0 }, clearance + 0.02, KERN_STEP, limit) : null;
+    const n = g ? parting(c.a, c.b, { x: 1, y: 0 }, partTarget(clearance), KERN_STEP, limit) : null;
     yield;
     if (g && n) {
       const gapKerning = { ...p.gapKerning, [g.key]: { pair: g.pair, mm: kernKept(g.gapKern + n, p.capHeight) } };
@@ -450,14 +455,14 @@ function* collisionCandidates(layout: Layout, c: Collision, clearance: number, a
 
 /**
  * Where several gaps collide for one reason, such as letter spacing set
- * tight: the letter spacing opened just enough to part every pair on a line.
+ * tight: the letter spacing opened enough to part every pair, with SPARE to spare.
  */
 function* letterSpacingFix(layout: Layout, sameLine: Collision[], clearance: number): Generator<void, Fix | null, void> {
   const p = layout.project;
   const limit = Math.max(50, 3 * p.capHeight);
   let need = 0;
   for (const c of sameLine) {
-    const s = parting(c.a, c.b, { x: 1, y: 0 }, clearance + 0.02, 0.01, limit);
+    const s = parting(c.a, c.b, { x: 1, y: 0 }, partTarget(clearance), 0.01, limit);
     yield;
     if (s === null) return null;
     // Letter spacing is added after every character between them, spaces too.
