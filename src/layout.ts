@@ -4,7 +4,8 @@ import { datumLines } from './datum';
 import type { Contour } from './geometry';
 import { defaultGroups, groupPairKey, type KernGroups } from './groups';
 import { defaultMachine, type MachineSettings } from './toolpath';
-import type { Box, LetterStore } from './letters';
+import type { Box, LetterStore, ShapeMode } from './letters';
+import type { Pt } from './geometry';
 import type { ValleyLine } from './valley';
 
 export type Align = 'left' | 'centre' | 'right';
@@ -70,6 +71,19 @@ export interface Project {
   spacers: Record<string, number>;
   /** The cap height hand kerning is kept at (always KERN_CAP; older saves lack it and are converted). */
   kernCap: number;
+  /**
+   * Letters linked on purpose into one shape (BRIEF.md, Decisions: "Linked
+   * letters"), keyed by gap like one-gap kerning (see gapKey). The pair is
+   * kept so that a link is ignored if the text changes under it. The overlap
+   * is how far the right-hand letter goes in past touching, mm as at KERN_CAP
+   * (it scales with the letters, like hand kerning).
+   */
+  links: Record<string, Link>;
+}
+
+export interface Link {
+  pair: string;
+  overlap: number;
 }
 
 /**
@@ -122,6 +136,7 @@ export const defaultProject: Project = {
   lines: {},
   spacers: {},
   kernCap: KERN_CAP,
+  links: {},
 };
 
 export interface EvenUpSettings {
@@ -231,14 +246,25 @@ export function gapKey(line: number, index: number): string {
 }
 
 export interface PlacedLetter {
+  /** The character, or for letters linked into one shape, each of them in order ("AM"). */
   char: string;
   line: number;
-  /** Its place in its line's text (0 = the first character). */
+  /** Its place in its line's text (0 = the first character); for linked letters, the first one's. */
   pos: number;
+  /** How many characters it is: 1, or more for letters linked into one shape. */
+  span: number;
   outline: Contour[];
   valleys: ValleyLine[];
   datum: Contour[];
   box: Box;
+  /**
+   * Linked letters: each joint between two neighbours: how thick the wood is
+   * across it at its thinnest (mm), where it is, at the feet, the heads or
+   * elsewhere, and the fill that built it up, if any.
+   */
+  joints?: { width: number; at: Pt; place: 'foot' | 'head' | 'elsewhere'; fill: Contour | null; fills: Contour[] }[];
+  /** Linked letters: each character's own box, so what touches it can be named by the character it touches. */
+  parts?: { char: string; pos: number; box: Box }[];
 }
 
 /** The space between two neighbouring letters on a line. */
@@ -261,8 +287,15 @@ export interface Gap {
   gapKern: number;
   /** Total hand kerning at this gap, mm. */
   kern: number;
-  /** Middle of the gap between the two letters' extremes, mm. */
+  /** Middle of the gap between the two letters' extremes, mm; for a linked gap, the middle of the joint. */
   x: number;
+  /**
+   * A linked gap: the two letters are joined into one shape (left and right
+   * are then that one shape), the right-hand one going in past touching by
+   * `overlap` mm. No kerning or spacing acts on it, and no space is measured
+   * across it.
+   */
+  link: { overlap: number } | null;
 }
 
 export interface PlacedLine {
@@ -306,13 +339,30 @@ export interface Layout {
   stops: PlacedStop[];
   /** Letters that could not be worked out, left as spaces: the character and its line (0 = first). */
   failed: { char: string; line: number }[];
+  /** Some linked letters' valley lines are still being worked out (letters.ts): their outlines are shown meanwhile. */
+  shapesPending: boolean;
+  /** Linked letters that could not be joined, cut as separate letters: the pair, its line and its gap's key. */
+  unjoined: { pair: string; line: number; key: string }[];
+}
+
+/**
+ * The link at the gap before character `i` of a line, if it holds: its pair
+ * still in that place, two letters (no space), and the two able to meet.
+ */
+export function linkAt(store: LetterStore, p: Project, line: number, chars: string[], i: number): Link | null {
+  const l = p.links[gapKey(line, i)];
+  if (!l || i < 1 || i >= chars.length || l.pair !== chars[i - 1] + chars[i]) return null;
+  if (/\s/.test(chars[i - 1]) || /\s/.test(chars[i])) return null;
+  return store.touch(chars[i - 1], chars[i]) === null ? null : l;
 }
 
 /**
  * With `quick` set, datum lines not already worked out are left off
  * (`datumPending` is then true) so that dragging a slider stays smooth.
+ * `shapes` says how linked letters' valley lines are had when not yet worked
+ * out (letters.ts, ShapeMode); by default as the store is set up.
  */
-export function layoutPanel(store: LetterStore, p: Project, quick = false): Layout {
+export function layoutPanel(store: LetterStore, p: Project, quick = false, shapes?: ShapeMode): Layout {
   const k = p.capHeight;
   const alphabet = store.alphabet;
   const texts = p.text.replace(/\r/g, '').split('\n');
@@ -346,6 +396,9 @@ export function layoutPanel(store: LetterStore, p: Project, quick = false): Layo
   const lines: PlacedLine[] = [];
   let wide = false;
   let datumPending = false;
+  let shapesPending = false;
+  const unjoined: Layout['unjoined'] = [];
+  const rule = { percent: p.datumPercent, minimum: p.datumMinimum };
 
   texts.forEach((text, li) => {
     const chars = [...text];
@@ -357,8 +410,17 @@ export function layoutPanel(store: LetterStore, p: Project, quick = false): Layo
       return g && g.pair === chars[i - 1] + chars[i] ? kernMm(g.mm, k) : 0;
     };
     const extra = p.lineExtras[String(li)] ?? { letter: 0, word: 0 };
+    // linked[i]: the link at the gap before character i, if it holds. A linked
+    // letter sits where it touches the one before, less the overlap; no
+    // kerning or spacing acts on it.
+    const linked = chars.map((_, i) => linkAt(store, p, li, chars, i));
     chars.forEach((ch, i) => {
       pens.push(pen);
+      const lk = linked[i + 1];
+      if (lk) {
+        pen = pens[i] + store.touch(ch, chars[i + 1])! * k - kernMm(lk.overlap, k);
+        return;
+      }
       pen += (alphabet.letter(ch)?.advance ?? 0.3) * k;
       if (/\s/.test(ch)) pen += extra.word;
       const next = chars[i + 1];
@@ -399,32 +461,75 @@ export function layoutPanel(store: LetterStore, p: Project, quick = false): Layo
     let prev: PlacedLetter | null = null;
     let lastInk: PlacedLetter | null = null;
     let spaceSince = false;
-    chars.forEach((ch, i) => {
-      let m: ReturnType<LetterStore['marks']> = null;
-      try {
-        m = store.marks(ch, k, { percent: p.datumPercent, minimum: p.datumMinimum }, quick);
-      } catch (err) {
-        // Left as a space and named in the problems; the rest of the job carries on.
-        if (!failed.some((f) => f.char === ch && f.line === li)) failed.push({ char: ch, line: li });
-        console.error(`Could not work out “${ch}” on line ${li + 1}:`, err);
-      }
-      if (!m) {
-        prev = null; // a space breaks the run: no gap to kern across it
-        if (/\s/.test(ch)) spaceSince = true;
-        return;
-      }
+    for (let i = 0; i < chars.length; i++) {
+      const ch = chars[i];
+      // Letters linked on from this one make one shape, to the end of the run.
+      let end = i;
+      while (linked[end + 1]) end++;
+      let L: PlacedLetter | null = null;
+      let ready = true;
       const dx = x0 + pens[i];
       const dy = baselineY;
       const move = (c: Contour) => c.map((q) => ({ x: q.x + dx, y: q.y + dy }));
-      const L: PlacedLetter = {
-        char: ch,
-        line: li,
-        pos: i,
-        outline: m.outline.map(move),
-        valleys: m.valleys.map((v) => v.map((q) => ({ x: q.x + dx, y: q.y + dy, r: q.r }))),
-        datum: (m.datum ?? []).map(move),
-        box: { x0: m.box.x0 + dx, x1: m.box.x1 + dx, y0: m.box.y0 + dy, y1: m.box.y1 + dy },
-      };
+      if (end > i) {
+        const run = chars.slice(i, end + 1);
+        try {
+          const r = store.run(run, linked.slice(i + 1, end + 1).map((l) => l!.overlap / KERN_CAP), k, rule, quick, shapes);
+          if (r) {
+            L = {
+              char: run.join(''),
+              line: li,
+              pos: i,
+              span: run.length,
+              outline: r.outline.map(move),
+              valleys: r.valleys.map((v) => v.map((q) => ({ x: q.x + dx, y: q.y + dy, r: q.r }))),
+              datum: (r.datum ?? []).map(move),
+              box: { x0: r.box.x0 + dx, x1: r.box.x1 + dx, y0: r.box.y0 + dy, y1: r.box.y1 + dy },
+              joints: r.joints.map((j) => ({ width: j.width, at: { x: j.at.x + dx, y: j.at.y + dy }, place: j.place, fill: j.fill ? move(j.fill) : null, fills: j.fills.map(move) })),
+              parts: run.map((c, n) => {
+                const b = store.marks(c, k, rule, true)?.box ?? { x0: 0, x1: 0, y0: 0, y1: 0 };
+                const x = x0 + pens[i + n];
+                return { char: c, pos: i + n, box: { x0: b.x0 + x, x1: b.x1 + x, y0: b.y0 + dy, y1: b.y1 + dy } };
+              }),
+            };
+            if (r.pending) shapesPending = true;
+            else if (!r.datum) datumPending = true;
+          }
+        } catch (err) {
+          console.error(`Could not join “${run.join('')}” on line ${li + 1}:`, err);
+        }
+        // Not joined after all: cut as separate letters, where the link put them, and named in the problems.
+        if (!L) {
+          for (let j = i + 1; j <= end; j++) unjoined.push({ pair: chars[j - 1] + chars[j], line: li, key: gapKey(li, j) });
+          end = i;
+        }
+      }
+      if (!L) {
+        let m: ReturnType<LetterStore['marks']> = null;
+        try {
+          m = store.marks(ch, k, rule, quick);
+        } catch (err) {
+          // Left as a space and named in the problems; the rest of the job carries on.
+          if (!failed.some((f) => f.char === ch && f.line === li)) failed.push({ char: ch, line: li });
+          console.error(`Could not work out “${ch}” on line ${li + 1}:`, err);
+        }
+        if (!m) {
+          prev = null; // a space breaks the run: no gap to kern across it
+          if (/\s/.test(ch)) spaceSince = true;
+          continue;
+        }
+        L = {
+          char: ch,
+          line: li,
+          pos: i,
+          span: 1,
+          outline: m.outline.map(move),
+          valleys: m.valleys.map((v) => v.map((q) => ({ x: q.x + dx, y: q.y + dy, r: q.r }))),
+          datum: (m.datum ?? []).map(move),
+          box: { x0: m.box.x0 + dx, x1: m.box.x1 + dx, y0: m.box.y0 + dy, y1: m.box.y1 + dy },
+        };
+        ready = !!m.datum;
+      }
       letters.push(L);
       // A word stop goes in the middle of each word space, between the letters either side.
       if (p.wordStops.on && spaceSince && lastInk) {
@@ -435,15 +540,15 @@ export function layoutPanel(store: LetterStore, p: Project, quick = false): Layo
       line.ink = line.ink
         ? { x0: Math.min(line.ink.x0, L.box.x0), x1: Math.max(line.ink.x1, L.box.x1) }
         : { x0: L.box.x0, x1: L.box.x1 };
-      if (!m.datum) datumPending = true;
+      if (!ready) datumPending = true;
       if (L.box.x0 < box.x0 - 0.01 || L.box.x1 > box.x1 + 0.01) wide = true;
       if (prev) {
-        const pair = prev.char + ch;
-        const pk = pairKerning(p, prev.char, ch);
+        const before = chars[i - 1];
+        const pk = pairKerning(p, before, ch);
         const pairKern = pk.mm;
         const own = gapKern(i);
         gaps.push({
-          pair,
+          pair: before + ch,
           line: li,
           key: gapKey(li, i),
           left: prev,
@@ -451,14 +556,34 @@ export function layoutPanel(store: LetterStore, p: Project, quick = false): Layo
           pairKern,
           pairFrom: pk.from,
           groupKern: pk.groupMm,
-          groupKey: groupPairKey(p.groups, prev.char, ch),
+          groupKey: groupPairKey(p.groups, before, ch),
           gapKern: own,
           kern: round1(pairKern + own),
           x: (prev.box.x1 + L.box.x0) / 2,
+          link: null,
+        });
+      }
+      // The links inside the run: gaps of their own, to select and unlink, but with nothing to kern or measure.
+      for (let j = i + 1; j <= end; j++) {
+        gaps.push({
+          pair: chars[j - 1] + chars[j],
+          line: li,
+          key: gapKey(li, j),
+          left: L,
+          right: L,
+          pairKern: 0,
+          pairFrom: 'none',
+          groupKern: 0,
+          groupKey: groupPairKey(p.groups, chars[j - 1], chars[j]),
+          gapKern: 0,
+          kern: 0,
+          x: L.joints?.[j - i - 1]?.at.x ?? x0 + pens[j],
+          link: { overlap: kernMm(linked[j]!.overlap, k) },
         });
       }
       prev = L;
-    });
+      i = end;
+    }
   });
 
   const inked = lines.filter((l) => l.ink);
@@ -467,7 +592,7 @@ export function layoutPanel(store: LetterStore, p: Project, quick = false): Layo
   const bottom = Math.max(...inked.map((l) => l.baselineY));
   const tall = inked.length > 0 && (top < box.y0 - 0.01 || bottom > box.y1 + 0.01);
 
-  return { project: p, letters, gaps, lines, spacers, overflow: { wide, tall }, datumPending, stops, failed };
+  return { project: p, letters, gaps, lines, spacers, overflow: { wide, tall }, datumPending, stops, failed, shapesPending, unjoined };
 }
 
 /** A line with nothing on it but spaces: a spacer between lettered lines. */

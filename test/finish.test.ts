@@ -159,7 +159,7 @@ describe('problems and their fixes', () => {
   it('letters of two lines that run into each other: open the line spacing just enough', () => {
     const p = proj({ text: 'MOON\nMOON', capHeight: 20, lineSpacing: 15, panelWidth: 200, panelHeight: 100 });
     const l = lay(p);
-    const list = attachFixes(layoutProblems(l, has), triedFixes(l, has, (q) => layoutPanel(store, q, true)));
+    const list = attachFixes(layoutProblems(l, has), triedFixes(l, has, (q) => layoutPanel(store, q, true, 'outline')));
     const fix = list.flatMap((x) => (x.kind === 'collision' ? x.fixes : [])).find((f) => f.id.startsWith('line-spacing:'))!;
     const ls = Number(fix.id.split(':')[1]);
     expect(ls).toBeGreaterThan(15);

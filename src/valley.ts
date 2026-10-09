@@ -35,6 +35,9 @@ export interface ValleyOptions {
   simplifyTol: number;
 }
 
+/** For letters at unit scale (cap height 1): 0.0015 is 0.04 mm on a 25 mm letter. */
+export const letterValleyOptions: ValleyOptions = { step: 0.0015, minAngleDeg: 30, simplifyTol: 0.0001 };
+
 export const defaultValleyOptions: ValleyOptions = {
   step: 0.05,
   minAngleDeg: 30,

@@ -130,6 +130,8 @@ describe('the warnings badge', () => {
       datumPending: false,
       stops: [],
       failed: [],
+      shapesPending: false,
+      unjoined: [],
     };
     const texts = layoutProblems(layout, (ch) => ch !== 'é').map((q) => q.text);
     expect(texts).toContain('Not in the alphabet, so left as a space: é');

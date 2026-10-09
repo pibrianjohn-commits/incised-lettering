@@ -62,7 +62,8 @@ export const SHORTCUTS: { group: string; items: [string, string][] }[] = [
     group: 'Spacing',
     items: [
       ['Click a gap', 'Its spacing controls appear beside it'],
-      ['Alt + ← / →', 'Close or open the gap 0.1 mm'],
+      ['Alt + ← / →', 'Close or open the gap 0.1 mm; on a linked gap, in deeper or not so deep (stops at touching)'],
+      ['L', 'Link the selected gap’s letters into one shape, cut as one letter, or unlink them'],
       ['Alt + Shift + ← / →', 'Close or open it 1 mm'],
       ['Tab / Shift + Tab', 'Next or previous gap'],
     ],

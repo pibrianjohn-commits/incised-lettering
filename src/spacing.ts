@@ -30,7 +30,7 @@ export interface EvenUp {
 
 /** Lay out two letters on their own, with everything else as in the project, and measure the space between them. */
 export function pairArea(store: LetterStore, p: Project, pair: string): number | null {
-  const solo: Project = { ...p, text: pair, lines: {}, lineExtras: {}, gapKerning: {}, wordStops: { ...p.wordStops, on: false } };
+  const solo: Project = { ...p, text: pair, lines: {}, lineExtras: {}, gapKerning: {}, links: {}, wordStops: { ...p.wordStops, on: false } };
   const l = layoutPanel(store, solo, true);
   const g = l.gaps[0];
   if (!g) return null;
@@ -54,11 +54,13 @@ export function evenUp(store: LetterStore, layout: Layout): EvenUp {
   const factor = (s: SideShape) => p.evenUp[s];
   const seen = new Set<string>();
   for (const g of layout.gaps) {
-    if (seen.has(g.pair) || g.pair === ref) continue;
+    // A linked gap has no space to even up (BRIEF.md, Decisions: "Linked letters").
+    if (g.link || seen.has(g.pair) || g.pair === ref) continue;
     seen.add(g.pair);
     const area = pairArea(store, p, g.pair);
     if (area === null) continue;
-    const shapes: [SideShape, SideShape] = [sideShape(g.left.char, 'right'), sideShape(g.right.char, 'left')];
+    const [a, b] = [...g.pair];
+    const shapes: [SideShape, SideShape] = [sideShape(a, 'right'), sideShape(b, 'left')];
     const target = (refArea * (factor(shapes[0]) + factor(shapes[1]))) / 2;
     const change = Math.round(((target - area) / p.capHeight) * 10) / 10;
     if (Math.abs(change) < 0.05) out.even.push(g.pair);

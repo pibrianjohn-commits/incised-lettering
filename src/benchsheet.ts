@@ -209,7 +209,8 @@ function settings(input: SheetInput): [string, string] {
   const m = p.machine;
   const b = p.border;
   const fit = bedFit(p.panelWidth, p.panelHeight);
-  const kerned = L.gaps.filter((g) => g.kern || g.gapKern);
+  const kerned = L.gaps.filter((g) => !g.link && (g.kern || g.gapKern));
+  const linkedGaps = L.gaps.filter((g) => g.link);
   const groups: [string, [string, string][]][] = [
     [
       'Lettering',
@@ -223,7 +224,19 @@ function settings(input: SheetInput): [string, string] {
         [
           'Kerning used',
           kerned.length
-            ? kerned.map((g) => `${esc(g.left.char)} ${esc(g.right.char)} ${signed(g.kern)}${g.gapKern ? ` (this gap ${signed(g.gapKern)})` : ''}`).join(', ')
+            ? kerned.map((g) => `${esc([...g.pair].join(' '))} ${signed(g.kern)}${g.gapKern ? ` (this gap ${signed(g.gapKern)})` : ''}`).join(', ')
+            : 'none',
+        ],
+        [
+          'Linked letters',
+          linkedGaps.length
+            ? linkedGaps
+                .map((g) => {
+                  const joint = g.left.joints?.[Number(g.key.split(':')[1]) - g.left.pos - 1];
+                  const thick = !joint ? '' : joint.width < 0.005 ? 'no wood joining them, ' : `joined ${joint.width.toFixed(2)} mm thick${joint.fill ? ', filled' : ''}, `;
+                  return `${esc([...g.pair].join(' '))} on line ${L.lines[g.line]?.number ?? g.line + 1}, ${thick}overlap ${mm(g.link!.overlap)}`;
+                })
+                .join('; ')
             : 'none',
         ],
       ],

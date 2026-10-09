@@ -70,6 +70,14 @@ export function normaliseProject(raw: unknown): Project {
           .map(([k, g]) => [k, { pair: (g as Loose).pair as string, mm: toKept((g as Loose).mm as number) }]),
       )
     : d.gapKerning;
+  // Linked letters (added 8 Oct 2026; older files have none), kept as at KERN_CAP like hand kerning.
+  const links = isObject(saved.links)
+    ? Object.fromEntries(
+        Object.entries(saved.links)
+          .filter(([, l]) => isObject(l) && typeof l.pair === 'string' && typeof l.overlap === 'number' && Number.isFinite(l.overlap) && l.overlap >= 0)
+          .map(([k, l]) => [k, { pair: (l as Loose).pair as string, overlap: (l as Loose).overlap as number }]),
+      )
+    : d.links;
   return {
     ...d,
     ...saved,
@@ -83,6 +91,7 @@ export function normaliseProject(raw: unknown): Project {
     kerning: kerns(saved.kerning),
     groupKerning: kerns(saved.groupKerning),
     gapKerning: gaps,
+    links,
     kernCap: KERN_CAP,
     spacers: isObject(saved.spacers) ? (Object.fromEntries(Object.entries(saved.spacers).filter(([, v]) => typeof v === 'number' && v >= 0)) as Project['spacers']) : {},
     lines: isObject(saved.lines) ? (saved.lines as Project['lines']) : d.lines,
