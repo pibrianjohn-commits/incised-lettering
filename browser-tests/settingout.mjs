@@ -109,7 +109,7 @@ const labelClashes = (page) =>
   page.evaluate(() => {
     const boxes = (sel) => [...document.querySelectorAll(sel)].map((e) => e.getBoundingClientRect()).filter((r) => r.width > 0);
     const letters = boxes('#world path.fill');
-    const labels = [...document.querySelectorAll('#labels .so-label')].map((t) => ({ text: t.textContent, r: t.getBoundingClientRect(), font: getComputedStyle(t).fontSize }));
+    const labels = [...document.querySelectorAll('#labels .so-label')].map((t) => ({ text: t.textContent, r: t.getBoundingClientRect(), y: Number(t.getAttribute('y')), font: getComputedStyle(t).fontSize }));
     const hit = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
     // A letter's box is the box round its outline: a label beside a letter's slanting side may lie inside that box but not over the letter itself, so the outline is asked too.
     const overLetter = (r) =>
@@ -132,7 +132,9 @@ const labelClashes = (page) =>
       count: labels.length,
       fonts: [...new Set(labels.map((l) => l.font))],
       over: labels.filter((l) => letters.some((b) => hit(l.r, b)) && overLetter(l.r)).map((l) => l.text),
-      close: labels.filter((l, i) => labels.some((m, j) => j !== i && Math.abs((m.r.top + m.r.bottom) / 2 - (l.r.top + l.r.bottom) / 2) < 11.5)).map((l) => l.text),
+      // Each label sits on its line, its 10 px lettering about 10 px from top to tail: no two kept closer than a label is tall (12 px).
+      // (A text's box on screen is no measure of that: Firefox's takes in the light edge round the letters and the font's whole line, 17 to 19 px.)
+      close: labels.filter((l, i) => labels.some((m, j) => j !== i && Math.abs(m.y - l.y) < 11.99)).map((l) => l.text),
       // The widths the labels are placed by (6.3 px a character) are never less than drawn.
       wide: labels.filter((l) => l.r.width > l.text.length * 6.3).map((l) => `${l.text} ${l.r.width.toFixed(1)}px`),
     };
