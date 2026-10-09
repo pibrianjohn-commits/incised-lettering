@@ -5,6 +5,7 @@ import { borderMarks } from './border';
 import { contourToSvg } from './geometry';
 import { balance, lineStats } from './inspect';
 import type { Layout } from './layout';
+import type { LineSet } from './settingout';
 
 export type OverviewMode = 'letters' | 'blocks';
 
@@ -50,10 +51,12 @@ export function overviewViewBox(layout: Layout): string {
 }
 
 const mm = (v: number) => `${v.toFixed(1)}`;
+/** −9.0, with a true minus. */
+const signedMm = (v: number) => `${v < -0.05 ? '−' : ''}${Math.abs(v).toFixed(1)}`;
 
 /** The list of lines, one card per line. */
-export function lineListHtml(layout: Layout, selectedLine: number | null, esc: (s: string) => string): string {
-  const stats = lineStats(layout);
+export function lineListHtml(layout: Layout, selectedLine: number | null, esc: (s: string) => string, sets: LineSet[] = []): string {
+  const stats = lineStats(layout, sets);
   if (!stats.length) return '<p class="hint">No lines yet.</p>';
   return stats
     .map((s) => {
@@ -70,10 +73,19 @@ export function lineListHtml(layout: Layout, selectedLine: number | null, esc: (
         <div class="ln-figs">
           <span title="Length of the letters end to end"><b>${mm(s.length)}</b> mm long</span>
           <span title="Length as a share of the panel width"><b>${s.percentOfPanel.toFixed(0)}%</b> of width</span>
-          <span title="Cap height"><b>${mm(s.capHeight)}</b> cap</span>
           <span title="Left end of the letters, from the panel's left edge"><b>${mm(s.left)}</b> left</span>
           <span title="Baseline, from the panel's top edge"><b>${mm(s.baseline)}</b> baseline</span>
           <span title="How much of the line's band is letter: its colour"><b>${s.colour.toFixed(0)}%</b> colour</span>
+        </div>
+        <div class="ln-figs ln-heights" title="Heights of its setting-out lines above the baseline, mm">
+          <span title="Cap line: the cap height"><b>${mm(s.heights.cap)}</b> cap</span>
+          ${s.heights.x === null ? '' : `<span title="x-height line: its lowercase letters"><b>${mm(s.heights.x)}</b> x</span>`}
+          <span title="Mid line: half the cap height"><b>${mm(s.heights.mid)}</b> mid</span>
+          ${
+            s.heights.descender === null
+              ? '<span title="No letter on this line goes below the baseline">no descender</span>'
+              : `<span title="Descender line: the deepest letter on the line${s.heights.deepest ? `, ${esc(s.heights.deepest)}` : ''}"><b>${signedMm(s.heights.descender)}</b> descender${s.heights.deepest ? ` (${esc(s.heights.deepest)})` : ''}</span>`
+          }
         </div>
       </div>`;
     })

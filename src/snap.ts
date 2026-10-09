@@ -1,11 +1,22 @@
 // Snapping a line while it is dragged: to the panel centre, the margins, the border, the
-// ruler guides, the ends, centres, baselines and cap lines of other lines, and
-// to positions that make the spacing between lines equal.
+// ruler guides, the ends and centres of other lines and their setting-out lines
+// (baseline, cap line, mid line, and x-height, ascender and descender lines
+// where they have them), and to positions that make the spacing between lines
+// equal. Ruler guides and the measure tool snap to the same lines and places.
 
 import { borderDepth, contentBox, type Layout } from './layout';
+import { SET_NAMES, type LineSet, type SetKind } from './settingout';
 
 /** Which part of the moving line a target lines up with. */
-export type Feature = 'left' | 'centre' | 'right' | 'base' | 'cap' | 'mid';
+export type Feature = 'left' | 'centre' | 'right' | 'base' | 'cap' | 'mid' | 'x' | 'asc' | 'desc';
+
+/**
+ * Which of a moving line's own setting-out lines each kind of line snaps:
+ * like to like, and also a line's cap line to another's descender line and
+ * its descender line to another's cap line, so the tails of one line can be
+ * brought just to the capitals of the next.
+ */
+const SNAPS: Record<SetKind, Feature[]> = { cap: ['cap', 'desc'], mid: ['mid'], x: ['x'], asc: ['asc'], base: ['base'], desc: ['desc', 'cap'] };
 
 export interface SnapTarget {
   at: number; // mm
@@ -32,8 +43,19 @@ export function nearest(features: { f: Feature; at: number }[], targets: SnapTar
   return best;
 }
 
-/** Everything the line numbered `index` can snap to. */
-export function snapTargets(layout: Layout, index: number): { x: SnapTarget[]; y: SnapTarget[] } {
+/** The nearest target within `tol` mm of a point (a ruler guide, an end of the measure), whatever the target is for. */
+export function nearestTo(at: number, targets: SnapTarget[], tol: number): SnapTarget | null {
+  let best: SnapTarget | null = null;
+  for (const t of targets) if (Math.abs(t.at - at) <= tol && (!best || Math.abs(t.at - at) < Math.abs(best.at - at))) best = t;
+  return best;
+}
+
+/**
+ * Everything the line numbered `index` can snap to; -1 for no line (a ruler
+ * guide or the measure tool). `sets` are the lines' setting-out lines
+ * (settingout.ts); without them, each line's cap line, mid line and baseline.
+ */
+export function snapTargets(layout: Layout, index: number, sets?: LineSet[]): { x: SnapTarget[]; y: SnapTarget[] } {
   const p = layout.project;
   const k = p.capHeight;
   const box = contentBox(p);
@@ -62,8 +84,12 @@ export function snapTargets(layout: Layout, index: number): { x: SnapTarget[]; y
     x.push({ at: o.ink!.x0, label: `line ${n} left end`, for: ['left'] });
     x.push({ at: (o.ink!.x0 + o.ink!.x1) / 2, label: `line ${n} centre`, for: ['centre'] });
     x.push({ at: o.ink!.x1, label: `line ${n} right end`, for: ['right'] });
-    y.push({ at: o.baselineY, label: `line ${n} baseline`, for: ['base'] });
-    y.push({ at: o.baselineY - k, label: `line ${n} cap line`, for: ['cap'] });
+    const set = sets?.find((q) => q.index === o.index)?.lines ?? [
+      { kind: 'cap' as const, y: o.baselineY - k },
+      { kind: 'mid' as const, y: o.baselineY - k / 2 },
+      { kind: 'base' as const, y: o.baselineY },
+    ];
+    for (const l of set) y.push({ at: l.y, label: `line ${n} ${SET_NAMES[l.kind]}`, for: SNAPS[l.kind] });
   }
 
   // Equal spacing: the same baseline-to-baseline distance as the other lines
@@ -81,6 +107,18 @@ export function snapTargets(layout: Layout, index: number): { x: SnapTarget[]; y
   for (let i = 1; i < bases.length; i++) y.push({ at: (bases[i] + bases[i - 1]) / 2, label: 'equal spacing', for: ['base'] });
 
   return { x, y };
+}
+
+/**
+ * What a ruler guide or an end of the measure snaps to: every line and place
+ * a dragged line snaps to (but equal spacing, which is for lines), less the
+ * guide being moved, if one is.
+ */
+export function pointTargets(layout: Layout, sets: LineSet[], moving?: { axis: 'x' | 'y'; at: number }): { x: SnapTarget[]; y: SnapTarget[] } {
+  const t = snapTargets(layout, -1, sets);
+  const keep = (axis: 'x' | 'y') => (q: SnapTarget) =>
+    q.label !== 'equal spacing' && !(moving && moving.axis === axis && q.label === 'guide' && q.at === moving.at);
+  return { x: t.x.filter(keep('x')), y: t.y.filter(keep('y')) };
 }
 
 function round(v: number) {

@@ -42,12 +42,16 @@ export class PanZoom {
     this.set({ scale: s, tx: sx - (sx - this.v.tx) * f, ty: sy - (sy - this.v.ty) * f });
   }
 
-  /** Show a w × h mm area centred, at `scale` px per mm (or fitted if omitted). */
-  frame(w: number, h: number, scale?: number) {
+  /**
+   * Show a w × h mm area centred, at `scale` px per mm (or fitted if omitted),
+   * with `left` px kept clear on its left for the rulers and line numbers (and
+   * the setting-out lines' labels, when they show), 70 on its right.
+   */
+  frame(w: number, h: number, scale?: number, left = 70) {
     const r = this.el.getBoundingClientRect();
-    // Leave room round the panel for the rulers and line numbers.
-    const s = scale ?? Math.min((r.width - 140) / w, (r.height - 120) / h);
-    this.set({ scale: s, tx: (r.width - w * s) / 2, ty: (r.height - h * s) / 2 });
+    const right = 70;
+    const s = scale ?? Math.min((r.width - left - right) / w, (r.height - 120) / h);
+    this.set({ scale: s, tx: left + (r.width - left - right - w * s) / 2, ty: (r.height - h * s) / 2 });
   }
 
   private onWheel(e: WheelEvent) {

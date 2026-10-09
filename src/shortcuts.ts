@@ -6,6 +6,7 @@ export const SHORTCUTS: { group: string; items: [string, string][] }[] = [
     items: [
       ['1 – 5', 'Write, Space, Panel, Machine, 3D'],
       ['Shift + 1 – 4', 'View: Design, Spacing, Setting-out, Proof'],
+      ['G', 'Setting-out lines: show every kind, or hide them all (a tick for each kind under Layers; each tick is one step to undo)'],
       ['I', 'Show or hide the inspection panel'],
       ['Z', 'Zoom to the whole panel'],
       ['Shift + Z', 'True size'],
@@ -81,8 +82,8 @@ export const SHORTCUTS: { group: string; items: [string, string][] }[] = [
     items: [
       ['Drag', 'Move the view'],
       ['Scroll', 'Zoom in or out at the pointer'],
-      ['Drag from a ruler', 'Make a guide; drag it back to remove it'],
-      ['M, then drag', 'Measure between two points'],
+      ['Drag from a ruler', 'Make a guide; drag it back to remove it. It snaps to the setting-out lines, the panel centre and the margins (Alt: freely)'],
+      ['M, then drag', 'Measure between two points; each end snaps as a guide does (Alt: freely; Shift: level or upright)'],
       ['Drag sideways on a setting’s name', 'Change its value (Shift for ten steps at a time)'],
     ],
   },

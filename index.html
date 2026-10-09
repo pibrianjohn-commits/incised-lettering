@@ -453,7 +453,13 @@
             <label><input type="checkbox" id="show-valley" checked /> <i class="key valley"></i> Valley lines and forks</label>
             <label><input type="checkbox" id="show-fill" /> <i class="key fill"></i> Letters filled solid</label>
             <label><input type="checkbox" id="show-space" /> <i class="key space"></i> Space between letters (mm²)</label>
-            <label><input type="checkbox" id="show-guides" checked /> <i class="key guides"></i> Margin, baselines and cap lines</label>
+            <label><input type="checkbox" id="show-margins" checked /> <i class="key margins"></i> Margins and blank lines</label>
+            <p class="menu-head" title="The lines a letterer rules before drawing the letters: G shows every kind, or hides them all">Setting-out lines <kbd>G</kbd></p>
+            <label class="sub" data-find="Setting-out lines: cap line and baseline"><input type="checkbox" id="show-capbase" checked /> <svg class="key-line" viewBox="0 0 22 6"><line class="so-cap" x1="0" x2="22" y1="3" y2="3"/></svg> Cap line and baseline</label>
+            <label class="sub" data-find="Setting-out lines: mid line"><input type="checkbox" id="show-mid" checked /> <svg class="key-line" viewBox="0 0 22 6"><line class="so-mid" x1="0" x2="22" y1="3" y2="3"/></svg> Mid line</label>
+            <label class="sub" data-find="Setting-out lines: x-height and ascender lines"><input type="checkbox" id="show-xheight" /> <svg class="key-line" viewBox="0 0 22 6"><line class="so-x" x1="0" x2="22" y1="3" y2="3"/></svg> x-height and ascender</label>
+            <label class="sub" data-find="Setting-out lines: descender line"><input type="checkbox" id="show-desc" /> <svg class="key-line" viewBox="0 0 22 6"><line class="so-desc" x1="0" x2="22" y1="3" y2="3"/></svg> Descender</label>
+            <label class="sub" data-find="Setting-out lines: panel centre lines"><input type="checkbox" id="show-centre" /> <svg class="key-line" viewBox="0 0 22 6"><line class="so-centre" x1="0" x2="22" y1="3" y2="3"/></svg> Panel centre</label>
             <label><input type="checkbox" id="show-kerns" /> <i class="key kerns">0.0</i> Kerning value under every gap</label>
             <label><input type="checkbox" id="show-bed" /> <i class="key bed"></i> Machine bed outline</label>
           </div>
@@ -553,6 +559,7 @@
         <h2>Bench sheet</h2>
         <span class="hint small" id="sheet-note"></span>
         <span class="grow"></span>
+        <label class="sheet-tick" title="The cap line, mid line, baseline and the rest, and the panel's centre lines, thin and grey, to mark out on the wood with a rule and a square"><input type="checkbox" id="sheet-lines" checked /> Setting-out lines</label>
         <button id="sheet-print" class="primary">Print…</button>
         <button class="quiet" data-close>Close</button>
       </header>

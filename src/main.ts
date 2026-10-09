@@ -50,8 +50,10 @@ import { oakUrl } from './oak';
 import { History } from './history';
 import { remapForEdit } from './remap';
 import { RULER, rulerSvg } from './rulers';
-import { nearest, snapTargets, type Snap } from './snap';
+import { nearest, nearestTo, pointTargets, snapTargets, type Feature, type Snap, type SnapTarget } from './snap';
+import { lineSets, panelCentre, placeLabels, type LineSet, type SetKind } from './settingout';
 import { PanZoom, type ViewState } from './view';
+import { LAYERS, PRESET_KEYS, PRESETS, SETTING_OUT, STAGE_VIEWS, viewsFromBefore, type Layer, type PresetName, type StageView } from './views';
 
 // ---------------------------------------------------------------- state
 
@@ -111,14 +113,21 @@ const v3d = {
 let alphabetName = '';
 /** The gap under the pointer, for keyboard kerning without clicking first. */
 let hovered: { line: number; n: number } | null = null;
-const history = new History<Project>();
+/**
+ * One step to undo: a change to the job, or to what a stage shows (a tick
+ * under Layers, a view preset, G): each is one step.
+ */
+type Step = { project: Project } | { view: { stage: Stage; was: StageView } };
+const history = new History<Step>();
 /** Pointer position over the workspace (px), for the ruler markers. */
 let pointer: { x: number; y: number } | null = null;
 /** Measure tool: on or off, and the two ends of the measurement in mm. */
 let measuring = false;
 let measure: { a: { x: number; y: number }; b: { x: number; y: number } } | null = null;
 /** A guide being dragged: which way it runs and where it is now (mm), or null when over a ruler. */
-let guideDrag: { axis: 'x' | 'y'; index: number; at: number | null } | null = null;
+let guideDrag: { axis: 'x' | 'y'; index: number; at: number | null; snap: SnapTarget | null } | null = null;
+/** What the ends of the measure have snapped to while it is drawn, each way. */
+let measureSnaps: { x: SnapTarget | null; y: SnapTarget | null }[] = [];
 /** The selected line (0 = first), or null. */
 let selectedLine: number | null = null;
 /** The selected blank line (its place in the text), or null. */
@@ -265,6 +274,7 @@ function buildControls() {
   for (const layer of LAYERS) {
     const cb = $<HTMLInputElement>(`show-${layer}`);
     cb.addEventListener('change', () => {
+      recordView(); // each tick is one step to undo
       setPreset(null); // fine control: no preset is exactly what's showing now
       syncLayers();
       rememberView();
@@ -308,7 +318,7 @@ function buildControls() {
 
   // View.
   $('fit').addEventListener('click', fitPanel);
-  $('true-size').addEventListener('click', () => view.frame(project.panelWidth, project.panelHeight, pxPerMm()));
+  $('true-size').addEventListener('click', () => frameView(pxPerMm()));
 
   // Calibration.
   const cal = $<HTMLInputElement>('cal');
@@ -326,7 +336,7 @@ function buildControls() {
  * alone. Changes with the same `group` in quick succession undo as one step.
  */
 function update(change: Partial<Project>, source?: Element, group: string | null = null) {
-  if (!batch) history.record(project, group);
+  if (!batch) history.record({ project }, group);
   project = { ...project, ...change };
   refreshUndoButtons();
   showFileName();
@@ -519,13 +529,13 @@ function draw() {
     if (bm.datum.length) out.push(`<path class="datum" d="${bm.datum.map(contourToSvg).join('')}"/>`);
     out.push(`<path class="valley" d="${bm.valleys.map(polylineToSvg).join('')}"/>`);
   }
-  out.push('<g class="guides">');
-  for (const line of L.lines) {
-    if (!line.ink) continue; // a blank line is drawn as its spacer instead
-    for (const y of [line.baselineY, line.baselineY - p.capHeight]) {
-      out.push(`<line x1="0" x2="${p.panelWidth}" y1="${fmt(y)}" y2="${fmt(y)}"/>`);
-    }
-  }
+  // The setting-out lines of each lettered line (a blank line is drawn as its spacer instead), and the panel's centre lines.
+  sets = store ? lineSets(L, store.alphabet.heights) : [];
+  out.push('<g class="setting-out">');
+  for (const set of sets)
+    for (const l of set.lines) out.push(`<line class="so-${l.kind}" x1="0" x2="${p.panelWidth}" y1="${fmt(l.y)}" y2="${fmt(l.y)}"/>`);
+  const centre = panelCentre(L);
+  out.push(`<path class="so-centre" d="M${fmt(centre.x)} 0V${p.panelHeight}M0 ${fmt(centre.y)}H${p.panelWidth}"/>`);
   out.push('</g>');
 
   // Blank lines: spacers, each with a handle along its bottom edge to drag its height.
@@ -628,6 +638,14 @@ function draw() {
 }
 
 let labelData: { spaces: ReturnType<typeof negativeSpace>[]; gaps: Gap[] } = { spaces: [], gaps: [] };
+/** Each lettered line's setting-out lines, as last drawn (settingout.ts). */
+let sets: LineSet[] = [];
+
+/** Which kinds of setting-out line are ticked under Layers. */
+function settingOutShown(kind: SetKind): boolean {
+  const tick: Record<SetKind, Layer> = { cap: 'capbase', base: 'capbase', mid: 'mid', x: 'xheight', asc: 'xheight', desc: 'desc' };
+  return $<HTMLInputElement>(`show-${tick[kind]}`).checked;
+}
 
 /** Things drawn at a fixed size on screen: labels and the kerning box. */
 function applyView() {
@@ -701,6 +719,27 @@ function applyView() {
         `<rect x="${(numX - w).toFixed(1)}" y="${(y - 10).toFixed(1)}" width="${w}" height="20" rx="4"/>` +
         `<text x="${(numX - w / 2).toFixed(1)}" y="${(y + 4).toFixed(1)}">${line.number}${mark}</text></g>`,
     );
+  }
+  // The setting-out lines' labels, at their left ends beside the line numbers, never over the letters.
+  if (layout && !cam) {
+    const screen = (b: { x0: number; y0: number; x1: number; y1: number }) => ({ x0: sx(b.x0), x1: sx(b.x1), y0: sy(b.y0), y1: sy(b.y1) });
+    const placed = placeLabels(sets, settingOutShown, {
+      sy,
+      column: (set) => {
+        const line = layout!.lines[set.index];
+        const w = line?.locked || line?.placed ? 36 : 24;
+        return { end: numX - w - 5, start: numX + 5 };
+      },
+      minX: RULER + 3,
+      avoid: [...layout.letters.map((t) => t.box), ...layout.stops.map((t) => boxAround(t.outline))].map(screen),
+      height: 12,
+      charWidth: 6.3,
+    });
+    for (const t of placed) {
+      const over = t.box.x1 > sx(0) ? ' over' : ''; // on the board, where there is no room beside it
+      if (over) out.push(`<rect class="so-back" x="${(t.box.x0 - 2).toFixed(1)}" y="${(t.box.y0 + 1).toFixed(1)}" width="${(t.box.x1 - t.box.x0 + 4).toFixed(1)}" height="${(t.box.y1 - t.box.y0 - 2).toFixed(1)}" rx="2"/>`);
+      out.push(`<text class="so-label so-${t.kind} ${t.anchor}${over}" x="${t.x.toFixed(1)}" y="${t.y.toFixed(1)}" dy="0.35em">${esc(t.text)}</text>`);
+    }
   }
   if (cam) out.push(camLabels(sx, sy));
   labels.innerHTML = out.join('');
@@ -845,30 +884,48 @@ function showKerningSummary() {
 }
 
 function fitPanel() {
-  view.frame(project.panelWidth, project.panelHeight);
+  frameView();
+}
+
+/** The whole panel on screen (or at a scale), with room on its left for the line numbers and the setting-out lines' labels when they show. */
+function frameView(scale?: number) {
+  const labelled = SETTING_OUT.some((l) => l !== 'centre' && $<HTMLInputElement>(`show-${l}`).checked);
+  view.frame(project.panelWidth, project.panelHeight, scale, labelled ? 150 : 70);
 }
 
 // ---------------------------------------------------------------- view presets
 
-const LAYERS = ['outline', 'datum', 'valley', 'fill', 'space', 'guides', 'kerns', 'bed'] as const;
-type Layer = (typeof LAYERS)[number];
-type PresetName = 'design' | 'spacing' | 'setting' | 'proof';
-const PRESET_KEYS: PresetName[] = ['design', 'spacing', 'setting', 'proof'];
+// The layers, presets and what each stage opens with are in views.ts.
 
-/** Which layers each view preset shows. */
-const PRESETS: Record<PresetName, Layer[]> = {
-  design: ['fill'], // letters filled solid, nothing else
-  spacing: ['fill', 'space'], // letters plus shaded spaces and their areas
-  setting: ['outline', 'datum', 'valley'], // the marks the machine will make
-  proof: ['fill'], // clean letters on the panel, as a client would see them
-};
-
+/** Show a view preset: one step to undo. */
 function applyPreset(name: PresetName) {
+  recordView();
   for (const layer of LAYERS) $<HTMLInputElement>(`show-${layer}`).checked = PRESETS[name].includes(layer);
   setPreset(name);
   syncLayers();
   rememberView();
   draw();
+}
+
+/** Keep what this stage shows now, as one step to undo, before a tick, a preset or G changes it. */
+function recordView() {
+  if (stage === '3d') return;
+  history.record({ view: { stage, was: viewOf(stage) } });
+  refreshUndoButtons();
+}
+
+/** G: every kind of setting-out line, or, if any is showing, none. One step to undo. */
+function toggleSettingOut() {
+  if (stage === '3d') return;
+  const boxes = SETTING_OUT.map((l) => $<HTMLInputElement>(`show-${l}`));
+  const on = !boxes.some((b) => b.checked);
+  recordView();
+  for (const b of boxes) b.checked = on;
+  setPreset(null);
+  syncLayers();
+  rememberView();
+  draw();
+  say(on ? 'Every setting-out line shown (G hides them).' : 'Setting-out lines hidden (G shows them again).');
 }
 
 let preset: PresetName | null = null;
@@ -887,19 +944,15 @@ function syncLayers() {
   for (const layer of LAYERS) work.classList.toggle(`hide-${layer}`, !$<HTMLInputElement>(`show-${layer}`).checked);
 }
 
-/**
- * What each stage shows when it is opened, until the carver changes it there
- * (BRIEF.md, Decisions: the interface). Each stage then remembers its own.
- */
-const STAGE_VIEWS: Record<Stage, { preset: PresetName | null; layers: Layer[] }> = {
-  write: { preset: null, layers: ['fill', 'guides'] }, // the letters, with the lines they sit on
-  space: { preset: 'spacing', layers: PRESETS.spacing },
-  panel: { preset: null, layers: ['fill', 'guides'] }, // the letters, with the margins
-  machine: { preset: 'setting', layers: PRESETS.setting },
-  '3d': { preset: null, layers: [] },
-};
-const VIEWS_KEY = 'incised.stageViews';
-let stageViews: Partial<Record<Stage, { preset: PresetName | null; layers: Layer[] }>> = readJson(VIEWS_KEY) ?? {};
+// What each stage shows, as the carver last left it there (else as it opens: STAGE_VIEWS).
+// Views remembered before the setting-out lines (9 Oct 2026) are brought over once.
+const VIEWS_KEY = 'incised.views';
+let stageViews: Partial<Record<Stage, StageView>> = readJson(VIEWS_KEY) ?? viewsFromBefore(readJson('incised.stageViews'));
+
+/** What a stage shows now. */
+function viewOf(s: Stage): StageView {
+  return stageViews[s] ?? STAGE_VIEWS[s];
+}
 
 function rememberView() {
   if (stage === '3d') return;
@@ -908,10 +961,19 @@ function rememberView() {
 }
 
 function showStageView(s: Stage) {
-  const v = stageViews[s] ?? STAGE_VIEWS[s];
+  const v = viewOf(s);
   for (const layer of LAYERS) $<HTMLInputElement>(`show-${layer}`).checked = v.layers.includes(layer);
   setPreset(v.preset);
   syncLayers();
+}
+
+/** Put a stage's view back as it was (undo and redo), on screen if it is the stage open. */
+function setStageViewTo(s: Stage, v: StageView) {
+  stageViews[s] = v;
+  writeJson(VIEWS_KEY, stageViews);
+  if (s !== stage) return;
+  showStageView(s);
+  draw();
 }
 
 // ---------------------------------------------------------------- keys, undo
@@ -981,7 +1043,7 @@ function onKey(e: KeyboardEvent) {
     spreadLine(e.code === 'BracketLeft' ? -1 : 1, e.shiftKey ? 1 : 0.1);
   } else if (!e.altKey && e.key.toLowerCase() === 'z') {
     // Z shows the whole panel; Shift+Z true size.
-    if (e.shiftKey) view.frame(project.panelWidth, project.panelHeight, pxPerMm());
+    if (e.shiftKey) frameView(pxPerMm());
     else fitPanel();
   } else if (e.key === 'Tab' && (target === document.body || target.closest('#work'))) {
     // Step through the gaps in reading order.
@@ -1027,18 +1089,33 @@ function onKey(e: KeyboardEvent) {
   } else if (!e.altKey && e.key.toLowerCase() === 'p') {
     // P marks the next problem on the panel; Shift+P the one before.
     stepProblem(e.shiftKey ? -1 : 1);
+  } else if (!e.altKey && !e.shiftKey && e.key.toLowerCase() === 'g') {
+    // G shows every kind of setting-out line, or hides them all.
+    toggleSettingOut();
   } else return;
   e.preventDefault();
 }
 
 function undo() {
-  const prev = history.undo(project);
-  if (prev) restore(prev);
+  const prev = history.undo(nowFor);
+  if (prev) restoreStep(prev, 'Undone');
 }
 
 function redo() {
-  const next = history.redo(project);
-  if (next) restore(next);
+  const next = history.redo(nowFor);
+  if (next) restoreStep(next, 'Redone');
+}
+
+/** The state now of whatever a step changed, to go back to by redo (or undo). */
+function nowFor(s: Step): Step {
+  return 'view' in s ? { view: { stage: s.view.stage, was: viewOf(s.view.stage) } } : { project };
+}
+
+function restoreStep(s: Step, done: string) {
+  if ('project' in s) return restore(s.project);
+  setStageViewTo(s.view.stage, s.view.was);
+  refreshUndoButtons();
+  if (s.view.stage !== stage) say(`${done} in ${STAGE_NAMES[s.view.stage]}: what it shows.`);
 }
 
 function restore(p: Project) {
@@ -1093,19 +1170,36 @@ function wireTools() {
       if (!measuring || e.button !== 0) return;
       if ((e.target as Element).closest('#viewbar, .ctx, .ruler, #ruler-corner, #cam-bar')) return;
       e.stopPropagation(); // don't pan
-      const a = toMm(e.clientX, e.clientY);
+      // Each end snaps, across and down, to the setting-out lines and every place a line snaps to (Alt, or S, for none).
+      const targets = layout ? pointTargets(layout, sets) : { x: [], y: [] };
+      const snapEnd = (q: { x: number; y: number }, free: boolean, keep?: 'x' | 'y') => {
+        const tol = 8 / view.v.scale;
+        const sn = {
+          x: free || keep === 'x' ? null : nearestTo(q.x, targets.x, tol),
+          y: free || keep === 'y' ? null : nearestTo(q.y, targets.y, tol),
+        };
+        return { at: { x: sn.x?.at ?? q.x, y: sn.y?.at ?? q.y }, sn };
+      };
+      const start = snapEnd(toMm(e.clientX, e.clientY), !snapping || e.altKey);
+      const a = start.at;
       measure = { a, b: a };
+      measureSnaps = [start.sn];
       work.setPointerCapture(e.pointerId);
       const move = (m: PointerEvent) => {
         let b = toMm(m.clientX, m.clientY);
         // Shift keeps the measurement level or upright.
-        if (m.shiftKey) b = Math.abs(b.x - a.x) > Math.abs(b.y - a.y) ? { x: b.x, y: a.y } : { x: a.x, y: b.y };
-        measure = { a, b };
+        const level = Math.abs(b.x - a.x) > Math.abs(b.y - a.y);
+        if (m.shiftKey) b = level ? { x: b.x, y: a.y } : { x: a.x, y: b.y };
+        const end = snapEnd(b, !snapping || m.altKey, m.shiftKey ? (level ? 'y' : 'x') : undefined);
+        measure = { a, b: end.at };
+        measureSnaps = [start.sn, end.sn];
         drawOverlay();
       };
       const up = () => {
         work.removeEventListener('pointermove', move);
         work.removeEventListener('pointerup', up);
+        measureSnaps = [];
+        drawOverlay();
       };
       work.addEventListener('pointermove', move);
       work.addEventListener('pointerup', up);
@@ -1166,10 +1260,21 @@ function startGuideDrag(axis: 'x' | 'y', index: number, e: PointerEvent) {
   e.preventDefault();
   const el = e.currentTarget as HTMLElement;
   el.setPointerCapture(e.pointerId);
-  const at = (m: PointerEvent) => (overRuler(m.clientX, m.clientY) ? null : round(toMm(m.clientX, m.clientY)[axis], 1));
-  guideDrag = { axis, index, at: index >= 0 ? project.guides[axis][index] : null };
+  // A guide snaps to the setting-out lines and every place a line snaps to (Alt, or S, for none).
+  const was = index >= 0 ? project.guides[axis][index] : null;
+  const targets = layout ? pointTargets(layout, sets, was === null ? undefined : { axis, at: was })[axis] : [];
+  let snap: SnapTarget | null = null;
+  const at = (m: PointerEvent) => {
+    snap = null;
+    if (overRuler(m.clientX, m.clientY)) return null;
+    const raw = toMm(m.clientX, m.clientY)[axis];
+    if (snapping && !m.altKey) snap = nearestTo(raw, targets, 8 / view.v.scale);
+    return snap ? round(snap.at, 3) : round(raw, 1);
+  };
+  guideDrag = { axis, index, at: was, snap: null };
   const move = (m: PointerEvent) => {
-    guideDrag = { axis, index, at: at(m) };
+    const where = at(m);
+    guideDrag = { axis, index, at: where, snap };
     drawOverlay();
   };
   const up = (u: PointerEvent) => {
@@ -1197,12 +1302,12 @@ function drawOverlay() {
   const sx = (x: number) => (v.tx + x * v.scale).toFixed(1);
   const sy = (y: number) => (v.ty + y * v.scale).toFixed(1);
   const out: string[] = [];
-  const guide = (axis: 'x' | 'y', at: number, attr: string, live: boolean) => {
+  const guide = (axis: 'x' | 'y', at: number, attr: string, live: boolean, snap: SnapTarget | null = null) => {
     const c = axis === 'x' ? sx(at) : sy(at);
     const pos = axis === 'x' ? `x1="${c}" x2="${c}" y1="0" y2="${r.height}"` : `y1="${c}" y2="${c}" x1="0" x2="${r.width}"`;
     out.push(`<g class="guide${live ? ' live' : ''}" ${attr}><line class="hit" ${pos}/><line ${pos}/></g>`);
     if (live) {
-      const label = `${axis === 'x' ? 'across' : 'down'} ${at.toFixed(1)} mm`;
+      const label = `${axis === 'x' ? 'across' : 'down'} ${at.toFixed(1)} mm${snap ? ` · ${snap.label}` : ''}`;
       const lx = axis === 'x' ? Number(c) + 6 : RULER + 6;
       const ly = axis === 'x' ? RULER + 16 : Number(c) - 6;
       out.push(`<text class="guide-label" x="${lx}" y="${ly}">${label}</text>`);
@@ -1214,7 +1319,7 @@ function drawOverlay() {
       guide(axis, at, `data-guide="${axis}:${i}"`, false);
     });
   }
-  if (guideDrag && guideDrag.at !== null) guide(guideDrag.axis, guideDrag.at, '', true);
+  if (guideDrag && guideDrag.at !== null) guide(guideDrag.axis, guideDrag.at, '', true, guideDrag.snap);
 
   if (measure) {
     const { a, b } = measure;
@@ -1243,6 +1348,24 @@ function drawOverlay() {
       out.push(
         `<g class="snap"><line y1="${c}" y2="${c}" x1="${sx(-4)}" x2="${sx(p.panelWidth + 4)}"/>` +
           `<text x="${Number(sx(p.panelWidth)) - 6}" y="${Number(c) - 5}" text-anchor="end">${esc(lineSnaps.y.target.label)}</text></g>`,
+      );
+    }
+  }
+  // What the ends of the measure snap to while it is drawn.
+  for (const m of measureSnaps) {
+    const p = project;
+    if (m.x) {
+      const c = sx(m.x.at);
+      out.push(
+        `<g class="snap"><line x1="${c}" x2="${c}" y1="${sy(-4)}" y2="${sy(p.panelHeight + 4)}"/>` +
+          `<text x="${Number(c) + 5}" y="${Number(sy(0)) - 6}">${esc(m.x.label)}</text></g>`,
+      );
+    }
+    if (m.y) {
+      const c = sy(m.y.at);
+      out.push(
+        `<g class="snap"><line y1="${c}" y2="${c}" x1="${sx(-4)}" x2="${sx(p.panelWidth + 4)}"/>` +
+          `<text x="${Number(sx(p.panelWidth)) - 6}" y="${Number(c) - 5}" text-anchor="end">${esc(m.y.label)}</text></g>`,
       );
     }
   }
@@ -1373,7 +1496,7 @@ function onLineEndPress(e: PointerEvent, side: 'left' | 'right') {
         delete lineExtras[String(line.index)];
         project = { ...project, lineExtras };
       }
-      history.record(before);
+      history.record({ project: before });
       refreshUndoButtons();
       syncControls();
       saveProject();
@@ -1411,8 +1534,9 @@ function onLinePress(e: PointerEvent) {
   const before = project;
   const p0 = placementOf(line);
   const ink = line.ink!;
-  const k = project.capHeight;
-  const targets = snapTargets(layout, index);
+  const targets = snapTargets(layout, index, sets);
+  // The line's own setting-out lines, each snapping to its like on the other lines (snap.ts).
+  const own = sets.find((q) => q.index === index)?.lines ?? [];
   let dragging = false;
 
   const move = (m: PointerEvent) => {
@@ -1441,11 +1565,7 @@ function onLinePress(e: PointerEvent) {
         tol,
       );
       sy = nearest(
-        [
-          { f: 'base', at: line.baselineY + dy },
-          { f: 'cap', at: line.baselineY - k + dy },
-          { f: 'mid', at: line.baselineY - k / 2 + dy },
-        ],
+        own.map((l) => ({ f: l.kind as Feature, at: l.y + dy })),
         targets.y,
         tol,
       );
@@ -1464,7 +1584,7 @@ function onLinePress(e: PointerEvent) {
     lineSnaps = null;
     if (dragging) {
       // The whole drag is one step to undo.
-      if (project !== before) history.record(before);
+      if (project !== before) history.record({ project: before });
       refreshUndoButtons();
       saveProject();
       relayout();
@@ -1596,7 +1716,7 @@ function onSpacerPress(e: PointerEvent) {
     work.removeEventListener('pointercancel', up);
     work.classList.remove('dragging-spacer');
     if (project !== before) {
-      history.record(before);
+      history.record({ project: before });
       refreshUndoButtons();
       saveProject();
       showFileName();
@@ -1906,7 +2026,7 @@ function onPicturePress(e: PointerEvent) {
     work.removeEventListener('pointerup', up);
     work.removeEventListener('pointercancel', up);
     if (project !== before) {
-      history.record(before);
+      history.record({ project: before });
       refreshUndoButtons();
       saveProject();
     }
@@ -1990,7 +2110,7 @@ function drawInspector() {
   const ov = $<SVGSVGElement>('overview');
   ov.setAttribute('viewBox', overviewViewBox(layout));
   ov.innerHTML = overviewSvg(layout, ovMode, selectedLine);
-  $('line-list').innerHTML = lineListHtml(layout, selectedLine, esc);
+  $('line-list').innerHTML = lineListHtml(layout, selectedLine, esc, sets);
   $('balance').innerHTML = balanceHtml(layout);
   updateOverviewView();
 }
@@ -3144,12 +3264,21 @@ function wireChrome() {
     });
   }
   $('sheet-print').addEventListener('click', printSheet);
+  // The sheet's own tick for the setting-out lines: off, the sheet is drawn without them.
+  $<HTMLInputElement>('sheet-lines').addEventListener('change', (e) => {
+    try {
+      localStorage.setItem(SHEET_LINES_KEY, (e.target as HTMLInputElement).checked ? '1' : '0');
+    } catch {
+      /* not remembered */
+    }
+    showSheet();
+  });
   window.addEventListener('beforeprint', fillPrint);
 
   // Status bar.
   $('zoom-in').addEventListener('click', () => zoomBy(1.25));
   $('zoom-out').addEventListener('click', () => zoomBy(0.8));
-  $('zoom-read').addEventListener('click', () => view.frame(project.panelWidth, project.panelHeight, pxPerMm()));
+  $('zoom-read').addEventListener('click', () => frameView(pxPerMm()));
   $('st-snap').addEventListener('click', () => setSnapping(!snapping));
   setSnapping(snapping);
   $('st-warn').addEventListener('click', () => {
@@ -3185,7 +3314,7 @@ function wireChrome() {
       batch = { before: project };
     },
     end: () => {
-      if (batch && project !== batch.before) history.record(batch.before);
+      if (batch && project !== batch.before) history.record({ project: batch.before });
       batch = null;
       refreshUndoButtons();
     },
@@ -3769,7 +3898,15 @@ function makeSheet(wait = false) {
   const strokes =
     passes.find((q) => q.name === 'slit') ?? buildPasses(l, { ...p.machine, passes: { hairline: false, datum: false, slit: true } })[0] ?? null;
   const checks = checkPasses(l, passes, p.machine, bedFit(p.panelWidth, p.panelHeight));
-  return benchSheet({ project: p, layout: l, strokes, passes, checks, alphabet: alphabetName, fileName: file?.name ?? null, date: new Date() });
+  // The setting-out lines, to mark out on the wood with a rule and a square, unless the sheet's tick is off.
+  const settingOut = sheetLines() ? { sets: lineSets(l, store.alphabet.heights), centre: panelCentre(l) } : null;
+  return benchSheet({ project: p, layout: l, strokes, passes, checks, alphabet: alphabetName, fileName: file?.name ?? null, date: new Date(), settingOut });
+}
+
+const SHEET_LINES_KEY = 'incised.sheetLines';
+/** The bench sheet's tick for the setting-out lines (on unless turned off there). */
+function sheetLines(): boolean {
+  return readNumber(SHEET_LINES_KEY, 1, 0, 1) === 1;
 }
 
 function showSheet() {
@@ -3778,7 +3915,9 @@ function showSheet() {
   closeMenus();
   $('sheet-paper').innerHTML = sh.html;
   $('sheet-note').textContent = `A4 ${sh.orientation}, drawn ${scaleName(sh.scale)}. Print at 100% (not “fit to page”) so the scale is true.`;
-  $<HTMLDialogElement>('sheet-view').showModal();
+  $<HTMLInputElement>('sheet-lines').checked = sheetLines();
+  const dlg = $<HTMLDialogElement>('sheet-view');
+  if (!dlg.open) dlg.showModal();
 }
 
 /** Put the bench sheet where printing picks it up (it is the only thing printed). */
@@ -3835,7 +3974,7 @@ function commands(): Command[] {
   for (const layer of LAYERS) {
     const cb = $<HTMLInputElement>(`show-${layer}`);
     add(
-      `${cb.checked ? 'Hide' : 'Show'}: ${cb.closest('label')!.textContent!.trim()}`,
+      `${cb.checked ? 'Hide' : 'Show'}: ${(cb.closest('label')!.dataset.find ?? cb.closest('label')!.textContent!).trim()}`,
       () => {
         cb.checked = !cb.checked;
         cb.dispatchEvent(new Event('change'));
@@ -3844,6 +3983,7 @@ function commands(): Command[] {
       'layer draw',
     );
   }
+  add('Setting-out lines: show every kind, or hide them all', toggleSettingOut, 'G', 'cap line baseline mid line x-height ascender descender panel centre guides rule');
   add('Undo', undo, 'Ctrl+Z');
   add('Redo', redo, 'Ctrl+Shift+Z');
   add('New: start again with OAK', newProject, 'File', 'clear reset');
@@ -3855,7 +3995,7 @@ function commands(): Command[] {
   add(measuring ? 'Stop measuring' : 'Measure between two points', () => setMeasuring(!measuring), 'M', 'ruler distance');
   add(`${inspectOpen ? 'Hide' : 'Show'} the inspection panel`, () => setInspect(!inspectOpen), 'I', 'overview balance');
   add(`Turn snapping ${snapping ? 'off' : 'on'}`, () => setSnapping(!snapping), 'S');
-  add('True size', () => view.frame(project.panelWidth, project.panelHeight, pxPerMm()), 'Shift+Z', 'full size zoom view');
+  add('True size', () => frameView(pxPerMm()), 'Shift+Z', 'full size zoom view');
   add('Zoom to panel', fitPanel, 'Z', 'whole panel screen view');
   add('Fit the panel to the lettering', fitPanelToLettering, 'Shift+F', 'size board');
   add('Fit the lettering to the panel', () => fitLettering('both'), 'F', 'scale size fill');
@@ -4039,6 +4179,12 @@ function readNumber(key: string, fallback: number, min: number, max: number) {
   } catch {
     return fallback;
   }
+}
+
+/** The box round some outlines, mm. */
+function boxAround(contours: Contour[]) {
+  const pts = contours.flat();
+  return { x0: Math.min(...pts.map((q) => q.x)), x1: Math.max(...pts.map((q) => q.x)), y0: Math.min(...pts.map((q) => q.y)), y1: Math.max(...pts.map((q) => q.y)) };
 }
 
 function round(v: number, places: number) {

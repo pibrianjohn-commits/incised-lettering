@@ -3,6 +3,7 @@
 
 import type { Contour } from './geometry';
 import type { Layout, PlacedLetter } from './layout';
+import type { LineSet } from './settingout';
 
 export interface LineStats {
   index: number;
@@ -21,6 +22,12 @@ export interface LineStats {
   colour: number;
   placed: boolean;
   locked: boolean;
+  /**
+   * Its setting-out lines' heights above the baseline, mm (settingout.ts): the
+   * x-height and descender only where it has those lines (the descender
+   * negative, below the baseline), with the character that goes deepest.
+   */
+  heights: { cap: number; x: number | null; mid: number; descender: number | null; deepest: string | null };
 }
 
 export interface Balance {
@@ -57,7 +64,7 @@ export function letterArea(l: PlacedLetter): number {
   return areaAndCentroid(l.outline).area;
 }
 
-export function lineStats(layout: Layout): LineStats[] {
+export function lineStats(layout: Layout, sets: LineSet[] = []): LineStats[] {
   const p = layout.project;
   const k = p.capHeight;
   return layout.lines
@@ -65,6 +72,8 @@ export function lineStats(layout: Layout): LineStats[] {
     .map((l) => {
       const length = l.ink!.x1 - l.ink!.x0;
       const ink = layout.letters.filter((t) => t.line === l.index).reduce((s, t) => s + letterArea(t), 0);
+      const set = sets.find((q) => q.index === l.index);
+      const height = (kind: 'x' | 'desc') => set?.lines.find((q) => q.kind === kind)?.height ?? null;
       return {
         index: l.index,
         number: l.number ?? l.index + 1,
@@ -77,6 +86,7 @@ export function lineStats(layout: Layout): LineStats[] {
         colour: length > 0 ? (100 * ink) / (length * k) : 0,
         placed: l.placed,
         locked: l.locked,
+        heights: { cap: k, x: height('x'), mid: k / 2, descender: height('desc'), deepest: set?.deepest ?? null },
       };
     });
 }
