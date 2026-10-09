@@ -317,10 +317,39 @@ describe('the joint, measured as wood and filled', () => {
     }
   });
 
-  it('where an S’s tail divides into its body and the beak at its tip, the joint is read through the body (O and S)', () => {
+  it('where an S’s tail divides into its body and the beak at its tip, the joint is read through the body (O and S), and is not filled', () => {
     const [a, b] = ['O', 'S'].map((c) => store.alphabet.letter(c)!.contours);
     const t = touchAdvance(a, b)!;
-    expect(unitRun([a, b], [LINK_OVERLAP / 25], () => t, THIN_JOINT / 25)!.joints[0].width * 25).toBeGreaterThan(3);
+    const j = unitRun([a, b], [LINK_OVERLAP / 25], () => t, THIN_JOINT / 25)!.joints[0];
+    expect(j.width * 25).toBeGreaterThan(3);
+    expect(j.fills).toEqual([]);
+  });
+
+  it('linked deep, a fill stays a short block at the join: none where the letters already run into each other thick enough, none slanting up a stroke', () => {
+    const run = (pair: string, mm: number) => {
+      const [a, b] = [...pair].map((c) => store.alphabet.letter(c)!.contours);
+      const t = touchAdvance(a, b)!;
+      return unitRun([a, b], [mm / 25], () => t, THIN_JOINT / 25)!;
+    };
+    // Found 9 Oct 2026: a round letter and a diagonal linked 2 to 3 mm deep run into each other along a long
+    // crescent, already 1.1 to 1.8 mm thick across, and were given a fill 10 or 11 mm long that ran out across
+    // a counter; and a Y against a 4 or 1 a block slanting nearly the height of the letter.
+    for (const [pair, mm] of [['XO', 3.3], ['DX', 2.3], ['DX', 2.8], ['QX', 2.8], ['YG', 1.8], ['AV', 2.8], ['CH', 2.8], ['FN', 2.3], ['Y4', 2.3], ['Y4', 2.8], ['Y1', 1.8]] as const) {
+      const j = run(pair, mm).joints[0];
+      for (const f of j.fills) {
+        const xs = f.map((p) => p.x);
+        const ys = f.map((p) => p.y);
+        expect((Math.max(...xs) - Math.min(...xs)) * 25, `${pair} at ${mm} mm`).toBeLessThan(5);
+        expect((Math.max(...ys) - Math.min(...ys)) * 25, `${pair} at ${mm} mm`).toBeLessThan(2);
+      }
+    }
+    for (const [pair, mm] of [['XO', 3.3], ['AV', 2.8], ['YG', 1.8]] as const) {
+      const j = run(pair, mm).joints[0];
+      expect(j.fills, `${pair} at ${mm} mm`).toEqual([]);
+      expect(j.width * 25, `${pair} at ${mm} mm`).toBeGreaterThan(1);
+    }
+    // Where no short block can make it, the joint stays thin, for the problems list (rule 6).
+    expect(run('Y4', 2.3).joints[0].width * 25).toBeLessThan(0.6);
   });
 
   it('a fill leaves no speck of wood shut in beside it, for the hairline to go round (I S, A S, S N, 6 M)', () => {
