@@ -348,8 +348,61 @@ describe('the joint, measured as wood and filled', () => {
       expect(j.fills, `${pair} at ${mm} mm`).toEqual([]);
       expect(j.width * 25, `${pair} at ${mm} mm`).toBeGreaterThan(1);
     }
-    // Where no short block can make it, the joint stays thin, for the problems list (rule 6).
-    expect(run('Y4', 2.3).joints[0].width * 25).toBeLessThan(0.6);
+  });
+
+  /** Two letters linked `mm` deep at 25 mm cap height, filled or (with `fill` off) as the letters make it. */
+  const pairRun = (pair: string, mm: number, fill = true) => {
+    const [a, b] = [...pair].map((c) => store.alphabet.letter(c)!.contours);
+    const t = touchAdvance(a, b)!;
+    return unitRun([a, b], [mm / 25], () => t, THIN_JOINT / 25, fill)!;
+  };
+
+  it('a foot is measured from the baseline up and a head from the cap line down: what runs below or above the line is not wood to chisel against', () => {
+    // An L's foot serif ends in a wedge on the top of a figure's curve, which runs on below the baseline: above
+    // the line only 0.15 mm of wood joins them (found by review, 9 Oct 2026; measured all the way down, about 1 mm).
+    for (const pair of ['L3', 'L5', 'Z5']) {
+      expect(pairRun(pair, 0.3, false).joints[0].width * 25, pair).toBeLessThan(0.2);
+      const j = pairRun(pair, 0.3).joints[0];
+      expect(j.place, pair).toBe('foot');
+      expect(j.fill, pair).not.toBeNull();
+      expect(j.width * 25, pair).toBeGreaterThanOrEqual(0.6 - 0.001);
+    }
+    const zt = pairRun('ZT', 0.3).joints[0];
+    expect(pairRun('ZT', 0.3, false).joints[0].width * 25).toBeLessThan(0.4);
+    expect([zt.place, zt.fill !== null]).toEqual(['head', true]);
+  });
+
+  it('a foot or head already thick enough is not filled', () => {
+    for (const [pair, mm] of [['7Z', 0.3], ['ET', 1.3], ['TT', 1.3], ['AJ', 2.3], ['EB', 2.3]] as const) {
+      const j = pairRun(pair, mm).joints[0];
+      expect(j.fills, `${pair} at ${mm} mm`).toEqual([]);
+      expect(j.width * 25, `${pair} at ${mm} mm`).toBeGreaterThan(0.75);
+    }
+  });
+
+  it('linked deep, a Y’s serif over the flat top of a 4 or 1 gets a level fill hanging from the cap line', () => {
+    // Found by review, 9 Oct 2026: once the Y's serif tip passes the end of the figure's top, the figure's wood on
+    // the cap line lies wholly within the overlap; its thick point was not looked for there, and the joint was left
+    // 0.41 to 0.59 mm thick with no fill, though the same fill cures it a hair shallower.
+    for (const [pair, mm] of [['Y4', 2.05], ['Y4', 2.3], ['Y4', 2.5], ['Y4', 2.8], ['Y1', 1.8], ['Y1', 1.9]] as const) {
+      const j = pairRun(pair, mm).joints[0];
+      expect(j.width * 25, `${pair} at ${mm} mm`).toBeGreaterThanOrEqual(0.6 - 0.001);
+      const f = j.fills.find((g) => g.some((p) => Math.abs(p.y + 1) < 1e-9));
+      expect(f, `${pair} at ${mm} mm`).toBeDefined();
+      for (const p of f!) expect(p.y, `${pair} at ${mm} mm`).toBeLessThanOrEqual(-1 + (0.61 / 25));
+    }
+  });
+
+  it('a joint is read at the join, not at the far end of a stem past it (Y 1, P D, G I linked deep), nor at a corner just past the overlap (3 S)', () => {
+    for (const [pair, mm] of [['Y1', 2.8], ['PD', 2.8], ['GI', 2.8], ['V1', 2.8]] as const) {
+      const r = pairRun(pair, mm);
+      const [a, b] = [...pair].map((c) => store.alphabet.letter(c)!.contours);
+      const ys = overlapOf(a, b.map((c) => c.map((p) => ({ x: p.x + r.pens[1], y: p.y }))), 0).flat().map((p) => p.y);
+      const at = r.joints[0].at.y;
+      expect(at, `${pair} at ${mm} mm`).toBeGreaterThan(Math.min(...ys) - 1 / 25);
+      expect(at, `${pair} at ${mm} mm`).toBeLessThan(Math.max(...ys) + 1 / 25);
+    }
+    for (const mm of [0.348, 0.35, 0.352]) expect(pairRun('3S', mm).joints[0].width * 25, `3S at ${mm} mm`).toBeGreaterThan(2);
   });
 
   it('a fill leaves no speck of wood shut in beside it, for the hairline to go round (I S, A S, S N, 6 M)', () => {
