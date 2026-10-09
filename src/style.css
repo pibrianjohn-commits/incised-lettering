@@ -58,7 +58,10 @@
   --valley: #e03131;
   --slit: #a61e1e;
   --space: #2f9e44;
-  --lines: #8a919c; /* margin, baselines and cap lines, machine bed */
+  --lines: #8a919c; /* margins, blank lines, machine bed */
+  /* The setting-out lines (cap, mid, base and the rest, the panel centre): a quiet olive of their own. */
+  --setting-out: #6f8231;
+  --setting-out-label: #5a6a1e; /* their labels, off the board on the light workspace */
   --kern: #e8590c;
   /* Tools drawn over the board and the workspace. */
   --guide: #0c8599;
@@ -90,6 +93,7 @@
     --letter-edge: rgb(255 255 255 / 0.5);
     --guide: #3bc9db;
     --measure: #f06595;
+    --setting-out-label: #a3b55a; /* on the graphite workspace */
   }
 }
 
@@ -246,7 +250,10 @@ input[type='checkbox'], input[type='radio'], input[type='range'] { accent-color:
 .key.datum { border-color: var(--datum); border-top-style: dashed; }
 .key.valley { border-color: var(--valley); }
 .key.fill { height: 10px; border: 1px solid var(--letter); background: var(--letter); }
-.key.guides { border-color: var(--lines); border-top-style: dashed; border-top-width: 1px; }
+.key.margins { border-color: var(--lines); border-top-style: dashed; border-top-width: 1px; }
+.key-line { width: 22px; height: 6px; flex: none; overflow: visible; background: var(--board); box-shadow: 0 0 0 3px var(--board); }
+.toggles .menu-head { margin: 6px 0 0; font-size: 12px; font-weight: 600; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+.toggles label.sub { padding-left: 14px; }
 .key.kerns { border: 0; width: 22px; height: auto; font: 600 10px var(--font); color: var(--kern); text-align: center; }
 kbd {
   font: 600 11px var(--font);
@@ -361,7 +368,22 @@ button.quiet { font-size: 13px; color: var(--muted); box-shadow: none; }
 #world .refimg[data-refimage] { pointer-events: auto; cursor: move; }
 /* A scribed border is a hairline when setting out, and a fine dark line on a proof. */
 #work.hide-outline:not(.hide-fill) #world .scribe { display: inline; stroke: var(--letter); stroke-width: 1.5; }
-#world .guides line { stroke: var(--lines); stroke-width: 1; stroke-dasharray: 4 4; opacity: 0.55; }
+/* The setting-out lines: hair-thin, cap line and baseline dashed as before, the mid, x-height and ascender
+   lines told apart by their dashes, the descender line as the baseline but lighter, the panel centre a dashed cross. */
+.setting-out line, .setting-out path, .key-line line { fill: none; stroke: var(--setting-out); stroke-width: 1; }
+.so-cap, .so-base { stroke-dasharray: 4 4; opacity: 0.85; }
+.so-mid { stroke-dasharray: 10 3 2 3; opacity: 0.85; }
+.so-x { stroke-dasharray: 1.5 3; opacity: 0.9; }
+.so-asc { stroke-dasharray: 10 3 1.5 3 1.5 3; opacity: 0.85; }
+.so-desc { stroke-dasharray: 4 4; opacity: 0.45; }
+.so-centre { stroke-dasharray: 7 4; opacity: 0.7; }
+#labels .so-label { font: 500 10px var(--font); font-variant-numeric: tabular-nums; fill: var(--setting-out-label); stroke: var(--work); stroke-width: 3px; }
+#labels .so-label.end { text-anchor: end; }
+#labels .so-label.start { text-anchor: start; }
+#labels .so-label.over { fill: #5a6a1e; stroke: var(--board); }
+#labels .so-back { fill: var(--board); fill-opacity: 0.9; stroke: none; }
+#labels .so-label.so-desc { opacity: 0.75; }
+#work.cam #labels .so-label { display: none; }
 #world .fill { fill: var(--letter); stroke: var(--letter-edge); stroke-width: 0.75; }
 #world .outline { fill: none; stroke: var(--outline); stroke-width: 1; }
 #world .datum { fill: none; stroke: var(--datum); stroke-width: 1; stroke-dasharray: 5 3; }
@@ -384,8 +406,8 @@ button.quiet { font-size: 13px; color: var(--muted); box-shadow: none; }
 #world .spacer-edge { stroke: var(--lines); stroke-width: 2; }
 #world .spacer.sel .spacer-edge { stroke: var(--accent); }
 #world .spacer-hit { stroke: transparent; stroke-width: 10; cursor: ns-resize; pointer-events: stroke; }
-#work.hide-guides #world .spacer, #work.clean #world .spacer,
-#work.hide-guides #labels .spacer-label, #work.clean #labels .spacer-label { display: none; }
+#work.hide-margins #world .spacer, #work.clean #world .spacer,
+#work.hide-margins #labels .spacer-label, #work.clean #labels .spacer-label { display: none; }
 #labels .spacer-label { fill: var(--muted); font-size: 11px; text-anchor: start; }
 #work.dragging-spacer, #work.dragging-spacer * { cursor: ns-resize !important; }
 #world .gap { fill: var(--accent); fill-opacity: 0; cursor: pointer; }
@@ -401,8 +423,14 @@ button.quiet { font-size: 13px; color: var(--muted); box-shadow: none; }
 #work.hide-valley .valley,
 #work.hide-fill .fill,
 #work.hide-space .space,
-#work.hide-guides .guides,
-#work.hide-guides .margin { display: none; }
+#work.hide-margins .margin,
+#work.hide-capbase #world .so-cap,
+#work.hide-capbase #world .so-base,
+#work.hide-mid #world .so-mid,
+#work.hide-xheight #world .so-x,
+#work.hide-xheight #world .so-asc,
+#work.hide-desc #world .so-desc,
+#work.hide-centre #world .so-centre { display: none; }
 
 /* Design and Proof: just the letters. Proof also drops guides and dimensions. */
 #work.clean #labels .kern,
@@ -634,6 +662,7 @@ dialog::backdrop { background: rgb(10 12 16 / 0.45); backdrop-filter: blur(2px);
 .dlg-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: var(--card); border-bottom: 1px solid var(--rule); }
 .dlg-head h2 { margin: 0; }
 .dlg-head button { margin: 0; }
+.dlg-head .sheet-tick { display: flex; align-items: center; gap: 6px; font-size: 13px; white-space: nowrap; cursor: pointer; }
 .grow { flex: 1; }
 #palette { width: min(580px, calc(100vw - 32px)); margin-top: 12vh; padding: 6px; }
 #palette-input, #palette-input:focus { width: 100%; padding: 10px 12px; font: 16px var(--font); color: var(--ink); background: transparent; border: 0; border-bottom: 1px solid var(--rule); border-radius: 0; box-shadow: none; outline: none; }
@@ -678,6 +707,8 @@ dialog::backdrop { background: rgb(10 12 16 / 0.45); backdrop-filter: blur(2px);
 .sheet-key .k-out { border-color: #000; }
 .sheet-key .k-datum { border-color: #7048e8; border-top-style: dashed; }
 .sheet-key .k-valley { border-color: #e03131; }
+.sheet-key .k-set { border-color: #8c8c8c; border-top-style: dashed; border-top-width: 0.3mm; }
+.sheet-drawing .sheet-so-label { fill: #6e6e6e; font-family: var(--font); font-variant-numeric: tabular-nums; }
 .sheet-key b { color: #a61e1e; }
 .sheet-scale { display: inline-flex; align-items: center; gap: 2mm; }
 .sheet-cols { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6mm; break-inside: avoid; }

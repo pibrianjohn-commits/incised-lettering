@@ -7,6 +7,8 @@ import { borderMarks } from './border';
 import { contourToSvg, polylineToSvg } from './geometry';
 import { contentBox, type Layout, type Project } from './layout';
 import { BED, BED_EXTENDED, bedFit } from './panel';
+import type { Box } from './letters';
+import { placeLabels, type LineSet, type SetKind } from './settingout';
 import { CORNER_NAMES, MAX_SCRIBE_DEPTH, type Check, type Cut, type Pass } from './toolpath';
 
 export interface SheetInput {
@@ -21,6 +23,12 @@ export interface SheetInput {
   alphabet: string;
   fileName: string | null;
   date: Date;
+  /**
+   * The setting-out lines, to mark out on the wood with a rule and a square
+   * (settingout.ts), and the panel's centre; null or left out when the
+   * sheet's tick for them is off.
+   */
+  settingOut?: { sets: LineSet[]; centre: { x: number; y: number } } | null;
 }
 
 export interface Sheet {
@@ -34,6 +42,8 @@ export interface Sheet {
 const PAGE = { long: 273, short: 186 };
 /** Room round the panel in the drawing for the zero mark and size, mm on paper. */
 const PAD = 9;
+/** More room on the left, mm on paper, for the setting-out lines' labels. */
+const LABEL_ROOM = 13;
 /** Scales a drawing is allowed to be printed at, largest first. */
 const SCALES = [1, 0.75, 0.5, 0.4, 1 / 3, 0.25, 0.2, 1 / 6, 0.125, 0.1, 1 / 15, 0.05];
 
@@ -41,9 +51,9 @@ const esc = (s: string) => s.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
 const mm = (v: number, places = 1) => `${Number(v.toFixed(places))} mm`;
 const signed = (v: number) => (v > 0 ? `+${v.toFixed(1)}` : v < 0 ? `−${(-v).toFixed(1)}` : '0.0');
 
-/** The largest allowed scale at which a w × h mm panel fits in the given space. */
-export function sheetScale(w: number, h: number, room: { w: number; h: number }): number {
-  const fit = Math.min((room.w - 2 * PAD) / w, (room.h - 2 * PAD) / h);
+/** The largest allowed scale at which a w × h mm panel fits in the given space (`left`: more room on the left, mm on paper). */
+export function sheetScale(w: number, h: number, room: { w: number; h: number }, left = 0): number {
+  const fit = Math.min((room.w - 2 * PAD - left) / w, (room.h - 2 * PAD) / h);
   return SCALES.find((s) => s <= fit + 1e-9) ?? SCALES[SCALES.length - 1];
 }
 
@@ -101,16 +111,72 @@ export function strokeLabels(pass: Pass | null): { x: number; y: number; n: numb
 /** "O (line 1)#0" → "O (line 1)". */
 const itemName = (id: string) => id.replace(/#\d+$/, '');
 
+/** Each kind of setting-out line on paper: its grey, and its dashes in mm on paper (as on screen: the descender lighter, the others told apart by their dashes). */
+const SHEET_LINES: Record<SetKind, { grey: string; dash: string }> = {
+  cap: { grey: '#8c8c8c', dash: '1 1' },
+  base: { grey: '#8c8c8c', dash: '1 1' },
+  mid: { grey: '#8c8c8c', dash: '2.4 0.8 0.5 0.8' },
+  x: { grey: '#8c8c8c', dash: '0.4 0.8' },
+  asc: { grey: '#8c8c8c', dash: '2.4 0.8 0.4 0.8 0.4 0.8' },
+  desc: { grey: '#bdbdbd', dash: '1 1' },
+};
+
+/** The setting-out lines, thin and grey, with their labels at their left ends, off the panel. */
+function settingOutLines(input: SheetInput, s: number, left: number): string {
+  const so = input.settingOut;
+  if (!so) return '';
+  const { project: p, layout: L } = input;
+  const line = (paperMm: number) => (paperMm / s).toFixed(4);
+  const dash = (d: string) => d.split(' ').map((v) => line(Number(v))).join(' ');
+  const out: string[] = ['<g class="sheet-setting-out" fill="none">'];
+  for (const set of so.sets)
+    for (const l of set.lines) {
+      const st = SHEET_LINES[l.kind];
+      out.push(
+        `<line class="so-${l.kind}" x1="0" x2="${p.panelWidth}" y1="${l.y.toFixed(3)}" y2="${l.y.toFixed(3)}" stroke="${st.grey}" stroke-width="${line(0.12)}" stroke-dasharray="${dash(st.dash)}"/>`,
+      );
+    }
+  const c = so.centre;
+  out.push(
+    `<path class="so-centre" d="M${c.x} 0V${p.panelHeight}M0 ${c.y}H${p.panelWidth}" stroke="#8c8c8c" stroke-width="${line(0.12)}" stroke-dasharray="${dash('3 1.2')}"/>`,
+  );
+  out.push('</g>');
+  const font = 2;
+  const labels = placeLabels(so.sets, () => true, {
+    sy: (y) => y,
+    column: () => ({ end: -1 / s, start: 1 / s }),
+    minX: -left / s,
+    avoid: [...L.letters.map((t) => t.box), ...L.stops.map((t) => boxOf(t.outline))],
+    height: (font * 1.15) / s,
+    charWidth: (font * 0.62) / s,
+  });
+  for (const t of labels) {
+    out.push(
+      `<text class="sheet-so-label" x="${t.x.toFixed(3)}" y="${t.y.toFixed(3)}" dy="0.35em" text-anchor="${t.anchor}" font-size="${line(font)}">${esc(t.text)}</text>`,
+    );
+  }
+  return out.join('');
+}
+
+/** The box round some outlines, mm. */
+function boxOf(contours: { x: number; y: number }[][]): Box {
+  const pts = contours.flat();
+  return { x0: Math.min(...pts.map((q) => q.x)), x1: Math.max(...pts.map((q) => q.x)), y0: Math.min(...pts.map((q) => q.y)), y1: Math.max(...pts.map((q) => q.y)) };
+}
+
 function drawing(input: SheetInput, s: number): string {
   const { project: p, layout: L } = input;
   const W = p.panelWidth;
   const H = p.panelHeight;
   const pad = PAD / s; // panel mm
+  const left = input.settingOut ? PAD + LABEL_ROOM : PAD; // mm on paper, room for the labels
+  const padL = left / s;
   const line = (paperMm: number) => (paperMm / s).toFixed(4); // a line or text size given on paper
   const out: string[] = [];
   out.push(
-    `<svg class="sheet-drawing" width="${((W + 2 * pad) * s).toFixed(2)}mm" height="${((H + 2 * pad) * s).toFixed(2)}mm" viewBox="${-pad} ${-pad} ${W + 2 * pad} ${H + 2 * pad}" xmlns="http://www.w3.org/2000/svg">`,
+    `<svg class="sheet-drawing" width="${((W + pad + padL) * s).toFixed(2)}mm" height="${((H + 2 * pad) * s).toFixed(2)}mm" viewBox="${-padL} ${-pad} ${W + pad + padL} ${H + 2 * pad}" xmlns="http://www.w3.org/2000/svg">`,
   );
+  out.push(settingOutLines(input, s, left));
   out.push(`<rect x="0" y="0" width="${W}" height="${H}" fill="none" stroke="#000" stroke-width="${line(0.35)}"/>`);
   const cb = contentBox(p);
   if (cb.x1 > cb.x0 && cb.y1 > cb.y0) {
@@ -292,7 +358,7 @@ export function benchSheet(input: SheetInput): Sheet {
   const p = input.project;
   const orientation = p.panelWidth >= p.panelHeight ? 'landscape' : 'portrait';
   const room = orientation === 'landscape' ? { w: PAGE.long, h: PAGE.short - 40 } : { w: PAGE.short, h: PAGE.long * 0.6 };
-  const s = sheetScale(p.panelWidth, p.panelHeight, room);
+  const s = sheetScale(p.panelWidth, p.panelHeight, room, input.settingOut ? LABEL_ROOM : 0);
   const lines = p.text.split('\n').filter((t) => t.trim());
   const title = lines.join(' / ') || 'Lettering';
   const checks = input.checks
@@ -313,6 +379,7 @@ export function benchSheet(input: SheetInput): Sheet {
       <span class="sheet-key"><i class="k-datum"></i> datum line</span>
       <span class="sheet-key"><i class="k-valley"></i> valley line</span>
       <span class="sheet-key"><b>3</b> stroke number: cut thin strokes first</span>
+      ${input.settingOut ? '<span class="sheet-key"><i class="k-set"></i> setting-out lines, each with its height above the baseline in mm (the baseline: down from the top edge)</span>' : ''}
       <span class="sheet-scale">${scaleBar(s)}</span>
     </figcaption>
   </figure>

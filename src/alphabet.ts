@@ -23,6 +23,50 @@ export interface Alphabet {
   letter(char: string): LetterShape | null;
   /** Extra space between a pair, in cap-height units (negative = closer). */
   kerning(left: string, right: string): number;
+  /** Its heights, for the setting-out lines (BRIEF.md, Decisions: "The setting-out lines"). */
+  heights: AlphabetHeights;
+}
+
+/**
+ * An alphabet's heights in cap heights (the cap height is 1), measured from
+ * its own letters once, when it loads; never taken from a font's metrics
+ * table, which need not say where its letters are (Cinzel's says its
+ * x-height is 500/700, but its small capitals stand 0.857 tall). An alphabet
+ * drawn as SVG will have them set by hand.
+ */
+export interface AlphabetHeights {
+  /** The top of its x; null if it has no x. */
+  xHeight: number | null;
+  /** The top of the tallest of b d h k l; null if it has none of them. */
+  ascender: number | null;
+  /** How far its O goes past the cap line or the baseline, whichever is more (0 if it has no O). Kept for later; not drawn. */
+  overshoot: number;
+  /** How far a character goes below the baseline, from its own outline (0 if it does not, or the alphabet has no shape for it). */
+  descent(char: string): number;
+  /** How far a character rises above the baseline, from its own outline (0 if the alphabet has no shape for it). */
+  rise(char: string): number;
+}
+
+/** Measure an alphabet's heights from its letters (see AlphabetHeights). */
+export function measureHeights(letter: (char: string) => LetterShape | null): AlphabetHeights {
+  const ends = new Map<string, { top: number; bottom: number } | null>();
+  // y points down: the top of a letter is its least y, the bottom its greatest.
+  const extent = (char: string) => {
+    if (ends.has(char)) return ends.get(char)!;
+    const pts = letter(char)?.contours.flat() ?? [];
+    const e = pts.length ? { top: -Math.min(...pts.map((p) => p.y)), bottom: Math.max(...pts.map((p) => p.y)) } : null;
+    ends.set(char, e);
+    return e;
+  };
+  const tops = [...'bdhkl'].map((c) => extent(c)?.top).filter((t): t is number => t !== undefined);
+  const o = extent('O');
+  return {
+    xHeight: extent('x')?.top ?? null,
+    ascender: tops.length ? Math.max(...tops) : null,
+    overshoot: o ? Math.max(0, o.top - 1, o.bottom) : 0,
+    descent: (char) => Math.max(0, extent(char)?.bottom ?? 0),
+    rise: (char) => extent(char)?.top ?? 0,
+  };
 }
 
 /** Load a TrueType / OpenType / WOFF font as an alphabet. */
@@ -33,9 +77,10 @@ export function alphabetFromFont(buffer: ArrayBuffer, licence: string): Alphabet
   const tol = 0.002;
   const cache = new Map<string, LetterShape | null>();
 
-  return {
+  const alphabet: Alphabet = {
     name: font.getEnglishName('fullName') || 'Font',
     licence,
+    heights: null as unknown as AlphabetHeights, // measured below, from the letters
     letter(char) {
       if (cache.has(char)) return cache.get(char)!;
       const glyph = font.charToGlyph(char);
@@ -56,6 +101,10 @@ export function alphabetFromFont(buffer: ArrayBuffer, licence: string): Alphabet
       return font.getKerningValue(font.charToGlyph(left), font.charToGlyph(right)) / capUnits;
     },
   };
+  // Its x-height, ascender and overshoot are measured now, once; each letter's
+  // own descent and rise when first asked, from the same outline it is drawn with.
+  alphabet.heights = measureHeights((char) => alphabet.letter(char));
+  return alphabet;
 }
 
 /**

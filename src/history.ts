@@ -25,18 +25,23 @@ export class History<T> {
     this.redoStack = [];
   }
 
-  undo(current: T): T | null {
+  /**
+   * Step back. `current` is the state now, kept for redo; or, where steps
+   * keep different things (the job, or what a view shows), a function giving
+   * the state now of whatever the step being undone keeps.
+   */
+  undo(current: T | ((step: T) => T)): T | null {
     const prev = this.undoStack.pop();
     if (prev === undefined) return null;
-    this.redoStack.push(current);
+    this.redoStack.push(typeof current === 'function' ? (current as (step: T) => T)(prev) : current);
     this.lastGroup = null;
     return prev;
   }
 
-  redo(current: T): T | null {
+  redo(current: T | ((step: T) => T)): T | null {
     const next = this.redoStack.pop();
     if (next === undefined) return null;
-    this.undoStack.push(current);
+    this.undoStack.push(typeof current === 'function' ? (current as (step: T) => T)(next) : current);
     this.lastGroup = null;
     return next;
   }
