@@ -239,8 +239,6 @@ interface Meeting {
   inner: [number, number];
   /** Whether what lies beyond the overlap on each side (left, right) is such a tip, and so not the joint. */
   tips: [boolean, boolean];
-  /** Where a letter (left, right) is already thick enough as it leaves the overlap, its band of wood there. */
-  thick: [[number, number] | null, [number, number] | null];
   /** The two letters, placed, near the join. */
   a: Crossings;
   b: Crossings;
@@ -310,16 +308,16 @@ function meeting(a: Contour[], b: Contour[], piece: Contour, thin: number, fill:
   // enough wood across the join (lying against each other along a slant; linked deep, running into each other
   // along a long crescent), none: a block there would only run out across a counter.
   const settle = (at: JointPlace, height: number, j: ReturnType<typeof joinAt>): Meeting => {
-    const m: Meeting = { place: at, y: height, x0: Math.min(j.x0, centre), x1: Math.max(j.x1, centre), centre, mid: (lo + hi) / 2, piece, inner: j.inner, tips: j.tips, thick: j.thick, a: ca, b: cb, fill: null, at: { x: centre, y: height } };
+    const m: Meeting = { place: at, y: height, x0: Math.min(j.x0, centre), x1: Math.max(j.x1, centre), centre, mid: (lo + hi) / 2, piece, inner: j.inner, tips: j.tips, a: ca, b: cb, fill: null, at: { x: centre, y: height } };
     if (j.made && thinnest(new Both(ca, cb), m, thin * 1.01).width < thin * 1.01) [m.fill, m.at] = [j.made, { x: (j.x0 + j.x1) / 2, y: j.middle }];
     return m;
   };
   const found = joinAt(ca, cb, p0, p1, place, y, left, right, left, right, thin, fill);
   let m = settle(place, y, found);
-  // Still no fill, where one letter's wood on the line ends where the overlap ends (the flat top of a 4 or 1 under
-  // the tip of a Y's serif, linked deep): from where that letter is thick enough on the line within the overlap,
-  // nearest the other letter.
-  if (fill && !found.made && onLine !== 'elsewhere' && (lineLeft.band || lineRight.band)) {
+  // Still no fill and the joint thin, where one letter's wood on the line ends where the overlap ends (the flat top
+  // of a 4 or 1 under the tip of a Y's serif, linked deep): from where that letter is thick enough on the line within
+  // the overlap, nearest the other letter.
+  if (fill && !found.made && onLine !== 'elsewhere' && (lineLeft.band || lineRight.band) && thinnest(new Both(ca, cb), m, thin).width < thin) {
     const l = lineLeft.band ? lineLeft : !ca.band(p0 - STEP, yLine) ? thickWithin(ca, p1, p0, onLine, yLine, thin) : null;
     const r = lineRight.band ? lineRight : !cb.band(p1 + STEP, yLine) ? thickWithin(cb, p0, p1, onLine, yLine, thin) : null;
     const atLine = l && r ? settle(onLine, yLine, joinAt(ca, cb, p0, p1, onLine, yLine, lineLeft, lineRight, l, r, thin, fill)) : null;
@@ -436,8 +434,9 @@ function joinAt(ca: Crossings, cb: Crossings, p0: number, p1: number, place: Joi
       // Centred on the join: level, as near the height of the join as both letters' wood allows; where they share
       // no height, at each end as near it as that letter's wood allows.
       const h = t / 2;
+      // (A letter's band where it is first thick enough is a hair under `t` tall: within that hair, it is shared.)
       const [lo2, hi2] = [Math.max(la, ra) + h, Math.min(lb, rb) - h];
-      const level = lo2 <= hi2 ? Math.min(Math.max(y, lo2), hi2) : null;
+      const level = lo2 <= hi2 + (t - thin) ? Math.min(Math.max(y, Math.min(lo2, hi2)), Math.max(lo2, hi2)) : null;
       const cl = level ?? Math.min(Math.max(y, la + h), lb - h);
       const cr = level ?? Math.min(Math.max(y, ra + h), rb - h);
       // Where one letter is thick enough only well above or below the other (linked deep, a stroke met at a slant),
@@ -449,9 +448,7 @@ function joinAt(ca: Crossings, cb: Crossings, p0: number, p1: number, place: Joi
       }
     }
   }
-  // Where a letter is already thick enough as it leaves the overlap, its band of wood there.
-  const thick: [[number, number] | null, [number, number] | null] = [left.band && left.x >= p0 - STEP / 2 ? left.band : null, right.band && right.x <= p1 + STEP / 2 ? right.band : null];
-  return { x0, x1, tips, inner, made, middle, thick };
+  return { x0, x1, tips, inner, made, middle };
 }
 
 /** Where a letter is found thick enough, and its band of wood there (none if it never is). */
@@ -592,21 +589,17 @@ function measureAlong(outline: Crossings | Both, m: Meeting, place: JointPlace, 
     } else if (spans.some(([t, u]) => y >= t && y <= u)) take(x, outline.band(x, y));
   }
   const fill = m.fill ? new Crossings([m.fill], -Infinity, Infinity) : null;
-  const sides: [number, number, Crossings, boolean, [number, number] | null][] = [
-    [p0, Math.min(m.x0, p0 - STEP), m.a, m.tips[0], m.thick[0]],
-    [p1, Math.max(m.x1, p1 + STEP), m.b, m.tips[1], m.thick[1]],
+  const sides: [number, number, Crossings, boolean][] = [
+    [p0, Math.min(m.x0, p0 - STEP), m.a, m.tips[0]],
+    [p1, Math.max(m.x1, p1 + STEP), m.b, m.tips[1]],
   ];
-  for (const [from, to, own, tip, thick] of sides) {
+  for (const [from, to, own, tip] of sides) {
     if (tip || width < below) continue;
     // Starting from the letter's own wood where it leaves the overlap: where that wood then divides (an S's tail
     // into its body and the beak at its tip), the branch that carries on the most is followed, not a tip that ends.
     const inside = from + (from === p0 ? 1 : -1) * Math.min(STEP, (p1 - p0) / 2);
     const span = spansAcross(m.piece, inside)[0] ?? ([m.mid, m.mid] as [number, number]);
     let prev: [number, number] | null = along(merged([...own.bands(inside), ...(fill?.bands(inside) ?? [])]), span) ?? span;
-    // Where the letter is already thick enough as it leaves the overlap, but in another part of it than the one the
-    // overlap is in (an S's body, past the notch below the spur that pokes into a 3's bowl), nothing of it lies
-    // between the two on this side: the spur's corner past the overlap is not the joint.
-    if (thick && Math.min(thick[1], prev[1]) < Math.max(thick[0], prev[0])) continue;
     const steps = Math.max(1, Math.ceil(Math.abs(to - from) / STEP));
     for (let k = 1; k <= steps && width >= below; k++) {
       const x = from + ((to - from) * k) / steps;
@@ -614,9 +607,10 @@ function measureAlong(outline: Crossings | Both, m: Meeting, place: JointPlace, 
       if (place === 'elsewhere') {
         const iv: [number, number] | null = prev && along(wood, prev);
         if (!iv) break; // the join has run out this way
-        // The letter's wood at the height of the join ends here, and only a far part of it carries on (past a
-        // stem's edge, its foot serif): that is not between the two letters.
-        if (y >= prev[0] && y <= prev[1] && !(y >= iv[0] && y <= iv[1]) && Math.min(iv[1], prev[1]) - Math.max(iv[0], prev[0]) < (prev[1] - prev[0]) / 4) break;
+        // Where the wood followed shrinks at a step to a small part of itself, the stroke has ended and only a corner
+        // or a far part of the letter carries on (past a stem's edge, its foot serif 20 mm below the join; past the
+        // overlap, the corner of an S's spur poking into a 3's bowl): that is not between the two letters.
+        if (Math.min(iv[1], prev[1]) - Math.max(iv[0], prev[0]) < (prev[1] - prev[0]) / 4) break;
         prev = iv;
         take(x, outline.band(x, (iv[0] + iv[1]) / 2));
       } else {

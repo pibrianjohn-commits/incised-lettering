@@ -403,6 +403,24 @@ describe('the joint, measured as wood and filled', () => {
       expect(at, `${pair} at ${mm} mm`).toBeLessThan(Math.max(...ys) + 1 / 25);
     }
     for (const mm of [0.348, 0.35, 0.352]) expect(pairRun('3S', mm).joints[0].width * 25, `3S at ${mm} mm`).toBeGreaterThan(2);
+    // A figure deep in a stem is read where its stroke leaves the stem, not up the stem's whole height (found by a
+    // second review, 9 Oct 2026: 'joined 25.00 mm thick').
+    for (const pair of ['H4', 'I4', 'J4', 'U4']) expect(pairRun(pair, 2.8).joints[0].width * 25, pair).toBeLessThan(3);
+  });
+
+  it('the last resort, a fill from within the overlap, is used only where the joint is thin without it, and fills away from the lines lie level where both letters allow', () => {
+    // 7 against A linked deep: the 7's point lies within the A's serif and the joint is 0.6 mm already; a block
+    // there would add no wood, only say "filled". J against 1 just over 3.2 mm deep had read a false 0.36 mm.
+    for (const mm of [2.6, 2.8, 3.1]) {
+      const j = pairRun('7A', mm).joints[0];
+      expect([j.fills.length, j.width * 25 >= 0.6], `7A at ${mm} mm`).toEqual([0, true]);
+    }
+    for (const mm of [3.2227, 3.224, 3.225, 3.2257]) expect(pairRun('J1', mm).joints[0].width * 25, `J1 at ${mm} mm`).toBeGreaterThan(1);
+    for (const [pair, mm] of [['ZD', 1.7], ['CB', 1.1], ['GB', 3.3], ['GB', 0.3]] as const) {
+      const fs = pairRun(pair, mm).joints[0].fills;
+      expect(fs.length, `${pair} at ${mm} mm`).toBeGreaterThan(0);
+      for (const f of fs) expect(Math.abs(f[1].y - f[0].y) * 25, `${pair} at ${mm} mm`).toBeLessThan(0.01);
+    }
   });
 
   it('a fill leaves no speck of wood shut in beside it, for the hairline to go round (I S, A S, S N, 6 M)', () => {
