@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_ZONES, levelReadout, thicknessText, type Design, type Layer } from '../src/ornament/model';
 import { SHAPED_LINE, designSvg, openSvg, sampleTemplate } from '../src/ornament/svgfile';
-import { NO_PLAN_DEPTH, apply, edgeMismatches, fromAboveReady, keepLid, keptLid, lidDesignFiles, lidLayout, openLid } from '../src/ornament/lid';
+import { NO_PLAN_DEPTH, apply, edgeMismatches, fromAboveReady, keepLid, keptLid, lastSavedText, lidLayout, openLid, saveLidSet } from '../src/ornament/lid';
 
 const layer = (name: string, level: number, extra: Partial<Layer> = {}): Layer => ({
   id: name,
@@ -122,6 +122,10 @@ const lidFiles = () => [
   { name: 'hip-back.svg', text: hipSvg('hip-back', 204, 264, 30) },
   { name: 'hip-left.svg', text: hipSvg('hip-left', 96, 156, 30) },
 ];
+const memStore = () => {
+  const kept = new Map<string, string>();
+  return { getItem: (k: string) => kept.get(k) ?? null, setItem: (k: string, v: string) => void kept.set(k, v), removeItem: (k: string) => void kept.delete(k) };
+};
 const near = (a: number[], b: number[]) => a.forEach((v, i) => expect(Math.abs(v - b[i])).toBeLessThan(0.01));
 
 describe('ornament: the whole lid', () => {
@@ -197,7 +201,7 @@ describe('ornament: the whole lid', () => {
     expect(lidLayout(back!.lid)).toEqual(lidLayout(lid));
   });
 
-  it('Save lid design writes one file per place with layers, and they open again exactly as they were', () => {
+  it('Save lid design writes every place, and they open again exactly as they were', () => {
     // A rectangular left hip, so a hip can carry layers too; the right hip has none.
     const files = lidFiles().map((f) =>
       f.name === 'hip-left.svg' ? { ...f, text: rectSvg('hip-left', 96, 30) } : f.name === 'hip-right.svg' ? { ...f, text: rectSvg('hip-right', 96, 30) } : f,
@@ -207,9 +211,9 @@ describe('ornament: the whole lid', () => {
     const lid = o.lid;
     lid.places.field!.design!.layers = [layer('Border band', 1, { finish: 'gold' }), layer('Centre', 2, { shape: { kind: 'zone', zone: 'centre' } })];
     lid.places['hip-left']!.design!.layers = [layer('Leaf', 1.5, { shape: { kind: 'rect', x: 10, y: 5, w: 20, h: 10 }, edge: 'v', finish: 'boxwood' })];
-    const out = lidDesignFiles(lid);
-    expect(out.map((f) => f.name)).toEqual(['field-design.svg', 'hip-left-design.svg']);
-    for (const f of out) {
+    const out = saveLidSet(memStore(), lid).files;
+    expect(out.map((f) => f.place)).toEqual(['field', 'hip-front', 'hip-right', 'hip-back', 'hip-left']);
+    for (const f of out.filter((x) => lid.places[x.place]!.design)) {
       const again = openSvg(f.text);
       expect(again.kind).toBe('design');
       if (again.kind !== 'design') continue;
@@ -219,10 +223,33 @@ describe('ornament: the whole lid', () => {
       expect(again.design.layers.map(({ id: _, ...l }) => l)).toEqual(was.layers.map(({ id: _, ...l }) => l));
       expect(designSvg(again.design)).toBe(f.text);
     }
-    // And all five open again as the lid, the field and left hip with their layers.
-    const reopened = openLid(files.map((f) => out.find((x) => x.name === f.name.replace('.svg', '-design.svg')) ?? f));
+    // And the set opens again as the lid, the field and left hip with their layers.
+    const reopened = openLid(out.map((f) => ({ name: f.name, text: f.text })));
     expect(reopened.kind).toBe('lid');
-    if (reopened.kind === 'lid') expect(lidDesignFiles(reopened.lid).map((f) => f.text)).toEqual(out.map((f) => f.text));
+    if (reopened.kind === 'lid') expect(saveLidSet(memStore(), reopened.lid).files.map((f) => f.text)).toEqual(out.map((f) => f.text));
+  });
+});
+
+describe('ornament: numbered design sets (card 4)', () => {
+  const PLACE_ORDER = ['field', 'hip-front', 'hip-right', 'hip-back', 'hip-left'];
+  const named = (lidName: string) => lidFiles().map((f) => ({ ...f, text: f.text.replace('<svg ', `<svg data-lid="${lidName}" `) }));
+
+  it('two saves give 001 then 002, all five places named', () => {
+    const o = openLid(named('walnut-box'));
+    if (o.kind !== 'lid') throw new Error('lid did not open');
+    const store = memStore();
+    const first = saveLidSet(store, o.lid);
+    const second = saveLidSet(store, o.lid);
+    expect(first.number).toBe(1);
+    expect(first.files.map((f) => f.name)).toEqual(PLACE_ORDER.map((p) => `walnut-box_001_${p}.svg`));
+    expect(second.files.map((f) => f.name)).toEqual(PLACE_ORDER.map((p) => `walnut-box_002_${p}.svg`));
+    expect(lastSavedText(store, o.lid)).toBe('Last saved: walnut-box 002');
+  });
+
+  it('templates without data-lid save as lid_001_<place>.svg', () => {
+    const o = openLid(lidFiles());
+    if (o.kind !== 'lid') throw new Error('lid did not open');
+    expect(saveLidSet(memStore(), o.lid).files.map((f) => f.name)).toEqual(PLACE_ORDER.map((p) => `lid_001_${p}.svg`));
   });
 });
 

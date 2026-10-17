@@ -315,6 +315,7 @@ export function openSvg(text: string): Opened {
     thickness: a['data-thickness'] !== undefined && Number.isFinite(t) && t > 0 ? t : null,
     slope: positive('data-slope'),
     planDepth: positive('data-plan-depth'),
+    lid: a['data-lid']?.trim() || null,
     outline: outline.attrs.d,
   };
   const rect = outlineRect(outline.attrs.d);
@@ -364,7 +365,7 @@ export function designSvg(d: Design): string {
   const out: string[] = [];
   out.push('<?xml version="1.0" encoding="UTF-8"?>');
   out.push(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${esc(p.width)}" height="${esc(p.height)}" viewBox="${esc(p.viewBox)}" data-place="${p.place}"${p.thickness !== null ? ` data-thickness="${p.thickness}"` : ''}${p.slope !== null ? ` data-slope="${p.slope}"` : ''}${p.planDepth !== null ? ` data-plan-depth="${p.planDepth}"` : ''}>`,
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${esc(p.width)}" height="${esc(p.height)}" viewBox="${esc(p.viewBox)}" data-place="${p.place}"${p.lid !== null ? ` data-lid="${esc(p.lid)}"` : ''}${p.thickness !== null ? ` data-thickness="${p.thickness}"` : ''}${p.slope !== null ? ` data-slope="${p.slope}"` : ''}${p.planDepth !== null ? ` data-plan-depth="${p.planDepth}"` : ''}>`,
   );
   out.push(`  <path id="outline" d="${esc(p.outline)}" fill="none" stroke="#000000" stroke-width="0.2"/>`);
   // The zones, drawn but never cut, carrying their settings so the design opens again as it was.
