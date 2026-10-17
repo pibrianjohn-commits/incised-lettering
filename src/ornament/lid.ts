@@ -98,13 +98,31 @@ export function topEdge(p: Panel): { from: number; to: number } {
   return xs.length > 1 ? { from: Math.min(...xs), to: Math.max(...xs) } : { from: 0, to: p.w };
 }
 
+/** Flat: the lid opened out flat. From above: the lid as it sits on the box, seen from above (card 3). */
+export type LidView = 'flat' | 'above';
+
+const HIPS = ['hip-front', 'hip-back', 'hip-left', 'hip-right'] as const;
+
+/** Shown when a hip's template is older than data-plan-depth, so From above can't be drawn. */
+export const NO_PLAN_DEPTH = 'Export the templates again from Blender to see this view';
+
+/** Whether From above can be drawn: the whole lid open, and every hip saying how deep it is seen from above. */
+export function fromAboveReady(lid: Lid): { ok: true } | { ok: false; message: string } {
+  if (!lid.whole || !slotPanel(lid.places.field)) return { ok: false, message: 'From above shows the whole lid: open the lid (all five files) to see it.' };
+  const older = HIPS.filter((h) => slotPanel(lid.places[h])?.planDepth == null);
+  return older.length ? { ok: false, message: NO_PLAN_DEPTH } : { ok: true };
+}
+
 /**
- * Where each place goes on the lid opened out flat, seen from above: the
+ * Where each place goes. Flat: the lid opened out flat, seen from above: the
  * field as it is (front of the box at the bottom), and each hip turned so its
  * foot faces outward and it reads as seen from outside, its top edge along the
- * matching field edge, HIP_GAP clear, centred on it.
+ * matching field edge, HIP_GAP clear, centred on it. From above: the same, but
+ * each hip against its field edge with no gap and squashed across its width to
+ * its plan depth, as it is seen sitting on the box. Without a plan depth for
+ * every hip, From above is drawn Flat.
  */
-export function lidLayout(lid: Lid): Partial<Record<Place, Affine>> {
+export function lidLayout(lid: Lid, view: LidView = 'flat'): Partial<Record<Place, Affine>> {
   const field = slotPanel(lid.places.field);
   const out: Partial<Record<Place, Affine>> = {};
   if (!lid.whole || !field) {
@@ -112,23 +130,26 @@ export function lidLayout(lid: Lid): Partial<Record<Place, Affine>> {
     if (p) out[lid.current] = IDENTITY;
     return out;
   }
+  const above = view === 'above' && fromAboveReady(lid).ok;
   const { w: W, h: H } = field;
   out.field = IDENTITY;
-  const g = HIP_GAP;
-  for (const place of ['hip-front', 'hip-back', 'hip-left', 'hip-right'] as const) {
+  const g = above ? 0 : HIP_GAP;
+  for (const place of HIPS) {
     const p = slotPanel(lid.places[place]);
     if (!p) continue;
     const { from, to } = topEdge(p);
+    // Across the hip: true width laid flat, or squashed to its plan depth.
+    const k = above ? p.planDepth! / p.h : 1;
     const along = place === 'hip-front' || place === 'hip-back' ? W : H;
     // Where the top edge's left end (as seen from outside) lands along the field edge.
     const start = (along - (to - from)) / 2;
-    if (place === 'hip-front') out[place] = [1, 0, 0, 1, start - from, H + g];
+    if (place === 'hip-front') out[place] = [1, 0, 0, k, start - from, H + g];
     // Seen from the back, its left is the field's right.
-    else if (place === 'hip-back') out[place] = [-1, 0, 0, -1, W - start + from, -g];
+    else if (place === 'hip-back') out[place] = [-1, 0, 0, -k, W - start + from, -g];
     // Seen from the left, its left is the back.
-    else if (place === 'hip-left') out[place] = [0, 1, -1, 0, -g, start - from];
+    else if (place === 'hip-left') out[place] = [0, 1, -k, 0, -g, start - from];
     // Seen from the right, its left is the front.
-    else out[place] = [0, -1, 1, 0, W + g, H - start + from];
+    else out[place] = [0, -1, k, 0, W + g, H - start + from];
   }
   return out;
 }
@@ -145,7 +166,7 @@ export function edgeMismatches(lid: Lid): string[] {
   const field = slotPanel(lid.places.field);
   if (!lid.whole || !field) return [];
   const out: string[] = [];
-  for (const place of ['hip-front', 'hip-back', 'hip-left', 'hip-right'] as const) {
+  for (const place of HIPS) {
     const p = slotPanel(lid.places[place]);
     if (!p) continue;
     const { from, to } = topEdge(p);
@@ -162,8 +183,8 @@ export function placedOutline(p: Panel, m: Affine): Ring[] {
 }
 
 /** The box round everything laid out, in lid mm. */
-export function lidBounds(lid: Lid): { x: number; y: number; w: number; h: number } | null {
-  const layout = lidLayout(lid);
+export function lidBounds(lid: Lid, view: LidView = 'flat'): { x: number; y: number; w: number; h: number } | null {
+  const layout = lidLayout(lid, view);
   const pts: Pt[] = [];
   for (const place of PLACES) {
     const m = layout[place];

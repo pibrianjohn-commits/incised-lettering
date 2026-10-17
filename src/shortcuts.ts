@@ -28,6 +28,7 @@ export const SHORTCUTS: { group: string; items: [string, string][] }[] = [
       ['Alt + ↑ / ↓', 'Move the selected layer earlier or later (later layers win where they overlap)'],
       ['Delete', 'Take out the selected layer'],
       ['T', 'Tone view (deeper is darker), or back to the finishes'],
+      ['F', 'The lid from above, as it sits on the box (for looking; click a place to work on it), or back to flat'],
       ['Z / Shift + Z', 'The whole panel (or lid), or true size'],
     ],
   },
