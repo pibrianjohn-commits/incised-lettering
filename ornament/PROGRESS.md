@@ -43,7 +43,7 @@ The sample lid field (204 × 96, 6 thick) at true size: a gold border band at 1,
 
 ### Questions for the design chat
 1. **Extra notes in the saved file.** So that a saved design opens again exactly as it was, with its handles, it carries a few extra labels the card doesn't mention: which zone or shape each layer is (`data-shape`, `data-box`), a mark on mirrored twins (`data-twin`), and the zone sizes on `<g id="setting-out">`, which also holds the zone outlines as lines. Everything the card asks for is there exactly as written. Is the lid add-on happy to ignore the rest?
-2. **Ellipses are written as straight segments**, 192 to the round, within about 0.003 mm on the lid (0.1 mm on a 600 mm plaque), not as curves. Does the add-on read curves (C commands), or should it stay straight segments?
+2. **Ellipses are written as straight segments**, 192 to the round, within about 0.003 mm on the lid (0.04 mm on a 600 mm plaque), not as curves. Does the add-on read curves (C commands), or should it stay straight segments?
 3. Should the side fields wrap round the centre (see the first assumption)?
 4. A hip template with no thickness opens and works, but can't say what depth is allowed. Will the add-on always send data-thickness?
 
