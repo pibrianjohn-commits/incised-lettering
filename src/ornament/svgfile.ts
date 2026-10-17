@@ -301,6 +301,10 @@ export function openSvg(text: string): Opened {
   if (!outline?.attrs.d) return { kind: 'error', message: 'This SVG has no panel outline (a path called “outline”), so it isn’t a template from the lid add-on.' };
   const place = (PLACES as readonly string[]).includes(a['data-place']) ? (a['data-place'] as Place) : 'field';
   const t = Number(a['data-thickness']);
+  const positive = (k: string) => {
+    const v = Number(a[k]);
+    return a[k] !== undefined && Number.isFinite(v) && v > 0 ? v : null;
+  };
   const panel: Panel = {
     place,
     width: a.width,
@@ -309,6 +313,8 @@ export function openSvg(text: string): Opened {
     w,
     h,
     thickness: a['data-thickness'] !== undefined && Number.isFinite(t) && t > 0 ? t : null,
+    slope: positive('data-slope'),
+    planDepth: positive('data-plan-depth'),
     outline: outline.attrs.d,
   };
   const rect = outlineRect(outline.attrs.d);
@@ -358,7 +364,7 @@ export function designSvg(d: Design): string {
   const out: string[] = [];
   out.push('<?xml version="1.0" encoding="UTF-8"?>');
   out.push(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${esc(p.width)}" height="${esc(p.height)}" viewBox="${esc(p.viewBox)}" data-place="${p.place}"${p.thickness !== null ? ` data-thickness="${p.thickness}"` : ''}>`,
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${esc(p.width)}" height="${esc(p.height)}" viewBox="${esc(p.viewBox)}" data-place="${p.place}"${p.thickness !== null ? ` data-thickness="${p.thickness}"` : ''}${p.slope !== null ? ` data-slope="${p.slope}"` : ''}${p.planDepth !== null ? ` data-plan-depth="${p.planDepth}"` : ''}>`,
   );
   out.push(`  <path id="outline" d="${esc(p.outline)}" fill="none" stroke="#000000" stroke-width="0.2"/>`);
   // The zones, drawn but never cut, carrying their settings so the design opens again as it was.

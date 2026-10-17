@@ -14,6 +14,8 @@ A layout tool for ornament on plaques and on the box lid's field and hip faces. 
 ## The file format
 Shared with the lid add-on; set out in ornament/design/CARD_01_loop.md and followed exactly. Field templates always carry data-thickness; hip templates don't yet, and then the depth limit isn't checked (the 1 mm steps still are).
 
+Optional on hip templates (card 3): `data-slope` (degrees) and `data-plan-depth` (mm, how deep the hip is seen from above). The From above view needs data-plan-depth on all four hips; without it (an older export) the lid is shown Flat only.
+
 Extra labels this tool adds, so a design opens again as it was (card 1a). They are only extra data- attributes (or, later, inside one `<metadata>` element), and never change anything the format names:
 - on each `<g class="layer">`: `data-shape="zone:border"` (or centre, fields, left, right) for a layer that is a zone's outline;
 - on a placed shape's path: `data-shape="rect"` or `"ellipse"` and `data-box="x y w h"` (mm);

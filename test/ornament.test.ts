@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_ZONES, levelReadout, thicknessText, type Design, type Layer } from '../src/ornament/model';
 import { SHAPED_LINE, designSvg, openSvg, sampleTemplate } from '../src/ornament/svgfile';
-import { apply, edgeMismatches, keepLid, keptLid, lidDesignFiles, lidLayout, openLid } from '../src/ornament/lid';
+import { NO_PLAN_DEPTH, apply, edgeMismatches, fromAboveReady, keepLid, keptLid, lidDesignFiles, lidLayout, openLid } from '../src/ornament/lid';
 
 const layer = (name: string, level: number, extra: Partial<Layer> = {}): Layer => ({
   id: name,
@@ -235,5 +235,59 @@ describe('ornament: hip edge tolerance (card 2a)', () => {
     const far = withFront(206);
     if (far.kind !== 'lid') throw new Error('lid did not open');
     expect(edgeMismatches(far.lid)).toEqual([expect.stringMatching(/front hip’s top edge is 206 long.*field edge it meets is 204.*may be from different lids/)]);
+  });
+});
+
+// ---------------------------------------------------------------- card 3: From above
+
+describe('ornament: the From above view (card 3)', () => {
+  // Hips sloping at 40 deg, 32 deep seen from above: so 32 / cos 40 wide laid flat, and their feet 2 × 32 longer than their tops.
+  const slant = 32 / Math.cos((40 * Math.PI) / 180);
+  const pd = ' data-slope="40" data-plan-depth="32"';
+  const aboveFiles = () => [
+    { name: 'field.svg', text: sampleTemplate(204, 96, 6) },
+    { name: 'hip-front.svg', text: hipSvg('hip-front', 204, 268, slant, pd) },
+    { name: 'hip-right.svg', text: hipSvg('hip-right', 96, 160, slant, pd) },
+    { name: 'hip-back.svg', text: hipSvg('hip-back', 204, 268, slant, pd) },
+    { name: 'hip-left.svg', text: hipSvg('hip-left', 96, 160, slant, pd) },
+  ];
+
+  it('hips with data-plan-depth 32 draw 32 deep, and the corner lines meet within 0.01', () => {
+    const o = openLid(aboveFiles());
+    expect(o.kind).toBe('lid');
+    if (o.kind !== 'lid') return;
+    expect(o.lid.places['hip-front']!.shaped!.panel).toMatchObject({ slope: 40, planDepth: 32 });
+    expect(fromAboveReady(o.lid).ok).toBe(true);
+    const m = lidLayout(o.lid, 'above');
+    // Each hip's ends, from its top edge to its foot, in lid mm: [left top, left foot, right top, right foot] as seen from outside.
+    const ends = (place: 'hip-front' | 'hip-back' | 'hip-left' | 'hip-right', top: number, foot: number) => {
+      const inset = (foot - top) / 2;
+      return [apply(m[place]!, [inset, 0]), apply(m[place]!, [0, slant]), apply(m[place]!, [inset + top, 0]), apply(m[place]!, [foot, slant])];
+    };
+    const front = ends('hip-front', 204, 268);
+    const back = ends('hip-back', 204, 268);
+    const left = ends('hip-left', 96, 160);
+    const right = ends('hip-right', 96, 160);
+    // 32 deep, against the field edge with no gap: the front from 96 to 128, the back from 0 to -32, the left from 0 to -32, the right from 204 to 236.
+    near(front.flat(), [0, 96, -32, 128, 204, 96, 236, 128]);
+    near(back.flat(), [204, 0, 236, -32, 0, 0, -32, -32]);
+    near(left.flat(), [0, 0, -32, -32, 0, 96, -32, 128]);
+    near(right.flat(), [204, 96, 236, 128, 204, 0, 236, -32]);
+    // Neighbouring hips meet on the corner lines: the front's right end is the right hip's left end, and so round.
+    near([...front[2], ...front[3]], [...right[0], ...right[1]]);
+    near([...right[2], ...right[3]], [...back[0], ...back[1]]);
+    near([...back[2], ...back[3]], [...left[0], ...left[1]]);
+    near([...left[2], ...left[3]], [...front[0], ...front[1]]);
+    // Flat is as it was: 10 clear, the full width laid flat.
+    near(apply(lidLayout(o.lid)['hip-front']!, [0, slant]), [-32, 96 + 10 + slant]);
+  });
+
+  it('a hip without data-plan-depth gives the plain line and stays on Flat', () => {
+    const o = openLid(aboveFiles().map((f) => (f.name === 'hip-left.svg' ? { ...f, text: hipSvg('hip-left', 96, 160, slant) } : f)));
+    expect(o.kind).toBe('lid');
+    if (o.kind !== 'lid') return;
+    expect(fromAboveReady(o.lid)).toEqual({ ok: false, message: NO_PLAN_DEPTH });
+    expect(NO_PLAN_DEPTH).toBe('Export the templates again from Blender to see this view');
+    expect(lidLayout(o.lid, 'above')).toEqual(lidLayout(o.lid, 'flat'));
   });
 });

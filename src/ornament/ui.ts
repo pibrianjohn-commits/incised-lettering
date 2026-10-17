@@ -48,6 +48,8 @@ import {
   lidBounds,
   lidDesignFiles,
   lidLayout,
+  fromAboveReady,
+  type LidView,
   openLid,
   placedOutline,
   slotPanel,
@@ -71,6 +73,7 @@ type State = Lid;
 type ViewMode = 'layout' | 'tone';
 
 const VIEW_KEY = 'incised.ornament.view';
+const LID_VIEW_KEY = 'incised.ornament.lidview';
 const RULER = 24; // px
 const PAD = 16; // px round the board
 
@@ -83,6 +86,9 @@ const NONE: Slot = Object.freeze({ design: null, shaped: null }) as Slot;
 const slot = (): Slot => state.places[state.current] ?? NONE;
 let selected: string | null = null;
 let viewMode: ViewMode = 'layout';
+/** Flat, or From above (card 3): asked for; drawn only when the lid can be seen from above. */
+let lidView: LidView = 'flat';
+const shownView = (): LidView => (lidView === 'above' && fromAboveReady(state).ok ? 'above' : 'flat');
 let zoom: 'true' | 'fit' = 'true';
 let message = '';
 let open = false;
@@ -576,6 +582,10 @@ function wireSide() {
     const b = (e.target as HTMLElement).closest<HTMLElement>('[data-view]');
     if (b) setViewMode(b.dataset.view as ViewMode);
   });
+  $('orn-lidview').addEventListener('click', (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLElement>('[data-lidview]');
+    if (b) setLidView(b.dataset.lidview as LidView);
+  });
   $('orn-zoom').addEventListener('click', (e) => {
     const b = (e.target as HTMLElement).closest<HTMLElement>('[data-zoom]');
     if (b) setZoom(b.dataset.zoom as 'true' | 'fit');
@@ -590,6 +600,27 @@ function setViewMode(m: ViewMode) {
     /* not remembered */
   }
   draw();
+}
+
+/** Flat, or From above: the lid as it sits on the box. For looking only; without plan depths it stays Flat. */
+function setLidView(v: LidView) {
+  if (v === 'above') {
+    const ready = fromAboveReady(state);
+    if (!ready.ok) {
+      // Asked for but can't be drawn: it stays Flat, saying why over the drawing, until Flat is picked.
+      lidView = state.whole ? 'above' : 'flat';
+      draw();
+      return host.say(ready.message);
+    }
+  }
+  lidView = v;
+  try {
+    localStorage.setItem(LID_VIEW_KEY, v);
+  } catch {
+    /* not remembered */
+  }
+  draw();
+  host.say(v === 'above' ? 'From above: the lid as it sits on the box. For looking only: click a place to work on it, laid flat.' : 'Flat: the lid opened out flat.');
 }
 
 function setZoom(z: 'true' | 'fit') {
@@ -611,7 +642,7 @@ function tone(level: number, deepest: number) {
 
 /** The whole of what is laid out, in lid mm (the field's back-left corner at 0, 0; a single panel's top-left). */
 function bounds() {
-  return lidBounds(state) ?? { x: 0, y: 0, w: 0, h: 0 };
+  return lidBounds(state, shownView()) ?? { x: 0, y: 0, w: 0, h: 0 };
 }
 
 function scale(): number {
@@ -644,7 +675,7 @@ function rulers(b: { x: number; y: number; w: number; h: number }, s: number): s
 
 /** Each open place, where it lies on the lid. */
 function placements(): { place: Place; m: Affine; slot: Slot; panel: Panel }[] {
-  const layout = lidLayout(state);
+  const layout = lidLayout(state, shownView());
   return PLACES.flatMap((place) => {
     const m = layout[place];
     const sl = state.places[place];
@@ -654,7 +685,7 @@ function placements(): { place: Place; m: Affine; slot: Slot; panel: Panel }[] {
 }
 
 /** The current place's mm to the lid's. */
-const currentM = (): Affine => lidLayout(state)[state.current] ?? [1, 0, 0, 1, 0, 0];
+const currentM = (): Affine => lidLayout(state, shownView())[state.current] ?? [1, 0, 0, 1, 0, 0];
 
 function draw() {
   if (!open) return;
@@ -665,6 +696,9 @@ function draw() {
   document.querySelectorAll<HTMLElement>('#orn-viewmode [data-view]').forEach((b) => b.classList.toggle('on', b.dataset.view === viewMode));
   document.querySelectorAll<HTMLElement>('#orn-zoom [data-zoom]').forEach((b) => b.classList.toggle('on', b.dataset.zoom === zoom));
   $('orn-viewmode').hidden = !placements().some((q) => q.slot.design);
+  const above = shownView() === 'above';
+  document.querySelectorAll<HTMLElement>('#orn-lidview [data-lidview]').forEach((b) => b.classList.toggle('on', b.dataset.lidview === (above ? 'above' : 'flat')));
+  $('orn-lidview').hidden = !state.whole;
   if (!p) {
     svg.innerHTML = '';
     svg.setAttribute('width', '0');
@@ -699,7 +733,7 @@ function draw() {
     const here = q.place === state.current;
     const lidMode = state.whole;
     parts.push(
-      `<path class="orn-board${lidMode && here ? ' here' : ''}${lidMode ? ' pick' : ''}" data-place="${q.place}" d="${ringsPath(placedOutline(q.panel, q.m), s)}" fill-rule="evenodd"><title>${esc(PLACE_NAMES[q.place])}${here ? '' : ': click to work on it'}</title></path>`,
+      `<path class="orn-board${lidMode && here ? ' here' : ''}${lidMode ? ' pick' : ''}" data-place="${q.place}" d="${ringsPath(placedOutline(q.panel, q.m), s)}" fill-rule="evenodd"><title>${esc(PLACE_NAMES[q.place])}${above ? ': click to work on it, laid flat' : here ? '' : ': click to work on it'}</title></path>`,
     );
     const dd = q.slot.design;
     if (dd) {
@@ -733,7 +767,8 @@ function draw() {
   }
   const m = currentM();
   const sel = d?.layers.find((l) => l.id === selected);
-  if (d && sel) {
+  // From above is for looking only: no handles.
+  if (d && sel && !above) {
     const { rings, twin } = layerRings(d, sel);
     parts.push(`<path class="orn-sel" d="${ringsPath([...rings, ...twin].map((r) => r.map((pt) => apply(m, pt))), s)}"/>`);
     if (sel.shape.kind === 'rect' || sel.shape.kind === 'ellipse') {
@@ -754,12 +789,15 @@ function draw() {
           .join('')
       : '';
   parts.push('</g>');
-  const name = `${state.whole && p.place !== 'field' ? 'Lid · ' : ''}${PLACE_NAMES[p.place]} · ${mm(p.w)} × ${mm(p.h)} mm · ${thicknessText(p)}`;
+  const name = `${above ? 'Lid from above · ' : state.whole && p.place !== 'field' ? 'Lid · ' : ''}${PLACE_NAMES[p.place]} · ${mm(p.w)} × ${mm(p.h)} mm · ${thicknessText(p)}`;
   parts.push(rulers(bb, s));
   svg.innerHTML = parts.join('');
   $('orn-title').textContent = name;
-  $('orn-shaped').hidden = !slot().shaped;
-  $('orn-shaped').textContent = slot().shaped ? `${state.whole ? `${PLACE_NAMES[p.place]}: ` : ''}${SHAPED_LINE}` : '';
+  // An older hip template can't be seen from above: said plainly while From above is asked for.
+  const noAbove = lidView === 'above' && state.whole && !above ? fromAboveReady(state) : null;
+  const lines = [noAbove && !noAbove.ok ? `${noAbove.message}.` : '', slot().shaped ? `${state.whole ? `${PLACE_NAMES[p.place]}: ` : ''}${SHAPED_LINE}` : ''].filter(Boolean);
+  $('orn-shaped').hidden = !lines.length;
+  $('orn-shaped').innerHTML = lines.map(esc).join('<br>');
 }
 
 // ---------------------------------------------------------------- pointer: select, move, size
@@ -793,6 +831,13 @@ function wireCanvas() {
     const t = e.target as Element;
     const handle = t.closest<SVGElement>('[data-handle]')?.dataset.handle;
     const place = t.closest<SVGElement>('[data-place]')?.dataset.place as Place | undefined;
+    // From above is for looking only: a click goes back to Flat, with that place picked.
+    if (shownView() === 'above') {
+      if (!place) return;
+      setLidView('flat');
+      setPlace(place);
+      return;
+    }
     // A press on another place of the lid goes to work on it.
     if (!handle && place && place !== state.current) {
       setPlace(place);
@@ -864,7 +909,7 @@ function wireCanvas() {
     const s = scale();
     const lidAt = toLid(e, s);
     // Over a place: where, in that place's own mm (as its file has them).
-    const layout = lidLayout(state);
+    const layout = lidLayout(state, shownView());
     for (const q of placements()) {
       const [x, y] = apply(invert(layout[q.place]!), lidAt);
       if (x >= 0 && y >= 0 && x <= q.panel.w && y <= q.panel.h) {
@@ -926,6 +971,10 @@ export function ornamentKey(e: KeyboardEvent, inField: boolean): boolean {
     setViewMode(viewMode === 'tone' ? 'layout' : 'tone');
     return true;
   }
+  if (k === 'f' && !e.shiftKey) {
+    setLidView(shownView() === 'above' ? 'flat' : 'above');
+    return true;
+  }
   if (k === 'z') {
     setZoom(e.shiftKey ? 'true' : 'fit');
     return true;
@@ -944,6 +993,8 @@ export function ornamentCommands(): { label: string; run: () => void; hint?: str
     { label: 'Ornament: save design', run: saveDesign, hint: 'Ctrl+S in Ornament', words: 'svg lid blender export' },
     { label: 'Ornament: view in tone (deeper is darker)', run: () => setViewMode('tone'), hint: 'T', words: 'levels depth' },
     { label: 'Ornament: view the layout in its finishes', run: () => setViewMode('layout'), hint: 'T', words: 'gold ebony' },
+    { label: 'Ornament: see the lid from above (as it sits on the box)', run: () => setLidView('above'), hint: 'F', words: 'plan top view hips squashed box' },
+    { label: 'Ornament: see the lid laid flat', run: () => setLidView('flat'), hint: 'F', words: 'opened out plan' },
     { label: 'Ornament: true size', run: () => setZoom('true'), hint: 'Shift+Z' },
     { label: 'Ornament: the whole panel (or the whole lid)', run: () => setZoom('fit'), hint: 'Z' },
     ...(['zone:border', 'zone:centre', 'zone:fields', 'rect', 'ellipse'] as const).map((v) => ({ label: `Ornament: add a layer, ${SHAPE_NAMES[v].toLowerCase()}`, run: () => addLayer(v), words: 'layer shape' })),
@@ -969,6 +1020,7 @@ export function initOrnament(h: OrnamentHost) {
   try {
     const v = localStorage.getItem(VIEW_KEY);
     if (v === 'tone' || v === 'layout') viewMode = v;
+    if (localStorage.getItem(LID_VIEW_KEY) === 'above') lidView = 'above';
     // The last lid (or template) opened, laid out ready, with every place's layers.
     const kept = keptLid(localStorage);
     if (kept) {

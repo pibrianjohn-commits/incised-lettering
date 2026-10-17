@@ -954,8 +954,9 @@ body[data-stage='ornament'] #st-cursor, body[data-stage='ornament'] .st-zoom, bo
 .orn-board.pick { cursor: pointer; }
 .orn-board.pick:not(.here) { fill-opacity: 0.6; }
 .orn-board.here { stroke: var(--accent); stroke-width: 2; }
-.orn-place-name { fill: var(--muted); font-size: 12px; text-anchor: middle; pointer-events: none; }
-.orn-place-name.here { fill: var(--accent); font-weight: 600; }
+/* The board is pale in light and dark alike, so the names are dark ink on a pale halo in both (card 3). */
+.orn-place-name { fill: #2b2f36; stroke: #fbfbfa; stroke-width: 3px; stroke-linejoin: round; paint-order: stroke; font-size: 13px; font-weight: 600; text-anchor: middle; pointer-events: none; }
+.orn-place-name.here { fill: #1d4ed8; }
 .orn-places { display: flex; margin: 0 0 8px; }
 .orn-places button { flex: 1; padding: 3px 4px; font-size: 12.5px; }
 .orn-shape { stroke: rgb(0 0 0 / 0.55); stroke-width: 0.75; cursor: pointer; }
