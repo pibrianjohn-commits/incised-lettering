@@ -25,6 +25,7 @@
         <button data-stage="panel" title="Panel size, border and margins (key 3)"><kbd>3</kbd> Panel</button>
         <button data-stage="machine" title="Marking out and G-code (key 4)"><kbd>4</kbd> Machine</button>
         <button data-stage="3d" title="The board in 3D (key 5)"><kbd>5</kbd> 3D</button>
+        <button data-stage="ornament" class="orn-tab" title="Ornament for the box lid and plaques, set out on its own, apart from the lettering (key 6)"><kbd>6</kbd> Ornament</button>
       </nav>
       <div class="top-tools">
         <span class="seg">
@@ -356,6 +357,43 @@
         <p id="v3d-note" class="hint small"></p>
       </div>
 
+      <!-- 6 Ornament: apart from the lettering (ornament/design/CARD_01_loop.md) -->
+      <div class="stage-panel" data-panel="ornament" hidden>
+        <section>
+          <h2>Template</h2>
+          <div id="orn-template"></div>
+          <div class="line-buttons wrap">
+            <button id="orn-open" title="An SVG template from the lid add-on in Blender, or a design saved here (Ctrl+O)">Open template…</button>
+            <button id="orn-sample" class="quiet" title="A plain lid field, 204 × 96 and 6 thick, as the lid add-on makes them">Try a sample field</button>
+          </div>
+          <input type="file" id="orn-file" accept=".svg,image/svg+xml" hidden />
+        </section>
+        <section id="orn-zones" hidden>
+          <h2>Zones</h2>
+          <div id="orn-zone-boxes"></div>
+        </section>
+        <section id="orn-layer-sec" hidden>
+          <h2>Layers and levels</h2>
+          <p class="hint small">Later layers win where they overlap, as the lid add-on builds them.</p>
+          <ol id="orn-layers"></ol>
+          <div id="orn-add" class="orn-add">
+            <span class="name">Add a layer</span>
+            <span class="line-buttons wrap">
+              <button data-add="zone:border">Border</button>
+              <button data-add="zone:centre">Centre</button>
+              <button data-add="zone:fields">Side fields</button>
+              <button data-add="rect">Rectangle</button>
+              <button data-add="ellipse">Ellipse</button>
+            </span>
+          </div>
+          <div id="orn-readout" aria-live="polite"></div>
+        </section>
+        <section>
+          <button id="orn-save" class="primary" disabled title="One SVG for the lid add-on, the size and place of its template (Ctrl+S)">Save design</button>
+          <p class="hint small">Saves to the Downloads folder. A saved design opens again here exactly as it was.</p>
+        </section>
+      </div>
+
       <footer id="side-foot">
         <p id="credit"></p>
       </footer>
@@ -470,6 +508,32 @@
           <button id="true-size" title="Show the panel at full size (Shift+Z)">True size</button>
           <button id="fit" title="Show the whole panel on the screen (Z)">Zoom to panel</button>
         </span>
+      </div>
+
+      <div id="orn" hidden>
+        <div id="orn-bar">
+          <span id="orn-title"></span>
+          <span id="orn-legend"></span>
+          <span class="orn-bar-tools">
+            <span class="seg" id="orn-viewmode" title="T switches">
+              <button data-view="layout" title="The layers in their finishes">Layout</button>
+              <button data-view="tone" title="In tone: the deeper, the darker, so the levels read at a glance">Tone</button>
+            </span>
+            <span class="seg" id="orn-zoom">
+              <button data-zoom="true" title="True size (Shift+Z)">True size</button>
+              <button data-zoom="fit" title="The whole panel (Z)">Whole panel</button>
+            </span>
+          </span>
+        </div>
+        <p id="orn-shaped" hidden></p>
+        <div id="orn-view">
+          <div id="orn-empty">
+            <p><b>Ornament</b>, set out apart from the lettering.</p>
+            <p>Open a template from the lid add-on in Blender, or try a sample field, from the side panel.</p>
+          </div>
+          <svg id="orn-canvas" xmlns="http://www.w3.org/2000/svg" aria-label="The ornament panel at true size"></svg>
+        </div>
+        <span id="orn-cursor"></span>
       </div>
 
       <div id="v3d" hidden>

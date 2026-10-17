@@ -36,6 +36,7 @@ export const STAGE_VIEWS: Record<Stage, StageView> = {
   panel: { preset: null, layers: ['fill', 'margins', 'capbase', 'mid'] }, // the letters, with the margins
   machine: { preset: 'setting', layers: PRESETS.setting },
   '3d': { preset: null, layers: [] },
+  ornament: { preset: null, layers: [] }, // its own drawing, apart from the lettering
 };
 
 /**

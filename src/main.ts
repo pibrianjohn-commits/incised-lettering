@@ -53,6 +53,7 @@ import { RULER, rulerSvg } from './rulers';
 import { nearest, nearestTo, pointTargets, snapTargets, type Feature, type Snap, type SnapTarget } from './snap';
 import { lineSets, panelCentre, placeLabels, type LineSet, type SetKind } from './settingout';
 import { PanZoom, type ViewState } from './view';
+import { hideOrnament, initOrnament, ornamentCanUndo, ornamentCommands, ornamentKey, ornamentRedo, ornamentUndo, showOrnament } from './ornament/ui';
 import { LAYERS, PRESET_KEYS, PRESETS, SETTING_OUT, STAGE_VIEWS, viewsFromBefore, type Layer, type PresetName, type StageView } from './views';
 
 // ---------------------------------------------------------------- state
@@ -144,8 +145,8 @@ let scaling: { a: { x: number; y: number } | null } | null = null;
 /** What a line being dragged has snapped to, to draw the snapping guides. */
 let lineSnaps: { x: Snap | null; y: Snap | null } | null = null;
 /** Stages of the job, in order, on keys 1 to 5 (BRIEF.md, Decisions: the interface). */
-const STAGES: Stage[] = ['write', 'space', 'panel', 'machine', '3d'];
-const STAGE_NAMES: Record<Stage, string> = { write: 'Write', space: 'Space', panel: 'Panel', machine: 'Machine', '3d': '3D' };
+const STAGES: Stage[] = ['write', 'space', 'panel', 'machine', '3d', 'ornament'];
+const STAGE_NAMES: Record<Stage, string> = { write: 'Write', space: 'Space', panel: 'Panel', machine: 'Machine', '3d': '3D', ornament: 'Ornament' };
 const STAGE_KEY = 'incised.stage';
 let stage: Stage = 'write';
 /** The stage to go back to from the 3D view. */
@@ -289,6 +290,8 @@ function buildControls() {
 
   // Kerning box.
   for (const el of [pop, linePop, $('viewbar')]) el.addEventListener('pointerdown', (e) => e.stopPropagation());
+  // The ornament has its own drawing over the lettering's: presses and scrolling there are its own.
+  for (const type of ['pointerdown', 'wheel', 'dblclick'] as const) $('orn').addEventListener(type, (e) => e.stopPropagation());
   wireTools();
   pop.addEventListener('click', (e) => {
     const b = (e.target as HTMLElement).closest('button');
@@ -909,14 +912,14 @@ function applyPreset(name: PresetName) {
 
 /** Keep what this stage shows now, as one step to undo, before a tick, a preset or G changes it. */
 function recordView() {
-  if (stage === '3d') return;
+  if (stage === '3d' || stage === 'ornament') return;
   history.record({ view: { stage, was: viewOf(stage) } });
   refreshUndoButtons();
 }
 
 /** G: every kind of setting-out line, or, if any is showing, none. One step to undo. */
 function toggleSettingOut() {
-  if (stage === '3d') return;
+  if (stage === '3d' || stage === 'ornament') return;
   const boxes = SETTING_OUT.map((l) => $<HTMLInputElement>(`show-${l}`));
   const on = !boxes.some((b) => b.checked);
   recordView();
@@ -955,7 +958,7 @@ function viewOf(s: Stage): StageView {
 }
 
 function rememberView() {
-  if (stage === '3d') return;
+  if (stage === '3d' || stage === 'ornament') return;
   stageViews[stage] = { preset, layers: LAYERS.filter((l) => $<HTMLInputElement>(`show-${l}`).checked) };
   writeJson(VIEWS_KEY, stageViews);
 }
@@ -984,6 +987,11 @@ function onKey(e: KeyboardEvent) {
   if (document.querySelector('dialog[open]')) return;
   // Typing boxes keep their keys; tick boxes, sliders and buttons don't need them.
   const inField = target.closest('textarea, select, input:not([type=checkbox]):not([type=range]):not([type=radio])');
+  // The Ornament tab has its own undo, files and keys (src/ornament/ui.ts).
+  if (stage === 'ornament' && ornamentKey(e, !!inField)) {
+    e.preventDefault();
+    return;
+  }
   // Undo, redo, files and search work everywhere, typing included.
   if ((e.ctrlKey || e.metaKey) && !e.altKey) {
     const k = e.key.toLowerCase();
@@ -1001,12 +1009,12 @@ function onKey(e: KeyboardEvent) {
   }
   if (inField) return;
 
-  // 1 to 5: the stages. Shift with 1 to 4: the views.
-  const digit = /^Digit([1-5])$/.exec(e.code)?.[1] ?? (/^[1-5]$/.test(e.key) ? e.key : null);
+  // 1 to 6: the stages. Shift with 1 to 4: the views.
+  const digit = /^Digit([1-6])$/.exec(e.code)?.[1] ?? (/^[1-6]$/.test(e.key) ? e.key : null);
   if (digit && !e.altKey) {
     const n = Number(digit);
     if (!e.shiftKey) setStage(STAGES[n - 1]);
-    else if (n <= 4 && stage !== '3d') applyPreset(PRESET_KEYS[n - 1]);
+    else if (n <= 4 && stage !== '3d' && stage !== 'ornament') applyPreset(PRESET_KEYS[n - 1]);
     e.preventDefault();
     return;
   }
@@ -1015,6 +1023,8 @@ function onKey(e: KeyboardEvent) {
     e.preventDefault();
     return;
   }
+  // None of the lettering's keys work on the ornament.
+  if (stage === 'ornament') return;
   // In the 3D view the mouse turns the board; Esc goes back.
   if (stage === '3d') {
     if (e.key === 'Escape') {
@@ -1097,11 +1107,13 @@ function onKey(e: KeyboardEvent) {
 }
 
 function undo() {
+  if (stage === 'ornament') return ornamentUndo();
   const prev = history.undo(nowFor);
   if (prev) restoreStep(prev, 'Undone');
 }
 
 function redo() {
+  if (stage === 'ornament') return ornamentRedo();
   const next = history.redo(nowFor);
   if (next) restoreStep(next, 'Redone');
 }
@@ -1128,6 +1140,12 @@ function restore(p: Project) {
 }
 
 function refreshUndoButtons() {
+  if (stage === 'ornament') {
+    const o = ornamentCanUndo();
+    $<HTMLButtonElement>('undo').disabled = !o.undo;
+    $<HTMLButtonElement>('redo').disabled = !o.redo;
+    return;
+  }
   $<HTMLButtonElement>('undo').disabled = !history.canUndo;
   $<HTMLButtonElement>('redo').disabled = !history.canRedo;
 }
@@ -1168,7 +1186,7 @@ function wireTools() {
     'pointerdown',
     (e) => {
       if (!measuring || e.button !== 0) return;
-      if ((e.target as Element).closest('#viewbar, .ctx, .ruler, #ruler-corner, #cam-bar')) return;
+      if ((e.target as Element).closest('#viewbar, .ctx, .ruler, #ruler-corner, #cam-bar, #orn')) return;
       e.stopPropagation(); // don't pan
       // Each end snaps, across and down, to the setting-out lines and every place a line snaps to (Alt, or S, for none).
       const targets = layout ? pointTargets(layout, sets) : { x: [], y: [] };
@@ -1974,7 +1992,7 @@ function onPicturePress(e: PointerEvent) {
   const ri = project.refImage;
   if (!ri || measuring || e.button !== 0) return;
   const t = e.target as Element;
-  if (t.closest('#viewbar, .ctx, .ruler, #ruler-corner, #cam-bar')) return;
+  if (t.closest('#viewbar, .ctx, .ruler, #ruler-corner, #cam-bar, #orn')) return;
 
   // Scaling: two clicks on the picture, then the real distance between them.
   if (scaling) {
@@ -3364,6 +3382,9 @@ function setStage(s: Stage, force = false) {
   $('side').scrollTop = 0;
   closeMenus();
   if (s !== 'machine' && cam) closeCam();
+  if (s === 'ornament') showOrnament();
+  else hideOrnament();
+  refreshUndoButtons();
   if (s === '3d') {
     if (measuring) setMeasuring(false);
     selected = null;
@@ -3960,6 +3981,11 @@ function commands(): Command[] {
   const list: Command[] = [];
   const add = (label: string, run: () => void, hint?: string, words?: string) => list.push({ label, run, hint, words });
   STAGES.forEach((s, i) => add(`Go to ${STAGE_NAMES[s]}`, () => setStage(s), `key ${i + 1}`, 'stage tab'));
+  for (const c of ornamentCommands())
+    add(c.label, () => {
+      setStage('ornament');
+      c.run();
+    }, c.hint, c.words);
   PRESET_KEYS.forEach((k, i) =>
     add(
       `View: ${PRESET_TITLES[k]}`,
@@ -4229,6 +4255,15 @@ async function start() {
   }
   $('loading').hidden = true;
   // Back to the stage last worked in (but not straight into 3D, which takes a moment to build).
+  initOrnament({
+    say,
+    pxPerMm,
+    undoChanged: (canUndo, canRedo) => {
+      if (stage !== 'ornament') return;
+      $<HTMLButtonElement>('undo').disabled = !canUndo;
+      $<HTMLButtonElement>('redo').disabled = !canRedo;
+    },
+  });
   const last = localStorage.getItem(STAGE_KEY) as Stage | null;
   setStage(last && STAGES.includes(last) && last !== '3d' ? last : 'write', true);
   fitPanel();

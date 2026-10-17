@@ -4,13 +4,28 @@ export const SHORTCUTS: { group: string; items: [string, string][] }[] = [
   {
     group: 'Stages and views',
     items: [
-      ['1 – 5', 'Write, Space, Panel, Machine, 3D'],
+      ['1 – 6', 'Write, Space, Panel, Machine, 3D, Ornament'],
       ['Shift + 1 – 4', 'View: Design, Spacing, Setting-out, Proof'],
       ['G', 'Setting-out lines: show every kind, or hide them all (a tick for each kind under Layers; each tick is one step to undo)'],
       ['I', 'Show or hide the inspection panel'],
       ['Z', 'Zoom to the whole panel'],
       ['Shift + Z', 'True size'],
       ['Esc', 'Close a box, clear the selection, or leave the 3D view'],
+    ],
+  },
+  {
+    group: 'Ornament (key 6)',
+    items: [
+      ['Ctrl + O', 'Open a template from the lid add-on, or a design saved here'],
+      ['Ctrl + S', 'Save the design, for the lid add-on'],
+      ['Ctrl + Z / Ctrl + Shift + Z', 'Undo and redo in the ornament (its own, apart from the lettering)'],
+      ['Click a shape', 'Select its layer'],
+      ['Drag a placed shape', 'Move it; drag its handles to size it'],
+      ['← ↑ → ↓', 'Nudge the selected placed shape 0.1 mm (Shift: 1 mm)'],
+      ['Alt + ↑ / ↓', 'Move the selected layer earlier or later (later layers win where they overlap)'],
+      ['Delete', 'Take out the selected layer'],
+      ['T', 'Tone view (deeper is darker), or back to the finishes'],
+      ['Z / Shift + Z', 'The whole panel, or true size'],
     ],
   },
   {

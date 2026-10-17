@@ -9,7 +9,7 @@ import { LINK_OVERLAP, THIN_JOINT } from './links';
 import { BED, BED_EXTENDED, bedFit, bedScale, letteringBox, shrinkToFit } from './panel';
 import type { Check, MachineSettings, Pass } from './toolpath';
 
-export type Stage = 'write' | 'space' | 'panel' | 'machine' | '3d';
+export type Stage = 'write' | 'space' | 'panel' | 'machine' | '3d' | 'ornament';
 
 /**
  * A one-click fix. The id says what to do, with any figure it needs after a
