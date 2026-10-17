@@ -42,3 +42,11 @@ A standing rule for every task, from 7 Oct 2026.
 - Every fix is tried before it is offered (added 8 Oct 2026). A one-click fix appears only if, tried on a copy of the layout, it cures the problem it is listed under without causing a new one. The fix is built once and the same code is both tried and applied, so what was tried is what Brian gets. Found 8 Oct 2026: "Return line 2 to auto" moved line 2 less than 1 mm and left its problem in place. Tests prove each fix cures its own problem.
 - Only ask Brian about craft decisions, never about obvious usability.
 
+
+## Ornament side
+
+- The ornament layout tool is planned in ornament/PLAN.md. Read it before any ornament task.
+- Build only from a card Brian brings: move it into ornament/design/ and commit it first. PLAN.md is planning only; never build from it directly.
+- Report every card in ornament/PROGRESS.md, newest first, in plain words: results, what was built, faults found and fixed, assumptions, questions for the design chat, what was not tested. Keep the two newest reports; move older ones to ornament/design/PROGRESS_ARCHIVE.md.
+- Reference images live in Brian's private repo ornament-reference, never in this public repo. Only written rules and original geometry come here. The reference repo is not yet cloned locally (the first attempt needed a GitHub login this session did not have); once it is, record its path here, read the images from there, and never copy them into this repo.
+- What ornament goes where is Brian's decision. Never choose design content in code.
