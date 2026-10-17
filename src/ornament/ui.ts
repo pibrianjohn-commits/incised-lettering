@@ -2,6 +2,8 @@
 // the lid add-on, set out its zones, put layers of plain shapes at levels,
 // and save the design back in the same format. Separate from the lettering:
 // it has its own undo and its own keys, and reads no machine settings.
+// The whole lid (CARD_02_lid_layout.md): the five places laid out together,
+// each keeping its own zones and layers, remembered in this browser.
 
 import { download } from '../files';
 import { History } from '../history';
@@ -12,6 +14,7 @@ import {
   FINISH_NAMES,
   FINISHES,
   PLACE_NAMES,
+  PLACES,
   ZONE_NAMES,
   designProblems,
   levelReadout,
@@ -27,12 +30,32 @@ import {
   type Finish,
   type Layer,
   type Panel,
+  type Place,
+  type Pt,
   type Ring,
   type Shape,
   type ZoneName,
   type Zones,
 } from './model';
-import { FINISH_COLOURS, designFileName, designSvg, layerRings, openSvg, pathRings, sampleTemplate } from './svgfile';
+import { FINISH_COLOURS, SHAPED_LINE, designFileName, designSvg, layerRings, openSvg, sampleTemplate } from './svgfile';
+import {
+  EMPTY_LID,
+  apply,
+  edgeMismatches,
+  invert,
+  keepLid,
+  keptLid,
+  lidBounds,
+  lidDesignFiles,
+  lidLayout,
+  openLid,
+  placedOutline,
+  slotPanel,
+  unsavedPlaces,
+  type Affine,
+  type Lid,
+  type Slot,
+} from './lid';
 
 export interface OrnamentHost {
   say(text: string): void;
@@ -42,21 +65,22 @@ export interface OrnamentHost {
   undoChanged(canUndo: boolean, canRedo: boolean): void;
 }
 
-interface State {
-  design: Design | null;
-  /** A shaped panel: its outline is shown, and nothing else until the outlines card. */
-  shaped: { panel: Panel; text: string } | null;
-}
+/** What is open: one template, or the whole lid, each place with its own design (a shaped one shows its outline only, until the outlines card). */
+type State = Lid;
 
 type ViewMode = 'layout' | 'tone';
 
-const STORE_KEY = 'incised.ornament';
 const VIEW_KEY = 'incised.ornament.view';
 const RULER = 24; // px
 const PAD = 16; // px round the board
 
 let host: OrnamentHost;
-let state: State = { design: null, shaped: null };
+let state: State = structuredClone(EMPTY_LID);
+/** Each place's design as last opened or saved, to know when there are layers not yet saved. */
+let savedAs: Partial<Record<Place, string>> = {};
+const NONE: Slot = Object.freeze({ design: null, shaped: null }) as Slot;
+/** The place being worked on. */
+const slot = (): Slot => state.places[state.current] ?? NONE;
 let selected: string | null = null;
 let viewMode: ViewMode = 'layout';
 let zoom: 'true' | 'fit' = 'true';
@@ -72,18 +96,17 @@ const clone = (s: State): State => structuredClone(s);
 
 /** Record the state before a change; changes in the same group in quick succession are one step. */
 function change(mutate: (d: Design) => Design | void, group: string | null = null) {
-  if (!state.design) return;
+  const d = slot().design;
+  if (!d) return;
   history.record(clone(state), group);
-  const next = mutate(state.design);
-  if (next) state.design = next;
+  const next = mutate(d);
+  if (next) slot().design = next;
   saved();
 }
 
 function saved() {
   try {
-    if (state.design) localStorage.setItem(STORE_KEY, designSvg(state.design));
-    else if (state.shaped) localStorage.setItem(STORE_KEY, state.shaped.text);
-    else localStorage.removeItem(STORE_KEY);
+    keepLid(localStorage, state, savedAs);
   } catch {
     /* not kept: lasts for this visit only */
   }
@@ -104,7 +127,7 @@ export function ornamentRedo() {
 
 function restore(s: State, done: string) {
   state = s;
-  if (selected && !state.design?.layers.some((l) => l.id === selected)) selected = null;
+  if (selected && !slot().design?.layers.some((l) => l.id === selected)) selected = null;
   saved();
   render();
   host.say(`${done}.`);
@@ -116,6 +139,26 @@ export function ornamentCanUndo() {
 
 // ---------------------------------------------------------------- opening and saving
 
+/** Layers not yet saved would be lost by opening something else: ask first. */
+function mayReplace(): boolean {
+  const left = unsavedPlaces(state, savedAs);
+  if (!left.length) return true;
+  const names = left.map((p) => PLACE_NAMES[p].toLowerCase());
+  const what = names.length === 1 ? `the ${names[0]}` : `the ${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+  return confirm(`There are layers on ${what} not yet saved. Open in place of them? (Ctrl+Z brings them back; “Save lid design” keeps them as files.)`);
+}
+
+/** Opens a new lid or template in place of what is open: one step to undo. */
+function replaceWith(next: State, saves: Partial<Record<Place, string>>) {
+  history.record(clone(state));
+  state = next;
+  savedAs = saves;
+  selected = null;
+  zoom = 'true';
+  saved();
+  render();
+}
+
 function openText(text: string, from: string) {
   const o = openSvg(text);
   if (o.kind === 'error') {
@@ -124,18 +167,11 @@ function openText(text: string, from: string) {
     host.say(o.message);
     return;
   }
-  history.record(clone(state));
-  selected = null;
-  if (o.kind === 'shaped') {
-    state = { design: null, shaped: { panel: o.panel, text } };
-    message = o.message;
-  } else {
-    state = { design: o.design, shaped: null };
-    message = '';
-  }
-  zoom = 'true';
-  saved();
-  render();
+  if (!mayReplace()) return host.say('Nothing opened: the layers on the lid are as they were.');
+  const place = o.kind === 'design' ? o.design.panel.place : o.panel.place;
+  const s: Slot = o.kind === 'design' ? { design: o.design, shaped: null } : { design: null, shaped: { panel: o.panel, text } };
+  message = '';
+  replaceWith({ places: { [place]: s }, current: place, whole: false }, o.kind === 'design' ? { [place]: designSvg(o.design) } : {});
   const what = o.kind === 'shaped' ? 'shaped panel' : o.kind === 'design' && !o.isTemplate ? 'design' : 'template';
   host.say(`Opened the ${what} ${from}. Ctrl+Z goes back.`);
 }
@@ -156,18 +192,86 @@ async function fileChosen() {
   }
 }
 
+export function openLidFiles() {
+  $<HTMLInputElement>('orn-lid-file').click();
+}
+
+async function lidChosen() {
+  const input = $<HTMLInputElement>('orn-lid-file');
+  const files = [...(input.files ?? [])];
+  input.value = '';
+  if (!files.length) return;
+  let texts: { name: string; text: string }[];
+  try {
+    texts = await Promise.all(files.map(async (f) => ({ name: f.name, text: await f.text() })));
+  } catch {
+    return host.say('Those files could not be read. Nothing was opened.');
+  }
+  const o = openLid(texts);
+  if (o.kind === 'error') {
+    message = o.message;
+    renderSide();
+    host.say(o.message);
+    return;
+  }
+  if (!mayReplace()) return host.say('Nothing opened: the layers on the lid are as they were.');
+  message = '';
+  const saves: Partial<Record<Place, string>> = {};
+  for (const p of PLACES) {
+    const d = o.lid.places[p]?.design;
+    if (d) saves[p] = designSvg(d);
+  }
+  replaceWith(o.lid, saves);
+  zoom = 'true';
+  draw();
+  host.say('Opened the lid: the field with its four hips, laid out flat. Click a place to work on it. Ctrl+Z goes back.');
+}
+
 function openSample() {
   openText(sampleTemplate(), 'sample (lid field, 204 × 96, 6 thick)');
 }
 
 export function saveDesign() {
-  const d = state.design;
-  if (!d) return host.say(state.shaped ? 'A shaped panel can’t be saved as a design yet: shaped panels come with the outlines card.' : 'Open a template first.');
+  const d = slot().design;
+  if (!d) return host.say(slot().shaped ? 'A shaped panel can’t be saved as a design yet: shaped panels come with the outlines card.' : 'Open a template first.');
   download(designSvg(d), designFileName(d), 'image/svg+xml');
+  savedAs[state.current] = designSvg(d);
+  saved();
   host.say(`Saved “${designFileName(d)}” to the Downloads folder, for the lid add-on.`);
 }
 
+/** One design file per place with layers, for the lid add-on. */
+export function saveLidDesign() {
+  if (!Object.keys(state.places).length) return host.say('Open the lid first (Open lid…).');
+  const files = lidDesignFiles(state);
+  if (!files.length) return host.say('No place on the lid has any layers yet, so there is nothing to save.');
+  // A moment apart, so the browser takes each one.
+  files.forEach((f, i) => setTimeout(() => download(f.text, f.name, 'image/svg+xml'), i * 300));
+  for (const f of files) savedAs[f.place] = f.text;
+  saved();
+  host.say(`Saved ${files.map((f) => `“${f.name}”`).join(', ')} to the Downloads folder, for the lid add-on.${files.length > 1 ? ' If the browser asks, allow it to save several files.' : ''}`);
+}
+
+/** Work on another place of the lid. */
+export function setPlace(p: Place) {
+  if (!state.places[p]) return host.say(`${PLACE_NAMES[p]} isn’t open. Open the lid (all five files) to work on every place.`);
+  if (p === state.current) return;
+  state.current = p;
+  selected = null;
+  saved();
+  render();
+  host.say(`Working on the ${PLACE_NAMES[p].toLowerCase()}.${slot().shaped ? ' Shaped panels come with the outlines card.' : ''}`);
+}
+
+function stepPlace(by: 1 | -1) {
+  const have = PLACES.filter((p) => state.places[p]);
+  if (have.length < 2) return host.say('Only one place is open. Open the lid to step between its places.');
+  setPlace(have[(have.indexOf(state.current) + by + have.length) % have.length]);
+}
+
 // ---------------------------------------------------------------- layers
+
+const PLACE_SHORT: Record<Place, string> = { field: 'Field', 'hip-front': 'Front', 'hip-right': 'Right', 'hip-back': 'Back', 'hip-left': 'Left' };
 
 const ZONE_ORDER: ZoneName[] = ['border', 'centre', 'fields', 'left', 'right'];
 
@@ -210,7 +314,7 @@ function shapeFrom(value: string, d: Design, was: Shape | null): Shape {
 const SHAPE_NAMES: Record<string, string> = { 'zone:border': 'Border', 'zone:centre': 'Centre', 'zone:fields': 'Side fields', 'zone:left': 'Left field', 'zone:right': 'Right field', rect: 'Rectangle', ellipse: 'Ellipse' };
 
 function addLayer(value: string) {
-  const d = state.design;
+  const d = slot().design;
   if (!d) return host.say('Open a template first.');
   const shape = shapeFrom(value, d, null);
   const base = SHAPE_NAMES[value] ?? 'Layer';
@@ -232,7 +336,7 @@ function updateLayer(id: string, patch: Partial<Layer>, group: string | null = n
 }
 
 function moveLayer(id: string, by: -1 | 1) {
-  const d = state.design;
+  const d = slot().design;
   if (!d) return;
   const i = d.layers.findIndex((l) => l.id === id);
   const j = i + by;
@@ -247,7 +351,7 @@ function moveLayer(id: string, by: -1 | 1) {
 }
 
 function deleteLayer(id: string) {
-  const l = state.design?.layers.find((x) => x.id === id);
+  const l = slot().design?.layers.find((x) => x.id === id);
   if (!l) return;
   change((d) => ({ ...d, layers: d.layers.filter((x) => x.id !== id) }));
   if (selected === id) selected = null;
@@ -264,17 +368,23 @@ function select(id: string | null) {
 // ---------------------------------------------------------------- side panel
 
 function zoneBox(id: keyof Zones, label: string, step: number, title: string) {
-  const z = state.design?.zones ?? DEFAULT_ZONES;
+  const z = slot().design?.zones ?? DEFAULT_ZONES;
   return `<label title="${esc(title)}">${esc(label)} <span><input type="number" id="orn-${id}" data-zone="${id}" min="0" step="${step}" value="${z[id]}" /> mm</span></label>`;
 }
 
 function renderSide() {
-  const d = state.design;
-  const p = d?.panel ?? state.shaped?.panel ?? null;
+  const d = slot().design;
+  const p = slotPanel(slot());
   const info = p
-    ? `<p class="orn-place"><b>${esc(PLACE_NAMES[p.place])}</b> · ${mm(p.w)} × ${mm(p.h)} mm${p.thickness !== null ? ` · ${thicknessText(p)}` : ''}</p>${p.thickness === null ? `<p class="orn-msg">${esc(NO_THICKNESS)}</p>` : ''}`
-    : '<p class="hint">Open a template saved by the lid add-on in Blender, or a design saved here. Or try a plain lid field to see how it works.</p>';
-  $('orn-template').innerHTML = `${info}${message ? `<p class="orn-msg">${esc(message)}</p>` : ''}`;
+    ? `<p class="orn-place"><b>${esc(PLACE_NAMES[p.place])}</b> · ${mm(p.w)} × ${mm(p.h)} mm${p.thickness !== null ? ` · ${thicknessText(p)}` : ''}</p>${p.thickness === null ? `<p class="orn-msg">${esc(NO_THICKNESS)}</p>` : ''}${slot().shaped ? `<p class="orn-msg">${esc(SHAPED_LINE)}</p>` : ''}`
+    : '<p class="hint">Open the five lid files from the lid add-on in Blender (pick them together), a single template, or a design saved here. Or try a plain lid field to see how it works.</p>';
+  const places = state.whole
+    ? `<div class="seg orn-places" id="orn-places" title="Click a place to work on it ([ and ] step through them)">${PLACES.map((q) => `<button data-place="${q}" class="${q === state.current ? 'on' : ''}">${esc(PLACE_SHORT[q])}</button>`).join('')}</div>`
+    : '';
+  const notes = edgeMismatches(state).map((t) => `<p class="orn-msg">${esc(t)}</p>`).join('');
+  $('orn-template').innerHTML = `${places}${info}${notes}${message ? `<p class="orn-msg">${esc(message)}</p>` : ''}`;
+  $<HTMLButtonElement>('orn-save-lid').hidden = !state.whole;
+  $<HTMLButtonElement>('orn-save-lid').disabled = !lidDesignFiles(state).length;
   $('orn-zones').hidden = !d;
   $('orn-layer-sec').hidden = !d;
   $<HTMLButtonElement>('orn-save').disabled = !d;
@@ -304,7 +414,7 @@ function renderSide() {
 }
 
 function renderLayers() {
-  const d = state.design;
+  const d = slot().design;
   if (!d) return;
   const n = d.layers.length;
   $('orn-layers').innerHTML = n
@@ -333,7 +443,7 @@ function renderLayers() {
 }
 
 function renderReadout() {
-  const d = state.design;
+  const d = slot().design;
   if (!d) return;
   const r = levelReadout(d.layers, d.panel.thickness);
   const problems = designProblems(d);
@@ -365,6 +475,13 @@ function wireSide() {
   $('orn-file').addEventListener('change', () => void fileChosen());
   $('orn-sample').addEventListener('click', openSample);
   $('orn-save').addEventListener('click', saveDesign);
+  $('orn-open-lid').addEventListener('click', openLidFiles);
+  $('orn-lid-file').addEventListener('change', () => void lidChosen());
+  $('orn-save-lid').addEventListener('click', saveLidDesign);
+  $('orn-template').addEventListener('click', (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLElement>('[data-place]');
+    if (b) setPlace(b.dataset.place as Place);
+  });
   $('orn-add').addEventListener('click', (e) => {
     const b = (e.target as HTMLElement).closest<HTMLElement>('[data-add]');
     if (b) addLayer(b.dataset.add!);
@@ -430,7 +547,7 @@ function wireSide() {
   list.addEventListener('change', (e) => {
     const t = e.target as HTMLSelectElement;
     const id = layerOf(t);
-    const d = state.design;
+    const d = slot().design;
     if (!id || !d) return;
     const l = d.layers.find((x) => x.id === id)!;
     if (t.dataset.f === 'shape') updateLayer(id, { shape: shapeFrom(t.value, d, l.shape) });
@@ -445,7 +562,7 @@ function wireSide() {
 
   $('orn-readout').addEventListener('click', (e) => {
     const b = (e.target as HTMLElement).closest<HTMLElement>('[data-fix]');
-    const d = state.design;
+    const d = slot().design;
     if (!b || !d) return;
     const [i, k] = b.dataset.fix!.split(':').map(Number);
     const fix = designProblems(d)[i]?.fixes[k];
@@ -492,101 +609,157 @@ function tone(level: number, deepest: number) {
   return `hsl(36 6% ${l}%)`;
 }
 
-function scale(p: { w: number; h: number }): number {
+/** The whole of what is laid out, in lid mm (the field's back-left corner at 0, 0; a single panel's top-left). */
+function bounds() {
+  return lidBounds(state) ?? { x: 0, y: 0, w: 0, h: 0 };
+}
+
+function scale(): number {
+  const b = bounds();
   const box = $('orn-view').getBoundingClientRect();
-  const fit = Math.max(0.5, Math.min((box.width - RULER - 2 * PAD) / p.w, (box.height - RULER - 2 * PAD) / p.h));
+  const fit = Math.max(0.5, Math.min((box.width - RULER - 2 * PAD) / b.w, (box.height - RULER - 2 * PAD) / b.h));
   return zoom === 'true' ? host.pxPerMm() : fit;
 }
 
-function rulers(p: { w: number; h: number }, s: number): string {
+function rulers(b: { x: number; y: number; w: number; h: number }, s: number): string {
   const out: string[] = [];
   // Ticks at least 3 px apart, numbers at least 36 px apart, at whole millimetres.
   const tick = [1, 5, 10, 50, 100, 500].find((t) => t * s >= 3) ?? 1000;
   const label = [10, 20, 50, 100, 200, 500, 1000].find((t) => t * s >= 36 && t % tick === 0) ?? 2000;
-  const along = (len: number, horiz: boolean) => {
-    for (let k = 0; k * tick <= len + 1e-9; k++) {
+  const along = (lo: number, hi: number, horiz: boolean) => {
+    for (let k = Math.ceil(lo / tick - 1e-9); k * tick <= hi + 1e-9; k++) {
       const v = k * tick;
       const t = v % label === 0 ? 10 : v % (tick * 5) === 0 || v % 10 === 0 ? 6 : 3;
-      const at = RULER + PAD + v * s;
+      const at = RULER + PAD + (v - lo) * s;
       if (horiz) out.push(`<line x1="${at}" y1="${RULER}" x2="${at}" y2="${RULER - t}"/>`);
       else out.push(`<line x1="${RULER}" y1="${at}" x2="${RULER - t}" y2="${at}"/>`);
       if (v % label === 0)
         out.push(horiz ? `<text x="${at + 2}" y="${RULER - 11}">${v}</text>` : `<text x="${RULER - 11}" y="${at - 2}" transform="rotate(-90 ${RULER - 11} ${at - 2})">${v}</text>`);
     }
   };
-  along(p.w, true);
-  along(p.h, false);
+  along(b.x, b.x + b.w, true);
+  along(b.y, b.y + b.h, false);
   return `<g class="orn-ruler"><rect x="0" y="0" width="100%" height="${RULER}"/><rect x="0" y="0" width="${RULER}" height="100%"/>${out.join('')}<text class="orn-unit" x="4" y="15">mm</text></g>`;
 }
 
+/** Each open place, where it lies on the lid. */
+function placements(): { place: Place; m: Affine; slot: Slot; panel: Panel }[] {
+  const layout = lidLayout(state);
+  return PLACES.flatMap((place) => {
+    const m = layout[place];
+    const sl = state.places[place];
+    const panel = slotPanel(sl);
+    return m && sl && panel ? [{ place, m, slot: sl, panel }] : [];
+  });
+}
+
+/** The current place's mm to the lid's. */
+const currentM = (): Affine => lidLayout(state)[state.current] ?? [1, 0, 0, 1, 0, 0];
+
 function draw() {
   if (!open) return;
-  const d = state.design;
-  const p = d?.panel ?? state.shaped?.panel ?? null;
+  const d = slot().design;
+  const p = slotPanel(slot());
   const svg = $<HTMLElement>('orn-canvas');
   $('orn-empty').hidden = !!p;
   document.querySelectorAll<HTMLElement>('#orn-viewmode [data-view]').forEach((b) => b.classList.toggle('on', b.dataset.view === viewMode));
   document.querySelectorAll<HTMLElement>('#orn-zoom [data-zoom]').forEach((b) => b.classList.toggle('on', b.dataset.zoom === zoom));
-  $('orn-viewmode').hidden = !d;
+  $('orn-viewmode').hidden = !placements().some((q) => q.slot.design);
   if (!p) {
     svg.innerHTML = '';
     svg.setAttribute('width', '0');
     svg.setAttribute('height', '0');
     $('orn-legend').innerHTML = '';
+    $('orn-shaped').hidden = true;
+    $('orn-title').textContent = '';
     return;
   }
-  const s = scale(p);
-  const W = RULER + 2 * PAD + p.w * s;
-  const H = RULER + 2 * PAD + p.h * s;
+  const bb = bounds();
+  const s = scale();
+  const W = RULER + 2 * PAD + bb.w * s;
+  const H = RULER + 2 * PAD + bb.h * s;
   svg.setAttribute('width', String(Math.ceil(W)));
   svg.setAttribute('height', String(Math.ceil(H)));
   svg.setAttribute('viewBox', `0 0 ${Math.ceil(W)} ${Math.ceil(H)}`);
   const parts: string[] = [];
-  parts.push(`<g transform="translate(${RULER + PAD} ${RULER + PAD})">`);
-  const outline = pathRings(p.outline).rings;
-  parts.push(`<path class="orn-board" d="${ringsPath(outline, s)}" fill-rule="evenodd"/>`);
-  if (d) {
-    const r = levelReadout(d.layers, d.panel.thickness);
-    const deepest = r.allowed ?? Math.max(1, r.deepest);
-    const bad = new Set(designProblems(d).flatMap((q) => q.layers));
-    for (const l of d.layers) {
-      const { rings, twin } = layerRings(d, l);
-      const fill = viewMode === 'tone' ? tone(l.level, deepest) : FINISH_COLOURS[l.finish];
-      const cls = `orn-shape${viewMode === 'tone' ? ' tone' : ''}${bad.has(l.id) ? ' bad' : ''}`;
-      const title = `<title>${esc(l.name)}: ${mm(l.level)} below the top, ${EDGE_NAMES[l.edge].toLowerCase()} edge, ${FINISH_NAMES[l.finish].toLowerCase()}</title>`;
-      if (rings.length) parts.push(`<path class="${cls}" data-id="${l.id}" d="${ringsPath(rings, s)}" fill="${fill}" fill-rule="evenodd">${title}</path>`);
-      if (twin.length) parts.push(`<path class="${cls} twin" data-id="${l.id}" d="${ringsPath(twin, s)}" fill="${fill}" fill-rule="evenodd">${title}</path>`);
-    }
-    // The zones, drawn but never cut.
-    const zl = (['border', 'centre', 'left', 'right'] as const).flatMap((z) => (z === 'right' && d.zones.mirror ? [] : zoneRings(d.panel, d.zones, z)));
-    parts.push(`<path class="orn-zone" d="${ringsPath(zl, s)}"/>`);
-    const sel = d.layers.find((l) => l.id === selected);
-    if (sel) {
-      const { rings, twin } = layerRings(d, sel);
-      parts.push(`<path class="orn-sel" d="${ringsPath([...rings, ...twin], s)}"/>`);
-      if (sel.shape.kind === 'rect' || sel.shape.kind === 'ellipse') {
-        const b = sel.shape;
-        parts.push(`<rect class="orn-box" x="${b.x * s}" y="${b.y * s}" width="${b.w * s}" height="${b.h * s}"/>`);
-        for (const [hx, hy] of HANDLES) {
-          parts.push(`<rect class="orn-handle" data-handle="${hx},${hy}" x="${(b.x + (b.w * (hx + 1)) / 2) * s - 5}" y="${(b.y + (b.h * (hy + 1)) / 2) * s - 5}" width="10" height="10"/>`);
-        }
+  parts.push(`<g transform="translate(${RULER + PAD - bb.x * s} ${RULER + PAD - bb.y * s})">`);
+  const levels: number[] = [0];
+  const all = placements();
+  // One tone scale for the whole lid, so the same depth reads the same everywhere.
+  let deepest = 1;
+  for (const q of all) {
+    const dd = q.slot.design;
+    if (!dd) continue;
+    const r = levelReadout(dd.layers, dd.panel.thickness);
+    deepest = Math.max(deepest, r.allowed ?? r.deepest);
+    levels.push(...dd.layers.map((l) => l.level));
+  }
+  for (const q of all) {
+    const at = (rings: Ring[]) => rings.map((r) => r.map((pt) => apply(q.m, pt)));
+    const here = q.place === state.current;
+    const lidMode = state.whole;
+    parts.push(
+      `<path class="orn-board${lidMode && here ? ' here' : ''}${lidMode ? ' pick' : ''}" data-place="${q.place}" d="${ringsPath(placedOutline(q.panel, q.m), s)}" fill-rule="evenodd"><title>${esc(PLACE_NAMES[q.place])}${here ? '' : ': click to work on it'}</title></path>`,
+    );
+    const dd = q.slot.design;
+    if (dd) {
+      const bad = here ? new Set(designProblems(dd).flatMap((x) => x.layers)) : new Set<string>();
+      for (const l of dd.layers) {
+        const { rings, twin } = layerRings(dd, l);
+        const fill = viewMode === 'tone' ? tone(l.level, deepest) : FINISH_COLOURS[l.finish];
+        const cls = `orn-shape${viewMode === 'tone' ? ' tone' : ''}${bad.has(l.id) ? ' bad' : ''}`;
+        const title = `<title>${esc(PLACE_NAMES[q.place])}, ${esc(l.name)}: ${mm(l.level)} below the top, ${EDGE_NAMES[l.edge].toLowerCase()} edge, ${FINISH_NAMES[l.finish].toLowerCase()}</title>`;
+        if (rings.length) parts.push(`<path class="${cls}" data-place="${q.place}" data-id="${l.id}" d="${ringsPath(at(rings), s)}" fill="${fill}" fill-rule="evenodd">${title}</path>`);
+        if (twin.length) parts.push(`<path class="${cls} twin" data-place="${q.place}" data-id="${l.id}" d="${ringsPath(at(twin), s)}" fill="${fill}" fill-rule="evenodd">${title}</path>`);
+      }
+      // The zones, drawn but never cut: on the place being worked on.
+      if (here) {
+        const zl = (['border', 'centre', 'left', 'right'] as const).flatMap((z) => (z === 'right' && dd.zones.mirror ? [] : zoneRings(dd.panel, dd.zones, z)));
+        parts.push(`<path class="orn-zone" d="${ringsPath(at(zl), s)}"/>`);
       }
     }
-    $('orn-legend').innerHTML =
-      viewMode === 'tone'
-        ? [...new Set([0, ...d.layers.map((l) => l.level)])]
-            .sort((a, b) => a - b)
-            .map((v) => `<span><i style="background:${tone(v, deepest)}"></i>${v === 0 ? 'top' : mm(v)}</span>`)
-            .join('')
-        : '';
-  } else $('orn-legend').innerHTML = '';
+    if (lidMode) {
+      // The place's name in the middle of it, along its length.
+      const c = apply(q.m, [q.panel.w / 2, q.panel.h / 2]);
+      const along = apply(q.m, [1, 0]);
+      const o = apply(q.m, [0, 0]);
+      let angle = (Math.atan2(along[1] - o[1], along[0] - o[0]) * 180) / Math.PI;
+      if (angle > 90.01 || angle < -90.01) angle += 180;
+      const big = q.place === 'field';
+      parts.push(
+        `<text class="orn-place-name${here ? ' here' : ''}" x="${c[0] * s}" y="${c[1] * s + (big ? -(q.panel.h / 2) * s + 14 : 4)}" transform="rotate(${angle.toFixed(1)} ${c[0] * s} ${c[1] * s})">${esc(PLACE_NAMES[q.place])}</text>`,
+      );
+    }
+  }
+  const m = currentM();
+  const sel = d?.layers.find((l) => l.id === selected);
+  if (d && sel) {
+    const { rings, twin } = layerRings(d, sel);
+    parts.push(`<path class="orn-sel" d="${ringsPath([...rings, ...twin].map((r) => r.map((pt) => apply(m, pt))), s)}"/>`);
+    if (sel.shape.kind === 'rect' || sel.shape.kind === 'ellipse') {
+      const b = sel.shape;
+      const box: Ring = [[b.x, b.y], [b.x + b.w, b.y], [b.x + b.w, b.y + b.h], [b.x, b.y + b.h]];
+      parts.push(`<path class="orn-box" d="${ringsPath([box.map((pt) => apply(m, pt))], s)}"/>`);
+      for (const [hx, hy] of HANDLES) {
+        const [px, py] = apply(m, [b.x + (b.w * (hx + 1)) / 2, b.y + (b.h * (hy + 1)) / 2]);
+        parts.push(`<rect class="orn-handle" data-handle="${hx},${hy}" x="${px * s - 5}" y="${py * s - 5}" width="10" height="10"/>`);
+      }
+    }
+  }
+  $('orn-legend').innerHTML =
+    viewMode === 'tone' && all.some((q) => q.slot.design)
+      ? [...new Set(levels)]
+          .sort((a, b) => a - b)
+          .map((v) => `<span><i style="background:${tone(v, deepest)}"></i>${v === 0 ? 'top' : mm(v)}</span>`)
+          .join('')
+      : '';
   parts.push('</g>');
-  const name = `${PLACE_NAMES[p.place]} · ${mm(p.w)} × ${mm(p.h)} mm · ${thicknessText(p)}`;
-  parts.push(rulers(p, s));
+  const name = `${state.whole && p.place !== 'field' ? 'Lid · ' : ''}${PLACE_NAMES[p.place]} · ${mm(p.w)} × ${mm(p.h)} mm · ${thicknessText(p)}`;
+  parts.push(rulers(bb, s));
   svg.innerHTML = parts.join('');
   $('orn-title').textContent = name;
-  $('orn-shaped').hidden = !state.shaped;
-  $('orn-shaped').textContent = state.shaped ? message : '';
+  $('orn-shaped').hidden = !slot().shaped;
+  $('orn-shaped').textContent = slot().shaped ? `${state.whole ? `${PLACE_NAMES[p.place]}: ` : ''}${SHAPED_LINE}` : '';
 }
 
 // ---------------------------------------------------------------- pointer: select, move, size
@@ -600,18 +773,35 @@ const HANDLES: [number, number][] = [
 
 const round = (v: number) => Math.round(v * 10) / 10;
 
-function toMm(e: PointerEvent, s: number) {
+/** Where the pointer is, in the lid's mm. */
+function toLid(e: PointerEvent, s: number): Pt {
   const r = $('orn-canvas').getBoundingClientRect();
-  return { x: (e.clientX - r.left - RULER - PAD) / s, y: (e.clientY - r.top - RULER - PAD) / s };
+  const bb = bounds();
+  return [(e.clientX - r.left - RULER - PAD) / s + bb.x, (e.clientY - r.top - RULER - PAD) / s + bb.y];
+}
+
+/** Where the pointer is, in the current place's own mm. */
+function toMm(e: PointerEvent, s: number) {
+  const [x, y] = apply(invert(currentM()), toLid(e, s));
+  return { x, y };
 }
 
 function wireCanvas() {
   const svg = $('orn-canvas');
   svg.addEventListener('pointerdown', (e) => {
-    const d = state.design;
-    if (!d || e.button !== 0) return;
+    if (e.button !== 0) return;
     const t = e.target as Element;
     const handle = t.closest<SVGElement>('[data-handle]')?.dataset.handle;
+    const place = t.closest<SVGElement>('[data-place]')?.dataset.place as Place | undefined;
+    // A press on another place of the lid goes to work on it.
+    if (!handle && place && place !== state.current) {
+      setPlace(place);
+      const id = t.closest<SVGElement>('[data-id]')?.dataset.id;
+      if (id) select(id);
+      return;
+    }
+    const d = slot().design;
+    if (!d) return;
     const hit = t.closest<SVGElement>('[data-id]');
     const id = handle ? selected : (hit?.dataset.id ?? null);
     if (!id) return select(null);
@@ -622,7 +812,7 @@ function wireCanvas() {
     const l = d.layers.find((x) => x.id === id);
     if (!l || (l.shape.kind !== 'rect' && l.shape.kind !== 'ellipse')) return;
     const start = { ...l.shape };
-    const s = scale(d.panel);
+    const s = scale();
     const from = toMm(e, s);
     // Dragging the mirrored twin moves the shape the other way across.
     const flip = !handle && hit?.classList.contains('twin') ? -1 : 1;
@@ -651,7 +841,7 @@ function wireCanvas() {
       }
       const box = handle ? { x: round(x0), y: round(y0), w: round(x1 - x0), h: round(y1 - y0) } : { x: round(x0), y: round(y0), w: start.w, h: start.h };
       // Not recorded as it goes: the whole drag is one step to undo, recorded when it ends.
-      state.design = { ...d, layers: state.design!.layers.map((x) => (x.id === id ? { ...x, shape: { kind: start.kind, ...box } } : x)) };
+      slot().design = { ...d, layers: slot().design!.layers.map((x) => (x.id === id ? { ...x, shape: { kind: start.kind, ...box } } : x)) };
       draw();
     };
     const onUp = () => {
@@ -662,7 +852,7 @@ function wireCanvas() {
       history.record(before);
       saved();
       renderReadout();
-      const b = state.design?.layers.find((x) => x.id === id)?.shape;
+      const b = slot().design?.layers.find((x) => x.id === id)?.shape;
       if (b && (b.kind === 'rect' || b.kind === 'ellipse')) host.say(`${l.name}: ${mm(b.w)} × ${mm(b.h)} mm, at ${mm(b.x)}, ${mm(b.y)} from the top-left corner.`);
     };
     svg.addEventListener('pointermove', onMove);
@@ -670,12 +860,19 @@ function wireCanvas() {
     svg.addEventListener('pointercancel', onUp);
   });
   svg.addEventListener('pointermove', (e) => {
-    const d = state.design ?? state.shaped;
-    const p = state.design?.panel ?? state.shaped?.panel;
-    if (!d || !p) return;
-    const at = toMm(e, scale(p));
-    if (at.x >= 0 && at.y >= 0 && at.x <= p.w && at.y <= p.h) $('orn-cursor').textContent = `${mm(round(at.x))}, ${mm(round(at.y))} mm`;
-    else $('orn-cursor').textContent = '';
+    if (!slotPanel(slot())) return;
+    const s = scale();
+    const lidAt = toLid(e, s);
+    // Over a place: where, in that place's own mm (as its file has them).
+    const layout = lidLayout(state);
+    for (const q of placements()) {
+      const [x, y] = apply(invert(layout[q.place]!), lidAt);
+      if (x >= 0 && y >= 0 && x <= q.panel.w && y <= q.panel.h) {
+        $('orn-cursor').textContent = `${state.whole ? `${PLACE_NAMES[q.place]}: ` : ''}${mm(round(x))}, ${mm(round(y))} mm`;
+        return;
+      }
+    }
+    $('orn-cursor').textContent = '';
   });
   new ResizeObserver(() => {
     if (zoom === 'fit') draw();
@@ -685,7 +882,7 @@ function wireCanvas() {
 // ---------------------------------------------------------------- keys and search
 
 function nudge(dx: number, dy: number) {
-  const l = state.design?.layers.find((x) => x.id === selected);
+  const l = slot().design?.layers.find((x) => x.id === selected);
   if (!l || (l.shape.kind !== 'rect' && l.shape.kind !== 'ellipse')) return false;
   const s = l.shape;
   updateLayer(l.id, { shape: { ...s, x: round(s.x + dx), y: round(s.y + dy) } }, `nudge:${l.id}`);
@@ -699,8 +896,8 @@ export function ornamentKey(e: KeyboardEvent, inField: boolean): boolean {
   if ((e.ctrlKey || e.metaKey) && !e.altKey) {
     if (k === 'z') e.shiftKey ? ornamentRedo() : ornamentUndo();
     else if (k === 'y') ornamentRedo();
-    else if (k === 's') saveDesign();
-    else if (k === 'o') openOrnamentFile();
+    else if (k === 's') e.shiftKey ? saveLidDesign() : saveDesign();
+    else if (k === 'o') e.shiftKey ? openLidFiles() : openOrnamentFile();
     else return false;
     return true;
   }
@@ -721,6 +918,10 @@ export function ornamentKey(e: KeyboardEvent, inField: boolean): boolean {
     deleteLayer(selected);
     return true;
   }
+  if (e.key === '[' || e.key === ']') {
+    stepPlace(e.key === ']' ? 1 : -1);
+    return true;
+  }
   if (k === 't' && !e.shiftKey) {
     setViewMode(viewMode === 'tone' ? 'layout' : 'tone');
     return true;
@@ -735,13 +936,16 @@ export function ornamentKey(e: KeyboardEvent, inField: boolean): boolean {
 /** For Ctrl+K: what can be done in the Ornament tab. */
 export function ornamentCommands(): { label: string; run: () => void; hint?: string; words?: string }[] {
   return [
+    { label: 'Ornament: open lid (all five files together)', run: openLidFiles, hint: 'Ctrl+Shift+O in Ornament', words: 'field hips blender template five' },
+    { label: 'Ornament: save lid design (a file for each place with layers)', run: saveLidDesign, hint: 'Ctrl+Shift+S in Ornament', words: 'svg blender export hips field' },
+    ...PLACES.map((q) => ({ label: `Ornament: work on the ${PLACE_NAMES[q].toLowerCase()}`, run: () => setPlace(q), hint: '[ and ]', words: 'lid place hip' })),
     { label: 'Ornament: open a template or design', run: openOrnamentFile, hint: 'Ctrl+O in Ornament', words: 'svg lid blender' },
     { label: 'Ornament: try a sample lid field', run: openSample, words: 'template 204 96' },
     { label: 'Ornament: save design', run: saveDesign, hint: 'Ctrl+S in Ornament', words: 'svg lid blender export' },
     { label: 'Ornament: view in tone (deeper is darker)', run: () => setViewMode('tone'), hint: 'T', words: 'levels depth' },
     { label: 'Ornament: view the layout in its finishes', run: () => setViewMode('layout'), hint: 'T', words: 'gold ebony' },
     { label: 'Ornament: true size', run: () => setZoom('true'), hint: 'Shift+Z' },
-    { label: 'Ornament: the whole panel', run: () => setZoom('fit'), hint: 'Z' },
+    { label: 'Ornament: the whole panel (or the whole lid)', run: () => setZoom('fit'), hint: 'Z' },
     ...(['zone:border', 'zone:centre', 'zone:fields', 'rect', 'ellipse'] as const).map((v) => ({ label: `Ornament: add a layer, ${SHAPE_NAMES[v].toLowerCase()}`, run: () => addLayer(v), words: 'layer shape' })),
   ];
 }
@@ -765,14 +969,12 @@ export function initOrnament(h: OrnamentHost) {
   try {
     const v = localStorage.getItem(VIEW_KEY);
     if (v === 'tone' || v === 'layout') viewMode = v;
-    const kept = localStorage.getItem(STORE_KEY);
+    // The last lid (or template) opened, laid out ready, with every place's layers.
+    const kept = keptLid(localStorage);
     if (kept) {
-      const o = openSvg(kept);
-      if (o.kind === 'design') state = { design: o.design, shaped: null };
-      else if (o.kind === 'shaped') {
-        state = { design: null, shaped: { panel: o.panel, text: kept } };
-        message = o.message;
-      }
+      state = kept.lid;
+      savedAs = kept.savedAs;
+      if (state.whole) zoom = 'true';
     }
   } catch {
     /* start empty */

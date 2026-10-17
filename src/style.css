@@ -951,6 +951,13 @@ body[data-stage='ornament'] #st-cursor, body[data-stage='ornament'] .st-zoom, bo
 .orn-ruler line { stroke: var(--muted); stroke-width: 1; }
 .orn-ruler text { fill: var(--muted); font-size: 9.5px; font-variant-numeric: tabular-nums; }
 .orn-board { fill: var(--board); stroke: var(--board-edge); stroke-width: 1; }
+.orn-board.pick { cursor: pointer; }
+.orn-board.pick:not(.here) { fill-opacity: 0.6; }
+.orn-board.here { stroke: var(--accent); stroke-width: 2; }
+.orn-place-name { fill: var(--muted); font-size: 12px; text-anchor: middle; pointer-events: none; }
+.orn-place-name.here { fill: var(--accent); font-weight: 600; }
+.orn-places { display: flex; margin: 0 0 8px; }
+.orn-places button { flex: 1; padding: 3px 4px; font-size: 12.5px; }
 .orn-shape { stroke: rgb(0 0 0 / 0.55); stroke-width: 0.75; cursor: pointer; }
 .orn-shape.tone { stroke: rgb(0 0 0 / 0.25); }
 .orn-shape.bad { stroke: var(--bad); stroke-width: 1.5; }
