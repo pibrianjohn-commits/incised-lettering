@@ -14,6 +14,8 @@ A layout tool for ornament on plaques and on the box lid's field and hip faces. 
 ## The file format
 Shared with the lid add-on; set out in ornament/design/CARD_01_loop.md and followed exactly. Field templates always carry data-thickness; hip templates don't yet, and then the depth limit isn't checked (the 1 mm steps still are).
 
+Saved sets (card 4): "Save lid design" saves every place each time, as one numbered set: `<lid>_<number>_<place>.svg`, for example `walnut-box_003_hip-front.svg`. Lid: the templates' `data-lid` (if there is none, "lid"); a design carries `data-lid` on when the template has it. Number: three digits from 001, one up per save, the same for the whole set, counted per lid in the browser that saves it. Place: field, hip-front, hip-right, hip-back, hip-left. A place with no layers is saved as its design, or its template as it came if it is a shaped hip, so a set is always complete and opens again with Open lid….
+
 Optional on hip templates (card 3): `data-slope` (degrees) and `data-plan-depth` (mm, how deep the hip is seen from above). The From above view needs data-plan-depth on all four hips; without it (an older export) the lid is shown Flat only.
 
 Extra labels this tool adds, so a design opens again as it was (card 1a). They are only extra data- attributes (or, later, inside one `<metadata>` element), and never change anything the format names:

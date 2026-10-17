@@ -2,6 +2,40 @@
 
 Newest first. Older reports move to ornament/design/PROGRESS_ARCHIVE.md.
 
+## Card 4: numbered design sets (17 Oct 2026)
+
+Card: ornament/design/CARD_04_numbered_sets.md.
+
+### Results
+- Both tests the card asks for pass: two saves of a lid named walnut-box give walnut-box_001_field.svg … walnut-box_001_hip-left.svg, then the same five with 002; templates without data-lid save as lid_001_field.svg, lid_001_hip-front.svg, lid_001_hip-right.svg, lid_001_hip-back.svg, lid_001_hip-left.svg.
+- The card 2 save test now checks the new behaviour: all five places are saved, and the set opens back as the lid exactly as it was. All the other tests still pass (488 in all).
+- Tried in the browser with a walnut-box lid: two clicks gave ten files, 001 then 002, and "Last saved: walnut-box 002" beside the button, still there after the page was reloaded.
+
+### What was built
+- **Save lid design** now saves the whole lid as one numbered set: `<lid>_<number>_<place>.svg`, every place each time, with layers or without. A place with a design is saved as its design; a hip that is still a shaped panel is saved as its template, as it came.
+- **The lid's name** is the templates' data-lid (the field's, if they differ), or "lid" if there is none. Saved designs now carry data-lid on, so a set opened again saves under the same name.
+- **The number** is three digits from 001, one up per save, the same for the whole set, counted for each lid separately in this browser.
+- **"Last saved: walnut-box 002"** beside the button, for the lid that is open. Nothing shows before its first save.
+- The button is ready whenever the whole lid is open, even with no layers yet. Its tip, the Ctrl+K entry and BRIEF.md say what it now does.
+- **PLAN.md**, "The file format": the naming added.
+
+### Faults found and fixed while using it
+- None.
+
+### Assumptions (please check)
+- **Counted per lid.** walnut-box and oak-box each have their own 001, 002…
+- **Not undone.** Ctrl+Z doesn't take a set number back: the files are already in the Downloads folder.
+- **Odd characters.** A data-lid with spaces or characters a file name can't hold (/ \ : * ? " < > |) has them turned into "-": "walnut box" saves as walnut-box_001_….
+- If this browser won't keep anything (a private window that refuses storage), the numbers still go up for that visit, from 001 again next time.
+
+### Questions for the design chat
+- None.
+
+### Not tested
+- In Firefox (none on this machine): tried in Chromium only. The card asked for no slowed-CPU test.
+- With real templates from the lid add-on carrying data-lid.
+- The installed offline copy.
+
 ## Card 3: the From above view (17 Oct 2026)
 
 Card: ornament/design/CARD_03_from_above.md.
@@ -37,25 +71,3 @@ Card: ornament/design/CARD_03_from_above.md.
 - With real templates from the lid add-on: the hips used slope at 40 deg, 32 deep from above (41.77 wide laid flat), tops 204 and 96, feet 268 and 160.
 - The installed offline copy.
 
-## Card 2a: hip edges a little long are matching (17 Oct 2026)
-
-Card: ornament/design/CARD_02a_tolerance.md.
-
-### Results
-- The new test passes: a front hip 204.2 along its top, against the field's 204 front edge, opens with no note; one 206 along its top shows "The front hip’s top edge is 206 long, but the field edge it meets is 204: it is centred on it. The two files may be from different lids."
-- All the other tests still pass (484 in all).
-
-### What was changed
-- A hip's top edge within 1 mm of the field edge it meets counts as matching: it is centred on the edge, with no note. The note shows only for a difference of 1 mm or more, longer or shorter. Hips were already centred on their edge, so a 204.2 hip overhangs 0.1 at each end, as in the model.
-
-### Faults found
-- None.
-
-### Assumptions
-- Exactly 1 mm out shows the note ("1 mm or more").
-
-### Questions for the design chat
-- None.
-
-### Not tested
-- In Firefox (none on this machine), and with real hip files from the lid add-on.

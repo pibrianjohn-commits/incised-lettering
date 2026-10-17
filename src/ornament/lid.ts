@@ -3,7 +3,7 @@
 // Read without the browser, so the unit tests use exactly what the page does.
 
 import { PLACES, PLACE_NAMES, mm, type Design, type Panel, type Place, type Pt, type Ring } from './model';
-import { designFileName, designSvg, openSvg, parseXml, pathRings } from './svgfile';
+import { designSvg, openSvg, parseXml, pathRings } from './svgfile';
 
 /** One place on the lid: a design to work on, or a shaped panel shown by its outline only. */
 export interface Slot {
@@ -203,12 +203,57 @@ export function lidBounds(lid: Lid, view: LidView = 'flat'): { x: number; y: num
 
 // ---------------------------------------------------------------- saving
 
-/** "Save lid design": one design file per place that has layers, in the shared format. */
-export function lidDesignFiles(lid: Lid): { place: Place; name: string; text: string }[] {
-  return PLACES.flatMap((place) => {
-    const d = lid.places[place]?.design;
-    return d && d.layers.length ? [{ place, name: designFileName(d), text: designSvg(d) }] : [];
+/** The lid's name for its saved sets: the templates' data-lid (the field's first), or "lid". Safe as part of a file name. */
+export function lidName(lid: Lid): string {
+  const given = [lid.places.field, ...PLACES.map((p) => lid.places[p])].map((s) => slotPanel(s)?.lid).find((n) => n);
+  const safe = (given ?? '').replace(/[\\/:*?"<>|\s]+/g, '-').replace(/^[-.]+|-+$/g, '');
+  return safe || 'lid';
+}
+
+/** A set's number as it is written: three digits from 001. */
+export const setNumber = (n: number) => String(n).padStart(3, '0');
+
+/** Each lid's last set number, kept in this browser. */
+export const SETS_KEY = 'incised.ornament.sets';
+
+function setCounts(store: Store): Record<string, number> {
+  try {
+    const v = JSON.parse(store.getItem(SETS_KEY) ?? '{}');
+    return v && typeof v === 'object' ? v : {};
+  } catch {
+    return {};
+  }
+}
+
+/** The number of this lid's last saved set, or 0 if none has been saved in this browser. */
+export function lastSet(store: Store, lid: Lid): number {
+  const n = setCounts(store)[lidName(lid)];
+  return Number.isInteger(n) && n > 0 ? n : 0;
+}
+
+/** "Last saved: fruitwood-box 003", or nothing before the first save. */
+export function lastSavedText(store: Store, lid: Lid): string {
+  const n = lastSet(store, lid);
+  return n ? `Last saved: ${lidName(lid)} ${setNumber(n)}` : '';
+}
+
+/**
+ * "Save lid design" (card 4): every place, with layers or without, as one
+ * numbered set: <lid>_<number>_<place>.svg. A place with a design is saved as
+ * its design; a shaped panel as its template, as it came. The number is one up
+ * on this lid's last, and is kept.
+ */
+export function saveLidSet(store: Store, lid: Lid): { number: number; files: { place: Place; name: string; text: string }[] } {
+  const name = lidName(lid);
+  const counts = setCounts(store);
+  const number = lastSet(store, lid) + 1;
+  const files = PLACES.flatMap((place) => {
+    const s = lid.places[place];
+    const text = s?.design ? designSvg(s.design) : s?.shaped?.text;
+    return text ? [{ place, name: `${name}_${setNumber(number)}_${place}.svg`, text }] : [];
   });
+  store.setItem(SETS_KEY, JSON.stringify({ ...counts, [name]: number }));
+  return { number, files };
 }
 
 /** Places with layers that have changed since they were opened or saved. */

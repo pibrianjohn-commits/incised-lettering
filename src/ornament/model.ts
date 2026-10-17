@@ -87,6 +87,8 @@ export interface Panel {
   /** Hips only, where the template gives them (card 3): the slope in degrees, and how deep the hip is seen from above, in mm. */
   slope: number | null;
   planDepth: number | null;
+  /** Which lid the template is from (data-lid), where it says (card 4); names the saved set. */
+  lid: string | null;
   /** The template's outline, exactly as it came. */
   outline: string;
 }

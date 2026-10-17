@@ -484,6 +484,7 @@ button.quiet { font-size: 13px; color: var(--muted); box-shadow: none; }
 .sg input { width: 58px; }
 .sg button { padding: 2px 8px; }
 .line-buttons.wrap { flex-wrap: wrap; }
+#orn-set-last { align-self: center; margin: 0; }
 #groups-edit h4 { margin: 6px 0 4px; font-size: 12px; color: var(--muted); }
 #groups-edit .groups { display: grid; gap: 4px; }
 #groups-edit label { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 13px; }
