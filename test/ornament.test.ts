@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_ZONES, levelReadout, type Design, type Layer } from '../src/ornament/model';
+import { DEFAULT_ZONES, levelReadout, thicknessText, type Design, type Layer } from '../src/ornament/model';
 import { SHAPED_LINE, designSvg, openSvg, sampleTemplate } from '../src/ornament/svgfile';
 
 const layer = (name: string, level: number, extra: Partial<Layer> = {}): Layer => ({
@@ -85,5 +85,21 @@ describe('ornament: level rules', () => {
     expect(r.deepest).toBe(5.5);
     expect(r.problems.map((p) => p.key)).toEqual(['deep:B']);
     expect(r.problems[0].text).toMatch(/deeper than allowed/);
+  });
+});
+
+describe('ornament: a template without a thickness (card 1a)', () => {
+  const hipNoThickness = `<svg xmlns="http://www.w3.org/2000/svg" width="204mm" height="30mm" viewBox="0 0 204 30" data-place="hip-front">
+    <path id="outline" d="M 0 0 L 204 0 L 204 30 L 0 30 Z"/></svg>`;
+
+  it('opens and shows "Thickness not given: depth limit not checked", and still checks the 1 mm steps', () => {
+    const o = openSvg(hipNoThickness);
+    expect(o.kind).toBe('design');
+    if (o.kind !== 'design') return;
+    expect(o.design.panel.thickness).toBeNull();
+    expect(thicknessText(o.design.panel)).toBe('Thickness not given: depth limit not checked');
+    const r = levelReadout([layer('A', 2), layer('B', 2.5), layer('C', 40)], o.design.panel.thickness);
+    expect(r.allowed).toBeNull();
+    expect(r.problems.map((p) => p.key)).toEqual(['step:A|B']);
   });
 });

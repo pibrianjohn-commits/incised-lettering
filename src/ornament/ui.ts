@@ -18,6 +18,8 @@ import {
   mm,
   newId,
   readoutText,
+  thicknessText,
+  NO_THICKNESS,
   zoneBoxes,
   zoneRings,
   type Design,
@@ -270,7 +272,7 @@ function renderSide() {
   const d = state.design;
   const p = d?.panel ?? state.shaped?.panel ?? null;
   const info = p
-    ? `<p class="orn-place"><b>${esc(PLACE_NAMES[p.place])}</b> · ${mm(p.w)} × ${mm(p.h)} mm · ${p.thickness !== null ? `${mm(p.thickness)} thick` : 'thickness not given'}</p>`
+    ? `<p class="orn-place"><b>${esc(PLACE_NAMES[p.place])}</b> · ${mm(p.w)} × ${mm(p.h)} mm${p.thickness !== null ? ` · ${thicknessText(p)}` : ''}</p>${p.thickness === null ? `<p class="orn-msg">${esc(NO_THICKNESS)}</p>` : ''}`
     : '<p class="hint">Open a template saved by the lid add-on in Blender, or a design saved here. Or try a plain lid field to see how it works.</p>';
   $('orn-template').innerHTML = `${info}${message ? `<p class="orn-msg">${esc(message)}</p>` : ''}`;
   $('orn-zones').hidden = !d;
@@ -335,7 +337,7 @@ function renderReadout() {
   if (!d) return;
   const r = levelReadout(d.layers, d.panel.thickness);
   const problems = designProblems(d);
-  $('orn-readout').innerHTML = `<p class="orn-levels ${problems.length ? 'bad' : 'ok'}">${esc(readoutText(r))}</p>${
+  $('orn-readout').innerHTML = `<p class="orn-levels ${problems.length ? 'bad' : 'ok'}">${esc(readoutText(r))}</p>${r.allowed === null ? `<p class="orn-msg">${esc(NO_THICKNESS)}</p>` : ''}${
     problems.length
       ? `<ul class="orn-problems">${problems
           .map(
@@ -579,7 +581,7 @@ function draw() {
         : '';
   } else $('orn-legend').innerHTML = '';
   parts.push('</g>');
-  const name = `${PLACE_NAMES[p.place]} · ${mm(p.w)} × ${mm(p.h)} mm · ${p.thickness !== null ? `${mm(p.thickness)} thick` : 'thickness not given'}`;
+  const name = `${PLACE_NAMES[p.place]} · ${mm(p.w)} × ${mm(p.h)} mm · ${thicknessText(p)}`;
   parts.push(rulers(p, s));
   svg.innerHTML = parts.join('');
   $('orn-title').textContent = name;

@@ -273,9 +273,17 @@ export function levelReadout(layers: Layer[], thickness: number | null): LevelRe
   };
 }
 
+/** Hip templates carry no thickness yet (ornament/design/CARD_01a_answers.md): the steps are still checked, the depth limit is not. */
+export const NO_THICKNESS = 'Thickness not given: depth limit not checked';
+
 export function readoutText(r: LevelReadout): string {
-  const of = r.allowed === null ? ' (no board thickness in the template)' : ` of ${mm(r.allowed)} allowed`;
+  const of = r.allowed === null ? '' : ` of ${mm(r.allowed)} allowed`;
   return `Levels used ${r.used}; deepest ${mm(r.deepest)}${of}`;
+}
+
+/** The panel's thickness, or the plain line saying it isn't given. */
+export function thicknessText(p: { thickness: number | null }): string {
+  return p.thickness === null ? NO_THICKNESS : `${mm(p.thickness)} thick`;
 }
 
 // ---------------------------------------------------------------- layout problems

@@ -11,6 +11,17 @@ A layout tool for ornament on plaques and on the box lid's field and hip faces. 
 - Family rules: ornament/families/<family>.md, written from the references: how each family is built (stem, growth, how it diminishes, how it turns, where it branches, how it ends). A maker is built only from its family file.
 - The lid: Brian's Blender add-on (box_lid, lid_ornament). It sends lid templates out and takes finished SVG back by level. Its half of the bridge is carded in that repo.
 
+## The file format
+Shared with the lid add-on; set out in ornament/design/CARD_01_loop.md and followed exactly. Field templates always carry data-thickness; hip templates don't yet, and then the depth limit isn't checked (the 1 mm steps still are).
+
+Extra labels this tool adds, so a design opens again as it was (card 1a). They are only extra data- attributes (or, later, inside one `<metadata>` element), and never change anything the format names:
+- on each `<g class="layer">`: `data-shape="zone:border"` (or centre, fields, left, right) for a layer that is a zone's outline;
+- on a placed shape's path: `data-shape="rect"` or `"ellipse"` and `data-box="x y w h"` (mm);
+- on a mirrored twin's path: `data-twin="1"` (made again on opening, not read);
+- on `<g id="setting-out">`: the zone sizes (`data-edge-distance`, `data-band-width`, `data-centre`, `data-centre-width`, `data-centre-height`, `data-gap-to-centre`, `data-mirror`), and the zone outlines as paths with `data-zone`.
+
+Ellipses are written as short straight lines (192 to the round), not curves: simplest for Blender to read, and far finer than the machine cuts.
+
 ## The skeleton
 - Panel: any closed outline at true size: a plaque, the lid field (204 x 96), a hip face laid flat (a trapezoid). Lid sizes come from Blender's template, never typed in.
 - Zones: the panel divides into zones (border, centre, left and right fields, corners). Each holds an element or nothing.
