@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_ZONES, levelReadout, thicknessText, type Design, type Layer } from '../src/ornament/model';
 import { SHAPED_LINE, designSvg, openSvg, sampleTemplate } from '../src/ornament/svgfile';
-import { NO_PLAN_DEPTH, apply, edgeMismatches, fromAboveReady, keepLid, keptLid, lastSavedText, lidLayout, openLid, openLidPicked, saveLidSet } from '../src/ornament/lid';
+import { NO_PLAN_DEPTH, apply, slotPanel, edgeMismatches, fromAboveReady, keepLid, keptLid, lastSavedText, lidLayout, openLid, openLidPicked, saveLidSet } from '../src/ornament/lid';
 import { readZip } from '../src/ornament/zip';
+import { depthAt, lid3dReady, lidCuts, lidFrames, onLid, placeMap } from '../src/ornament/relief';
 
 const layer = (name: string, level: number, extra: Partial<Layer> = {}): Layer => ({
   id: name,
@@ -369,5 +370,57 @@ describe('ornament: the From above view (card 3)', () => {
     expect(fromAboveReady(o.lid)).toEqual({ ok: false, message: NO_PLAN_DEPTH });
     expect(NO_PLAN_DEPTH).toBe('Export the templates again from Blender to see this view');
     expect(lidLayout(o.lid, 'above')).toEqual(lidLayout(o.lid, 'flat'));
+  });
+});
+
+// ---------------------------------------------------------------- card 5: the 3D view
+
+describe('ornament: the 3D view (card 5)', () => {
+  it('a field with layers at levels 1 and 2 is lowered 1 and 2 where it should be, sampled at three points', () => {
+    const o = openSvg(sampleTemplate(204, 96, 6));
+    if (o.kind !== 'design') throw new Error('template did not open');
+    const design: Design = {
+      ...o.design,
+      layers: [layer('Border', 1), layer('Centre', 2, { shape: { kind: 'zone', zone: 'centre' }, edge: 'v' })],
+    };
+    const lid = { places: { field: { design, shaped: null } }, current: 'field' as const, whole: false };
+    const frame = lidFrames(lid).field!;
+    const map = placeMap(lidCuts(lid)[0], 0.1, 30);
+    const z = (x: number, y: number) => onLid(frame, x, y, depthAt(map, x, y)!)[2];
+    // The border band runs 12 to 14 in from the edge; the centre is a 36 × 36 ellipse in the middle.
+    expect(z(13, 48)).toBeCloseTo(-1, 6);
+    expect(z(102, 48)).toBeCloseTo(-2, 6);
+    expect(z(50, 48)).toBeCloseTo(0, 6);
+  });
+
+  it('a hip with data-slope 20.556 sits at that angle within 0.1°', () => {
+    const slope = 20.556;
+    const h = 34;
+    const pd = h * Math.cos((slope * Math.PI) / 180);
+    const extra = ` data-slope="${slope}" data-plan-depth="${pd}"`;
+    const files = [
+      { name: 'field.svg', text: sampleTemplate(204, 96, 6) },
+      { name: 'hip-front.svg', text: hipSvg('hip-front', 204, 204 + 2 * pd, h, extra) },
+      { name: 'hip-right.svg', text: hipSvg('hip-right', 96, 96 + 2 * pd, h, extra) },
+      { name: 'hip-back.svg', text: hipSvg('hip-back', 204, 204 + 2 * pd, h, extra) },
+      { name: 'hip-left.svg', text: hipSvg('hip-left', 96, 96 + 2 * pd, h, extra) },
+    ];
+    const o = openLid(files);
+    if (o.kind !== 'lid') throw new Error('lid did not open');
+    expect(lid3dReady(o.lid).ok).toBe(true);
+    const frames = lidFrames(o.lid);
+    for (const place of ['hip-front', 'hip-right', 'hip-back', 'hip-left'] as const) {
+      const f = frames[place]!;
+      const w = slotPanel(o.lid.places[place])!.w;
+      const top = onLid(f, w / 2, 0);
+      const foot = onLid(f, w / 2, h);
+      const angle = (Math.atan2(top[2] - foot[2], Math.hypot(foot[0] - top[0], foot[1] - top[1])) * 180) / Math.PI;
+      expect(Math.abs(angle - slope)).toBeLessThan(0.1);
+      // Its top edge against the field's edge, level with the field's top.
+      expect(Math.abs(top[2])).toBeLessThan(1e-9);
+    }
+    const front = onLid(frames['hip-front']!, (204 + 2 * pd) / 2, 0);
+    expect(front[0]).toBeCloseTo(102, 6);
+    expect(front[1]).toBeCloseTo(-96, 6);
   });
 });

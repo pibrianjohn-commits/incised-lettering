@@ -370,6 +370,24 @@
           <input type="file" id="orn-file" accept=".svg,image/svg+xml" hidden />
           <input type="file" id="orn-lid-file" accept=".svg,image/svg+xml,.zip,application/zip" multiple hidden />
         </section>
+        <section id="orn-light" hidden>
+          <h2>Light</h2>
+          <label class="v3d-slider" data-find="Swing the light round the lid">Round <input type="range" id="orn-light-from" min="-180" max="180" step="1" /></label>
+          <div class="seg" id="orn-light-quick">
+            <button data-from="-90" title="Light from the left (,  and  . swing it round)">Left</button>
+            <button data-from="0" title="Light from the back">Back</button>
+            <button data-from="90" title="Light from the right">Right</button>
+            <button data-from="180" title="Light from the front, where you stand">Front</button>
+          </div>
+          <label class="v3d-slider" data-find="Raise or lower the light">Height <small>low</small><input type="range" id="orn-light-height" min="2" max="70" step="1" /><small>high</small></label>
+          <p class="hint small" id="orn-light-read"></p>
+          <div class="seg stack" id="orn-3d-views">
+            <button data-look="fit">Whole lid</button>
+            <button data-look="top">Straight down</button>
+            <button data-look="front">Along the front</button>
+          </div>
+          <p class="hint small">Left-drag to turn · right-drag to move · scroll to zoom. <kbd>,</kbd> <kbd>.</kbd> swing the light round, <kbd>-</kbd> <kbd>=</kbd> lower and raise it. Changes in the side panel show here within a moment.</p>
+        </section>
         <section id="orn-zones" hidden>
           <h2>Zones</h2>
           <div id="orn-zone-boxes"></div>
@@ -524,6 +542,7 @@
             <span class="seg" id="orn-lidview" title="F switches" hidden>
               <button data-lidview="flat" title="The lid opened out flat, to work on">Flat</button>
               <button data-lidview="above" title="The lid as it sits on the box, seen from above: each hip squashed to its depth seen from above. For looking only">From above</button>
+              <button data-lidview="3d" title="The lid as assembled, in 3D, under one low light you can swing round it: how the relief reads. For looking only">3D</button>
             </span>
             <span class="seg" id="orn-viewmode" title="T switches">
               <button data-view="layout" title="The layers in their finishes">Layout</button>
@@ -542,6 +561,14 @@
             <p>Open a template from the lid add-on in Blender, or try a sample field, from the side panel.</p>
           </div>
           <svg id="orn-canvas" xmlns="http://www.w3.org/2000/svg" aria-label="The ornament panel at true size"></svg>
+        </div>
+        <div id="orn-3d" hidden>
+          <div id="orn-3d-canvas"></div>
+          <div id="orn-working" hidden role="status" aria-live="polite">
+            <p><span class="v3d-what">Working out the lid…</span> <b class="v3d-pct"></b></p>
+            <div class="v3d-bar"><i></i></div>
+            <p class="v3d-foot"><span>The lid shown stays until the new one is ready.</span> <button class="quiet" data-orn3d="cancel">Cancel (Esc)</button><button data-orn3d="again" hidden>Work it out</button></p>
+          </div>
         </div>
         <span id="orn-cursor"></span>
       </div>

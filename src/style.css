@@ -909,18 +909,18 @@ button.primary:disabled { background: var(--card); color: var(--muted); border-c
 .v3d-ramp { display: inline-block; width: 110px; height: 10px; border-radius: 3px; background: linear-gradient(to right, #fae68c, #f59433, #cc2e2e, #591a73); }
 #v3d-note { margin: 12px 0 0; }
 /* Working out the board: a card at the top, over the board shown until the new one is ready. */
-#v3d-working { position: absolute; left: 50%; top: 14px; transform: translateX(-50%); z-index: 2; width: min(360px, calc(100% - 32px)); padding: 10px 14px; color: var(--ink); background: var(--card); border: 1px solid var(--rule); border-radius: 10px; box-shadow: var(--shadow-2); font-size: 13px; }
-#v3d-working p { margin: 0; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
-#v3d-working .v3d-pct { font-variant-numeric: tabular-nums; }
+#v3d-working, #orn-working { position: absolute; left: 50%; top: 14px; transform: translateX(-50%); z-index: 2; width: min(360px, calc(100% - 32px)); padding: 10px 14px; color: var(--ink); background: var(--card); border: 1px solid var(--rule); border-radius: 10px; box-shadow: var(--shadow-2); font-size: 13px; }
+#v3d-working p, #orn-working p { margin: 0; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+#v3d-working .v3d-pct, #orn-working .v3d-pct { font-variant-numeric: tabular-nums; }
 .v3d-bar { height: 6px; margin: 8px 0; border-radius: 3px; background: var(--rule); overflow: hidden; }
 .v3d-bar i { display: block; height: 100%; width: 0; background: var(--accent); }
-#v3d-working .v3d-foot { color: var(--muted); font-size: 12px; }
-#v3d-working .v3d-foot button { margin: 0; flex: none; }
-#v3d-working.idle .v3d-bar { display: none; }
-#v3d-working.idle .v3d-foot { margin-top: 6px; }
-#v3d-working.failed { width: min(440px, calc(100% - 32px)); }
-#v3d-working.failed .v3d-what { font-weight: 600; color: var(--bad); }
-#v3d-working.failed .v3d-foot { align-items: flex-end; }
+#v3d-working .v3d-foot, #orn-working .v3d-foot { color: var(--muted); font-size: 12px; }
+#v3d-working .v3d-foot button, #orn-working .v3d-foot button { margin: 0; flex: none; }
+#v3d-working.idle .v3d-bar, #orn-working.idle .v3d-bar { display: none; }
+#v3d-working.idle .v3d-foot, #orn-working.idle .v3d-foot { margin-top: 6px; }
+#v3d-working.failed, #orn-working.failed { width: min(440px, calc(100% - 32px)); }
+#v3d-working.failed .v3d-what, #orn-working.failed .v3d-what { font-weight: 600; color: var(--bad); }
+#v3d-working.failed .v3d-foot, #orn-working.failed .v3d-foot { align-items: flex-end; }
 /* The actual reason for a problem, folded away under its plain words (3D card and problems list). */
 details.why { margin-top: 6px; font-size: 12px; }
 details.why summary { cursor: pointer; color: var(--muted); }
@@ -947,6 +947,13 @@ body[data-stage='ornament'] #st-cursor, body[data-stage='ornament'] .st-zoom, bo
 #orn-view { position: relative; flex: 1; min-height: 0; overflow: auto; }
 #orn-empty { margin: 40px; color: var(--muted); max-width: 440px; }
 #orn-canvas { display: block; }
+/* The lid in 3D (card 5): in place of the drawing. */
+#orn-3d { position: relative; flex: 1; min-height: 0; background: var(--stage3d); }
+#orn-3d-canvas { position: absolute; inset: 0; }
+#orn-3d-canvas canvas { display: block; cursor: grab; }
+#orn-3d-canvas canvas:active { cursor: grabbing; }
+#orn-light-quick { margin: 4px 0 6px; }
+#orn-3d-views { margin-top: 8px; }
 #orn-cursor { position: absolute; right: 12px; bottom: 8px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; pointer-events: none; }
 .orn-ruler rect { fill: var(--card); }
 .orn-ruler line { stroke: var(--muted); stroke-width: 1; }
