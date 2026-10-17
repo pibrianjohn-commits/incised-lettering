@@ -48,5 +48,5 @@ A standing rule for every task, from 7 Oct 2026.
 - The ornament layout tool is planned in ornament/PLAN.md. Read it before any ornament task.
 - Build only from a card Brian brings: move it into ornament/design/ and commit it first. PLAN.md is planning only; never build from it directly.
 - Report every card in ornament/PROGRESS.md, newest first, in plain words: results, what was built, faults found and fixed, assumptions, questions for the design chat, what was not tested. Keep the two newest reports; move older ones to ornament/design/PROGRESS_ARCHIVE.md.
-- Reference images live in Brian's private repo ornament-reference, never in this public repo. Only written rules and original geometry come here. The reference repo is not yet cloned locally (the first attempt needed a GitHub login this session did not have); once it is, record its path here, read the images from there, and never copy them into this repo.
+- Reference images live in Brian's private repo ornament-reference, never in this public repo. Only written rules and original geometry come here. The reference images are cloned locally at /home/user/ornament-reference (next to this repo). Read them from there; never copy them into this repo.
 - What ornament goes where is Brian's decision. Never choose design content in code.
