@@ -133,6 +133,13 @@ export function lidLayout(lid: Lid): Partial<Record<Place, Affine>> {
   return out;
 }
 
+/**
+ * Real hips are a little longer at the top than the field edge they meet (0.2
+ * from the lid add-on: 0.1 clear each side), so under this counts as matching
+ * (ornament/design/CARD_02a_tolerance.md).
+ */
+export const EDGE_TOLERANCE = 1;
+
 /** The lid's top edges that don't match the field edge they run along, in plain words. */
 export function edgeMismatches(lid: Lid): string[] {
   const field = slotPanel(lid.places.field);
@@ -143,7 +150,7 @@ export function edgeMismatches(lid: Lid): string[] {
     if (!p) continue;
     const { from, to } = topEdge(p);
     const along = place === 'hip-front' || place === 'hip-back' ? field.w : field.h;
-    if (Math.abs(to - from - along) > 0.01)
+    if (Math.abs(to - from - along) >= EDGE_TOLERANCE)
       out.push(`The ${PLACE_NAMES[place].toLowerCase()}’s top edge is ${mm(to - from)} long, but the field edge it meets is ${mm(along)}: it is centred on it. The two files may be from different lids.`);
   }
   return out;

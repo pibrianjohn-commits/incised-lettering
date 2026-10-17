@@ -2,6 +2,36 @@
 
 Moved here from ornament/PROGRESS.md, which keeps the two newest. Newest first.
 
+## Card 1a: answers to card 1's questions (17 Oct 2026)
+
+Card: ornament/design/CARD_01a_answers.md.
+
+![A hip template with no thickness](card01a-no-thickness.png)
+
+A hip template with no thickness: the line "Thickness not given: depth limit not checked" shows under the template, in the top bar and under the readout, and the 0.5 step between the two layers is still caught.
+
+### Results
+- New test passes: a template without data-thickness opens, shows "Thickness not given: depth limit not checked", and still reports a 0.5 step. A layer 40 deep on it is not reported, since there is no limit to check against.
+- All the card 1 tests and the lettering's tests still pass (479 in all).
+
+### What was built or changed
+- **No thickness** (point 4): the template's details, the top bar and the levels readout show "Thickness not given: depth limit not checked". The readout then reads "Levels used X; deepest Y", with no "of Z allowed". The 1 mm rules (under 1 deep, and steps under 1) are still checked. This works for shaped hips too, which show the line under their outline.
+- **The extra labels** (point 1): already only extra data- attributes; nothing the format names was changed. They are now listed in ornament/PLAN.md under a new heading, "The file format".
+- **Curves and side fields** (points 2 and 3): kept as they were, as the answers say, and noted in PLAN.md.
+
+### Faults found
+- None new. Using a 204 × 30 hip shows that the stand-in zone sizes (12 from the edge, 36 × 36 centre) don't fit a hip. The readout says so and offers "Shrink the centre…" and "Shrink the zones to fit the panel". The real sizes for hips are Brian's to set, with the outlines card.
+
+### Assumptions
+- The line is shown as information, in plain black, not red: it isn't a fault in the design.
+
+### Questions for the design chat
+- None.
+
+### Not tested
+- In Firefox: there is none on this machine, so this was used in Chromium only.
+- With a real hip template from the lid add-on.
+
 ## Card 1: the loop, plain shapes (17 Oct 2026)
 
 Card: ornament/design/CARD_01_loop.md.

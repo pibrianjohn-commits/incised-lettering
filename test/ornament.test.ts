@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_ZONES, levelReadout, thicknessText, type Design, type Layer } from '../src/ornament/model';
 import { SHAPED_LINE, designSvg, openSvg, sampleTemplate } from '../src/ornament/svgfile';
-import { apply, keepLid, keptLid, lidDesignFiles, lidLayout, openLid } from '../src/ornament/lid';
+import { apply, edgeMismatches, keepLid, keptLid, lidDesignFiles, lidLayout, openLid } from '../src/ornament/lid';
 
 const layer = (name: string, level: number, extra: Partial<Layer> = {}): Layer => ({
   id: name,
@@ -223,5 +223,17 @@ describe('ornament: the whole lid', () => {
     const reopened = openLid(files.map((f) => out.find((x) => x.name === f.name.replace('.svg', '-design.svg')) ?? f));
     expect(reopened.kind).toBe('lid');
     if (reopened.kind === 'lid') expect(lidDesignFiles(reopened.lid).map((f) => f.text)).toEqual(out.map((f) => f.text));
+  });
+});
+
+describe('ornament: hip edge tolerance (card 2a)', () => {
+  const withFront = (top: number) => openLid(lidFiles().map((f) => (f.name === 'hip-front.svg' ? { ...f, text: hipSvg('hip-front', top, 264, 30) } : f)));
+  it('a 204.2 hip top against a 204 field edge opens with no note; a 206 one shows it', () => {
+    const close = withFront(204.2);
+    if (close.kind !== 'lid') throw new Error('lid did not open');
+    expect(edgeMismatches(close.lid)).toEqual([]);
+    const far = withFront(206);
+    if (far.kind !== 'lid') throw new Error('lid did not open');
+    expect(edgeMismatches(far.lid)).toEqual([expect.stringMatching(/front hip’s top edge is 206 long.*field edge it meets is 204.*may be from different lids/)]);
   });
 });
