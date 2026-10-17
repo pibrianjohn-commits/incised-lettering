@@ -18,7 +18,7 @@ export const SHORTCUTS: { group: string; items: [string, string][] }[] = [
     items: [
       ['Ctrl + Shift + O', 'Open the lid: all five files from the lid add-on, picked together'],
       ['Ctrl + O', 'Open one template from the lid add-on, or a design saved here'],
-      ['Ctrl + Shift + S', 'Save the lid design: a numbered set, a file for every place'],
+      ['Ctrl + Shift + S', 'Save the lid design: the places with layers, as one numbered zip'],
       ['Ctrl + S', 'Save the design of the place being worked on'],
       ['Click a place / [ and ]', 'Work on that place of the lid, or step to the next or previous one'],
       ['Ctrl + Z / Ctrl + Shift + Z', 'Undo and redo in the ornament (its own, apart from the lettering)'],

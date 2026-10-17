@@ -4,6 +4,7 @@
 
 import { PLACES, PLACE_NAMES, mm, type Design, type Panel, type Place, type Pt, type Ring } from './model';
 import { designSvg, openSvg, parseXml, pathRings } from './svgfile';
+import { isZip, makeZip, readZip } from './zip';
 
 /** One place on the lid: a design to work on, or a shaped panel shown by its outline only. */
 export interface Slot {
@@ -45,10 +46,16 @@ function givenPlace(text: string): Place | null {
  * The five files from the lid add-on, picked together: field, hip-front,
  * hip-right, hip-back and hip-left, as templates or saved designs. If any is
  * missing, doubled or can't be read, it says which and opens nothing.
+ *
+ * A saved set (card 4a) holds only the places that had layers: its files
+ * (fromSet) win over loose files for the same place, and the places it
+ * doesn't hold are taken from the lid already open, if it is the same lid,
+ * with no layers, as they were when the set was saved.
  */
-export function openLid(files: { name: string; text: string }[]): LidOpened {
+export function openLid(files: { name: string; text: string; fromSet?: boolean }[], open?: Lid): LidOpened {
   const places: Partial<Record<Place, Slot>> = {};
   const from: Partial<Record<Place, string[]>> = {};
+  const fromSet: Partial<Record<Place, boolean>> = {};
   const bad: string[] = [];
   for (const f of files) {
     const o = openSvg(f.text);
@@ -61,17 +68,54 @@ export function openLid(files: { name: string; text: string }[]): LidOpened {
       bad.push(`“${f.name}” doesn’t say which part of the lid it is (it has no data-place), so it isn’t one of the lid add-on’s five.`);
       continue;
     }
+    if (fromSet[place] && !f.fromSet) continue;
+    if (f.fromSet && !fromSet[place]) delete from[place];
+    if (f.fromSet) fromSet[place] = true;
     (from[place] ??= []).push(f.name);
     places[place] = o.kind === 'design' ? { design: o.design, shaped: null } : { design: null, shaped: { panel: o.panel, text: f.text } };
   }
+  const anySet = Object.values(fromSet).some(Boolean);
+  const sameLid = !!open?.whole && lidName({ places, current: 'field', whole: true }) === lidName(open);
+  if (anySet && !bad.length && sameLid)
+    for (const p of PLACES) {
+      const s = open!.places[p];
+      if (from[p] || !s) continue;
+      places[p] = s.design ? { design: { ...s.design, layers: [] }, shaped: null } : { design: null, shaped: s.shaped };
+      from[p] = ['the lid already open'];
+    }
   const msgs: string[] = [];
   const doubled = PLACES.filter((p) => (from[p]?.length ?? 0) > 1);
   for (const p of doubled) msgs.push(`${from[p]!.length === 2 ? 'Two' : 'Several'} files are ${placeWord(p)}: ${list(from[p]!.map((n) => `“${n}”`))}.`);
   const missing = PLACES.filter((p) => !from[p]);
   if (missing.length && !bad.length) msgs.push(`${missing.length === 5 ? 'None of the five lid files was picked.' : `Missing: ${list(missing.map(placeWord))}.`}`);
   msgs.push(...bad);
-  if (msgs.length) return { kind: 'error', message: `${msgs.join(' ')} Pick all five lid files together (field, hip-front, hip-right, hip-back, hip-left); nothing was opened.` };
+  if (msgs.length) {
+    const how = anySet
+      ? open?.whole && !sameLid
+        ? ` The set is from ${lidName({ places, current: 'field', whole: true })}, but the lid open is ${lidName(open)}: pick the set together with its lid’s templates.`
+        : ' A set holds only the places that had layers: open its lid first, or pick the set together with the lid’s templates.'
+      : ' Pick all five lid files together (field, hip-front, hip-right, hip-back, hip-left).';
+    return { kind: 'error', message: `${msgs.join(' ')}${how} Nothing was opened.` };
+  }
   return { kind: 'lid', lid: { places, current: 'field', whole: true } };
+}
+
+/** The files as picked for Open lid…: a set's zip is opened up into its place files. */
+export async function openLidPicked(files: { name: string; bytes: Uint8Array }[], open?: Lid): Promise<LidOpened> {
+  const dec = new TextDecoder();
+  const texts: { name: string; text: string; fromSet?: boolean }[] = [];
+  for (const f of files) {
+    if (!isZip(f.bytes)) {
+      texts.push({ name: f.name, text: dec.decode(f.bytes) });
+      continue;
+    }
+    const inside = await readZip(f.bytes);
+    if (!inside) return { kind: 'error', message: `“${f.name}” is a zip that can’t be read. Nothing was opened.` };
+    const svgs = inside.filter((x) => /\.svg$/i.test(x.name) && !x.name.startsWith('.'));
+    if (!svgs.length) return { kind: 'error', message: `“${f.name}” holds no lid design files. Nothing was opened.` };
+    texts.push(...svgs.map((x) => ({ ...x, fromSet: true })));
+  }
+  return openLid(texts, open);
 }
 
 // ---------------------------------------------------------------- laying it out
@@ -238,23 +282,30 @@ export function lastSavedText(store: Store, lid: Lid): string {
 }
 
 /**
- * "Save lid design" (card 4): every place, with layers or without, as one
- * numbered set: <lid>_<number>_<place>.svg. A place with a design is saved as
- * its design; a shaped panel as its template, as it came. The number is one up
- * on this lid's last, and is kept.
+ * "Save lid design" (cards 4 and 4a): the places with layers, as one numbered
+ * set in one zip, <lid>_<number>.zip, holding <lid>_<number>_<place>.svg. The
+ * number is one up on this lid's last, and is kept. Null, and no number used,
+ * if no place has layers.
  */
-export function saveLidSet(store: Store, lid: Lid): { number: number; files: { place: Place; name: string; text: string }[] } {
-  const name = lidName(lid);
+export function saveLidSet(
+  store: Store,
+  lid: Lid,
+): { number: number; name: string; files: { place: Place; name: string; text: string }[]; zip: Uint8Array<ArrayBuffer> } | null {
+  const lidN = lidName(lid);
   const counts = setCounts(store);
   const number = lastSet(store, lid) + 1;
+  const set = `${lidN}_${setNumber(number)}`;
   const files = PLACES.flatMap((place) => {
-    const s = lid.places[place];
-    const text = s?.design ? designSvg(s.design) : s?.shaped?.text;
-    return text ? [{ place, name: `${name}_${setNumber(number)}_${place}.svg`, text }] : [];
+    const d = lid.places[place]?.design;
+    return d && d.layers.length ? [{ place, name: `${set}_${place}.svg`, text: designSvg(d) }] : [];
   });
-  store.setItem(SETS_KEY, JSON.stringify({ ...counts, [name]: number }));
-  return { number, files };
+  if (!files.length) return null;
+  store.setItem(SETS_KEY, JSON.stringify({ ...counts, [lidN]: number }));
+  return { number, name: `${set}.zip`, files, zip: makeZip(files) };
 }
+
+/** Whether any place on the lid has layers to save. */
+export const hasLayers = (lid: Lid) => PLACES.some((p) => (lid.places[p]?.design?.layers.length ?? 0) > 0);
 
 /** Places with layers that have changed since they were opened or saved. */
 export function unsavedPlaces(lid: Lid, savedAs: Partial<Record<Place, string>>): Place[] {

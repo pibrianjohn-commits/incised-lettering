@@ -47,6 +47,8 @@ import {
   keptLid,
   lidBounds,
   SETS_KEY,
+  hasLayers,
+  openLidPicked,
   lastSavedText,
   lidName,
   setNumber,
@@ -54,7 +56,6 @@ import {
   lidLayout,
   fromAboveReady,
   type LidView,
-  openLid,
   placedOutline,
   slotPanel,
   unsavedPlaces,
@@ -211,13 +212,12 @@ async function lidChosen() {
   const files = [...(input.files ?? [])];
   input.value = '';
   if (!files.length) return;
-  let texts: { name: string; text: string }[];
+  let o: Awaited<ReturnType<typeof openLidPicked>>;
   try {
-    texts = await Promise.all(files.map(async (f) => ({ name: f.name, text: await f.text() })));
+    o = await openLidPicked(await Promise.all(files.map(async (f) => ({ name: f.name, bytes: new Uint8Array(await f.arrayBuffer()) }))), state);
   } catch {
     return host.say('Those files could not be read. Nothing was opened.');
   }
-  const o = openLid(texts);
   if (o.kind === 'error') {
     message = o.message;
     renderSide();
@@ -262,21 +262,22 @@ function setStore(): Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> {
   }
 }
 
-/** The whole lid as one numbered set, every place, for the lid add-on (card 4). */
+/** The places with layers as one numbered set in one zip, for the lid add-on (cards 4 and 4a). */
 export function saveLidDesign() {
   if (!state.whole) return host.say('Open the lid first (Open lid…).');
+  if (!hasLayers(state)) return host.say('No place on the lid has any layers yet, so there is nothing to save.');
   let set: ReturnType<typeof saveLidSet>;
   try {
     set = saveLidSet(setStore(), state);
   } catch {
     set = saveLidSet(visitOnly, state);
   }
-  // A moment apart, so the browser takes each one.
-  set.files.forEach((f, i) => setTimeout(() => download(f.text, f.name, 'image/svg+xml'), i * 300));
-  for (const f of set.files) if (state.places[f.place]?.design) savedAs[f.place] = f.text;
+  if (!set) return;
+  download(new Blob([set.zip], { type: 'application/zip' }), set.name);
+  for (const f of set.files) savedAs[f.place] = f.text;
   saved();
   render();
-  host.say(`Saved set ${lidName(state)} ${setNumber(set.number)}: ${set.files.map((f) => `“${f.name}”`).join(', ')}, to the Downloads folder, for the lid add-on. If the browser asks, allow it to save several files.`);
+  host.say(`Saved set ${lidName(state)} ${setNumber(set.number)} as “${set.name}” in the Downloads folder, holding ${set.files.map((f) => `“${f.name}”`).join(', ')}. Open lid… opens it back.`);
 }
 
 /** Work on another place of the lid. */
@@ -411,7 +412,7 @@ function renderSide() {
   const notes = edgeMismatches(state).map((t) => `<p class="orn-msg">${esc(t)}</p>`).join('');
   $('orn-template').innerHTML = `${places}${info}${notes}${message ? `<p class="orn-msg">${esc(message)}</p>` : ''}`;
   $<HTMLButtonElement>('orn-save-lid').hidden = !state.whole;
-  $<HTMLButtonElement>('orn-save-lid').disabled = !state.whole;
+  $<HTMLButtonElement>('orn-save-lid').disabled = !hasLayers(state);
   $('orn-set-last').hidden = !state.whole;
   $('orn-set-last').textContent = state.whole ? lastSavedText(setStore(), state) : '';
   $('orn-zones').hidden = !d;
@@ -1008,8 +1009,8 @@ export function ornamentKey(e: KeyboardEvent, inField: boolean): boolean {
 /** For Ctrl+K: what can be done in the Ornament tab. */
 export function ornamentCommands(): { label: string; run: () => void; hint?: string; words?: string }[] {
   return [
-    { label: 'Ornament: open lid (all five files together)', run: openLidFiles, hint: 'Ctrl+Shift+O in Ornament', words: 'field hips blender template five' },
-    { label: 'Ornament: save lid design (a numbered set, a file for every place)', run: saveLidDesign, hint: 'Ctrl+Shift+S in Ornament', words: 'svg blender export hips field set number' },
+    { label: 'Ornament: open lid (all five files together, or a saved set’s zip)', run: openLidFiles, hint: 'Ctrl+Shift+O in Ornament', words: 'field hips blender template five' },
+    { label: 'Ornament: save lid design (a numbered set in one zip, the places with layers)', run: saveLidDesign, hint: 'Ctrl+Shift+S in Ornament', words: 'svg blender export hips field set number zip' },
     ...PLACES.map((q) => ({ label: `Ornament: work on the ${PLACE_NAMES[q].toLowerCase()}`, run: () => setPlace(q), hint: '[ and ]', words: 'lid place hip' })),
     { label: 'Ornament: open a template or design', run: openOrnamentFile, hint: 'Ctrl+O in Ornament', words: 'svg lid blender' },
     { label: 'Ornament: try a sample lid field', run: openSample, words: 'template 204 96' },

@@ -210,11 +210,34 @@ function setLevel(ids: string[], level: number): (layers: Layer[]) => Layer[] {
   return (layers) => layers.map((l) => (ids.includes(l.id) ? { ...l, level } : l));
 }
 
+/** Inlay finishes: set into a seat, never into a groove. */
+const INLAYS: readonly Finish[] = ['pearl', 'boxwood'];
+export const INLAY_GROOVE = 'Pearl and boxwood never go in a groove';
+export const INLAY_SEAT = 'Pearl and boxwood need a seat: give the layer a level of 1 or more';
+
 /** The level rules, without fixes: what is wrong now. */
 function findProblems(layers: Layer[], thickness: number | null): LevelProblem[] {
   const out: LevelProblem[] = [];
   const allowed = thickness === null ? null : thickness - MIN_UNDER;
   for (const l of layers) {
+    // The lid add-on's two inlay stops (card 4a), in its words.
+    if (INLAYS.includes(l.finish) && l.edge === 'v')
+      out.push({
+        key: `groove:${l.id}`,
+        text: `${named([l])}: ${INLAY_GROOVE}`,
+        layers: [l.id],
+        fixes: [{ label: 'Give it a square edge', apply: (ls) => ls.map((x) => (x.id === l.id ? { ...x, edge: 'square' } : x)) }],
+      });
+    if (INLAYS.includes(l.finish) && l.level === 0)
+      out.push({
+        key: `seat:${l.id}`,
+        text: `${named([l])}: ${INLAY_SEAT}`,
+        layers: [l.id],
+        fixes: [...new Set([MIN_CUT, ...layers.map((x) => x.level).filter((v) => v >= MIN_CUT)])]
+          .sort((a, b) => a - b)
+          .slice(0, 3)
+          .map((v) => ({ label: `Give it a level of ${mm(v)}`, apply: setLevel([l.id], v) })),
+      });
     if (l.level > 0 && l.level < MIN_CUT - 1e-6) {
       out.push({
         key: `shallow:${l.id}`,

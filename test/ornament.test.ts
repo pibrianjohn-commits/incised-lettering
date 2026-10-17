@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_ZONES, levelReadout, thicknessText, type Design, type Layer } from '../src/ornament/model';
 import { SHAPED_LINE, designSvg, openSvg, sampleTemplate } from '../src/ornament/svgfile';
-import { NO_PLAN_DEPTH, apply, edgeMismatches, fromAboveReady, keepLid, keptLid, lastSavedText, lidLayout, openLid, saveLidSet } from '../src/ornament/lid';
+import { NO_PLAN_DEPTH, apply, edgeMismatches, fromAboveReady, keepLid, keptLid, lastSavedText, lidLayout, openLid, openLidPicked, saveLidSet } from '../src/ornament/lid';
+import { readZip } from '../src/ornament/zip';
 
 const layer = (name: string, level: number, extra: Partial<Layer> = {}): Layer => ({
   id: name,
@@ -168,7 +169,7 @@ describe('ornament: the whole lid', () => {
     expect(o.kind).toBe('error');
     if (o.kind === 'error') {
       expect(o.message).toMatch(/Missing: the back hip\./);
-      expect(o.message).toMatch(/nothing was opened/);
+      expect(o.message).toMatch(/Nothing was opened/);
     }
     const twice = openLid([...lidFiles(), { name: 'hip-left copy.svg', text: hipSvg('hip-left', 96, 156, 30) }]);
     expect(twice.kind).toBe('error');
@@ -201,7 +202,7 @@ describe('ornament: the whole lid', () => {
     expect(lidLayout(back!.lid)).toEqual(lidLayout(lid));
   });
 
-  it('Save lid design writes every place, and they open again exactly as they were', () => {
+  it('Save lid design writes the places with layers, and they open again exactly as they were', () => {
     // A rectangular left hip, so a hip can carry layers too; the right hip has none.
     const files = lidFiles().map((f) =>
       f.name === 'hip-left.svg' ? { ...f, text: rectSvg('hip-left', 96, 30) } : f.name === 'hip-right.svg' ? { ...f, text: rectSvg('hip-right', 96, 30) } : f,
@@ -211,9 +212,9 @@ describe('ornament: the whole lid', () => {
     const lid = o.lid;
     lid.places.field!.design!.layers = [layer('Border band', 1, { finish: 'gold' }), layer('Centre', 2, { shape: { kind: 'zone', zone: 'centre' } })];
     lid.places['hip-left']!.design!.layers = [layer('Leaf', 1.5, { shape: { kind: 'rect', x: 10, y: 5, w: 20, h: 10 }, edge: 'v', finish: 'boxwood' })];
-    const out = saveLidSet(memStore(), lid).files;
-    expect(out.map((f) => f.place)).toEqual(['field', 'hip-front', 'hip-right', 'hip-back', 'hip-left']);
-    for (const f of out.filter((x) => lid.places[x.place]!.design)) {
+    const out = saveLidSet(memStore(), lid)!.files;
+    expect(out.map((f) => f.place)).toEqual(['field', 'hip-left']);
+    for (const f of out) {
       const again = openSvg(f.text);
       expect(again.kind).toBe('design');
       if (again.kind !== 'design') continue;
@@ -223,33 +224,85 @@ describe('ornament: the whole lid', () => {
       expect(again.design.layers.map(({ id: _, ...l }) => l)).toEqual(was.layers.map(({ id: _, ...l }) => l));
       expect(designSvg(again.design)).toBe(f.text);
     }
-    // And the set opens again as the lid, the field and left hip with their layers.
-    const reopened = openLid(out.map((f) => ({ name: f.name, text: f.text })));
-    expect(reopened.kind).toBe('lid');
-    if (reopened.kind === 'lid') expect(saveLidSet(memStore(), reopened.lid).files.map((f) => f.text)).toEqual(out.map((f) => f.text));
   });
 });
 
-describe('ornament: numbered design sets (card 4)', () => {
-  const PLACE_ORDER = ['field', 'hip-front', 'hip-right', 'hip-back', 'hip-left'];
-  const named = (lidName: string) => lidFiles().map((f) => ({ ...f, text: f.text.replace('<svg ', `<svg data-lid="${lidName}" `) }));
+/** Every place rectangular, so every place can carry a layer. */
+const rectLid = (lidName?: string) => {
+  const files = [
+    { name: 'field.svg', text: sampleTemplate(204, 96, 6) },
+    { name: 'hip-front.svg', text: rectSvg('hip-front', 204, 30) },
+    { name: 'hip-right.svg', text: rectSvg('hip-right', 96, 30) },
+    { name: 'hip-back.svg', text: rectSvg('hip-back', 204, 30) },
+    { name: 'hip-left.svg', text: rectSvg('hip-left', 96, 30) },
+  ].map((f) => (lidName ? { ...f, text: f.text.replace('<svg ', `<svg data-lid="${lidName}" `) } : f));
+  const o = openLid(files);
+  if (o.kind !== 'lid') throw new Error('lid did not open');
+  for (const p of PLACE_ORDER) o.lid.places[p]!.design!.layers = [layer('Band', 1)];
+  return o.lid;
+};
+const PLACE_ORDER = ['field', 'hip-front', 'hip-right', 'hip-back', 'hip-left'] as const;
 
+describe('ornament: numbered design sets (card 4)', () => {
   it('two saves give 001 then 002, all five places named', () => {
-    const o = openLid(named('walnut-box'));
-    if (o.kind !== 'lid') throw new Error('lid did not open');
+    const lid = rectLid('walnut-box');
     const store = memStore();
-    const first = saveLidSet(store, o.lid);
-    const second = saveLidSet(store, o.lid);
+    const first = saveLidSet(store, lid)!;
+    const second = saveLidSet(store, lid)!;
     expect(first.number).toBe(1);
     expect(first.files.map((f) => f.name)).toEqual(PLACE_ORDER.map((p) => `walnut-box_001_${p}.svg`));
     expect(second.files.map((f) => f.name)).toEqual(PLACE_ORDER.map((p) => `walnut-box_002_${p}.svg`));
-    expect(lastSavedText(store, o.lid)).toBe('Last saved: walnut-box 002');
+    expect(second.name).toBe('walnut-box_002.zip');
+    expect(lastSavedText(store, lid)).toBe('Last saved: walnut-box 002');
   });
 
   it('templates without data-lid save as lid_001_<place>.svg', () => {
-    const o = openLid(lidFiles());
+    expect(saveLidSet(memStore(), rectLid())!.files.map((f) => f.name)).toEqual(PLACE_ORDER.map((p) => `lid_001_${p}.svg`));
+  });
+});
+
+describe('ornament: save fixes (card 4a)', () => {
+  const fieldOnly = () => {
+    const o = openLid(lidFiles().map((f) => ({ ...f, text: f.text.replace('<svg ', '<svg data-lid="walnut-box" ') })));
     if (o.kind !== 'lid') throw new Error('lid did not open');
-    expect(saveLidSet(memStore(), o.lid).files.map((f) => f.name)).toEqual(PLACE_ORDER.map((p) => `lid_001_${p}.svg`));
+    o.lid.places.field!.design!.layers = [layer('Border band', 1, { finish: 'gold' }), layer('Rosette', 2, { shape: { kind: 'ellipse', x: 80, y: 30, w: 40, h: 36 }, finish: 'pearl' })];
+    return o.lid;
+  };
+
+  it('a lid with layers on the field only saves a zip holding only the field file', async () => {
+    const set = saveLidSet(memStore(), fieldOnly())!;
+    expect(set.name).toBe('walnut-box_001.zip');
+    const inside = await readZip(set.zip);
+    expect(inside!.map((f) => f.name)).toEqual(['walnut-box_001_field.svg']);
+    expect(inside![0].text).toBe(set.files[0].text);
+  });
+
+  it('a saved zip opens back with Open lid… exactly as it was', async () => {
+    const lid = fieldOnly();
+    const set = saveLidSet(memStore(), lid)!;
+    // The layers change after saving; opening the set brings back the saved ones.
+    const now = structuredClone(lid);
+    now.places.field!.design!.layers = [];
+    const back = await openLidPicked([{ name: set.name, bytes: set.zip }], now);
+    expect(back.kind).toBe('lid');
+    if (back.kind !== 'lid') return;
+    expect(designSvg(back.lid.places.field!.design!)).toBe(designSvg(lid.places.field!.design!));
+    for (const p of ['hip-front', 'hip-right', 'hip-back', 'hip-left'] as const) expect(back.lid.places[p]!.shaped!.text).toBe(lid.places[p]!.shaped!.text);
+    expect(lidLayout(back.lid)).toEqual(lidLayout(lid));
+    // Picked together with the lid's templates, with no lid open, it opens the same.
+    const withTemplates = await openLidPicked([...lidFiles().map((f) => ({ name: f.name, bytes: new TextEncoder().encode(f.text.replace('<svg ', '<svg data-lid="walnut-box" ')) })), { name: set.name, bytes: set.zip }]);
+    expect(withTemplates.kind).toBe('lid');
+    if (withTemplates.kind === 'lid') expect(designSvg(withTemplates.lid.places.field!.design!)).toBe(designSvg(lid.places.field!.design!));
+  });
+
+  it('a pearl V layer and a pearl level-0 layer each show their stop', () => {
+    const groove = layer('Pearl leaf', 2, { finish: 'pearl', edge: 'v' });
+    const top = layer('Pearl dot', 0, { finish: 'pearl' });
+    const r = levelReadout([layer('Band', 1), groove, top], 6);
+    expect(r.problems.find((p) => p.key === `groove:${groove.id}`)!.text).toBe('“Pearl leaf”: Pearl and boxwood never go in a groove');
+    expect(r.problems.find((p) => p.key === `seat:${top.id}`)!.text).toBe('“Pearl dot”: Pearl and boxwood need a seat: give the layer a level of 1 or more');
+    // Each one-click fix cures its stop.
+    for (const p of r.problems) for (const f of p.fixes) expect(levelReadout(f.apply([layer('Band', 1), groove, top]), 6).problems.map((q) => q.key)).not.toContain(p.key);
   });
 });
 

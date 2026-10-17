@@ -14,7 +14,7 @@ A layout tool for ornament on plaques and on the box lid's field and hip faces. 
 ## The file format
 Shared with the lid add-on; set out in ornament/design/CARD_01_loop.md and followed exactly. Field templates always carry data-thickness; hip templates don't yet, and then the depth limit isn't checked (the 1 mm steps still are).
 
-Saved sets (card 4): "Save lid design" saves every place each time, as one numbered set: `<lid>_<number>_<place>.svg`, for example `walnut-box_003_hip-front.svg`. Lid: the templates' `data-lid` (if there is none, "lid"); a design carries `data-lid` on when the template has it. Number: three digits from 001, one up per save, the same for the whole set, counted per lid in the browser that saves it. Place: field, hip-front, hip-right, hip-back, hip-left. A place with no layers is saved as its design, or its template as it came if it is a shaped hip, so a set is always complete and opens again with Open lid….
+Saved sets (cards 4 and 4a): "Save lid design" saves the places that have layers as one numbered set, in one zip, `<lid>_<number>.zip`, holding `<lid>_<number>_<place>.svg` for each, for example `walnut-box_003.zip` holding `walnut-box_003_field.svg`. Untouched places aren't saved. Lid: the templates' `data-lid` (if there is none, "lid"); a design carries `data-lid` on when the template has it. Number: three digits from 001, one up per save, the same for the whole set, counted per lid in the browser that saves it. Place: field, hip-front, hip-right, hip-back, hip-left. Open lid… takes a set's zip: the places it holds open as saved, the others come from the same lid already open, with no layers; with no lid open, the zip is picked together with the lid's templates.
 
 Optional on hip templates (card 3): `data-slope` (degrees) and `data-plan-depth` (mm, how deep the hip is seen from above). The From above view needs data-plan-depth on all four hips; without it (an older export) the lid is shown Flat only.
 
@@ -64,6 +64,7 @@ By rules, never by dice: the same settings always give the same result. Rules fr
 - End mill 3.175: gaps between raised parts at least 3.175; inside corners round at 1.6 unless squared by hand.
 - V-bit 30 deg now, 90 deg coming. Fine detail comes from the V-bit's walls.
 - Cut from one face: no undercuts, nothing proud and fragile.
+- Inlay (card 4a, the lid add-on's two stops, in its words): pearl or boxwood on a V edge, "Pearl and boxwood never go in a groove"; pearl or boxwood at level 0, "Pearl and boxwood need a seat: give the layer a level of 1 or more".
 - Ebony relief reads only under low light; the raking-light view is the judge.
 
 ## Out
