@@ -927,3 +927,57 @@ details.why pre { margin: 4px 0 0; padding: 6px 8px; max-height: 40vh; overflow:
 #v3d-sharper { margin-top: 8px; }
 #v3d-detail { margin: 6px 0 0; }
 #v3d-detail:empty { display: none; }
+
+/* ---------------------------------------------------------- ornament (ornament/design/CARD_01_loop.md) */
+
+body[data-stage='ornament'] { grid-template-columns: 320px minmax(0, 1fr) 0; }
+body[data-stage='ornament'] #inspect { display: none; }
+body[data-stage='ornament'] #st-cursor, body[data-stage='ornament'] .st-zoom, body[data-stage='ornament'] #st-snap, body[data-stage='ornament'] #st-warn { visibility: hidden; }
+#stages .orn-tab { margin-left: 10px; }
+#orn { position: absolute; inset: 0; z-index: 5; display: flex; flex-direction: column; background: var(--work); cursor: default; }
+#orn-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 8px 12px; background: var(--card); border-bottom: 1px solid var(--rule); font-size: 13px; }
+#orn-title { font-weight: 600; }
+#orn-legend { display: flex; gap: 8px; flex-wrap: wrap; color: var(--muted); font-size: 12px; }
+#orn-legend span { display: inline-flex; align-items: center; gap: 4px; }
+#orn-legend i, .orn-fin i { display: inline-block; width: 14px; height: 14px; border-radius: 3px; border: 1px solid var(--board-edge); }
+.orn-bar-tools { margin-left: auto; display: flex; gap: 8px; }
+.orn-bar-tools button { font-size: 12.5px; padding: 3px 10px; }
+#orn-shaped { margin: 10px 12px 0; padding: 8px 12px; border-radius: 8px; background: var(--card); border: 1px solid var(--rule); font-weight: 600; }
+#orn-view { position: relative; flex: 1; min-height: 0; overflow: auto; }
+#orn-empty { margin: 40px; color: var(--muted); max-width: 440px; }
+#orn-canvas { display: block; }
+#orn-cursor { position: absolute; right: 12px; bottom: 8px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; pointer-events: none; }
+.orn-ruler rect { fill: var(--card); }
+.orn-ruler line { stroke: var(--muted); stroke-width: 1; }
+.orn-ruler text { fill: var(--muted); font-size: 9.5px; font-variant-numeric: tabular-nums; }
+.orn-board { fill: var(--board); stroke: var(--board-edge); stroke-width: 1; }
+.orn-shape { stroke: rgb(0 0 0 / 0.55); stroke-width: 0.75; cursor: pointer; }
+.orn-shape.tone { stroke: rgb(0 0 0 / 0.25); }
+.orn-shape.bad { stroke: var(--bad); stroke-width: 1.5; }
+.orn-zone { fill: none; stroke: var(--setting-out); stroke-width: 1; stroke-dasharray: 5 3; pointer-events: none; }
+.orn-sel { fill: none; stroke: var(--accent); stroke-width: 2; pointer-events: none; }
+.orn-box { fill: none; stroke: var(--accent); stroke-width: 1; stroke-dasharray: 3 3; pointer-events: none; }
+.orn-handle { fill: var(--card); stroke: var(--accent); stroke-width: 1.5; cursor: crosshair; }
+#side h3 { margin: 12px 0 6px; font-size: 13px; }
+#side h3:first-child { margin-top: 0; }
+.orn-place { margin: 0 0 6px; }
+.orn-msg { margin: 6px 0; font-weight: 600; }
+#orn-layers { list-style: none; margin: 8px 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.orn-layer { padding: 8px; border: 1px solid var(--rule); border-radius: 8px; background: var(--card); }
+.orn-layer.sel { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.orn-layer .boxes { margin-top: 6px; }
+.orn-layer select { max-width: 132px; min-width: 0; }
+.orn-layer .boxes label { gap: 6px; }
+.orn-layer input[type='number'] { width: 64px; }
+.orn-lhead { display: flex; align-items: center; gap: 6px; }
+.orn-num { flex: none; width: 20px; height: 20px; border-radius: 10px; display: grid; place-items: center; font-size: 11px; font-weight: 600; background: var(--hover); }
+.orn-name { flex: 1; min-width: 0; width: 0; }
+.orn-order button { padding: 2px 7px; font-size: 12px; }
+.orn-fin { display: inline-flex; align-items: center; gap: 6px; }
+.orn-add .name { display: block; font-size: 13px; margin-top: 4px; }
+.orn-levels { margin: 10px 0 4px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.orn-levels.bad { color: var(--bad); }
+.orn-problems { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
+.orn-problems li { color: var(--bad); font-size: 13px; }
+.orn-fixes { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.orn-fixes button { font-size: 12px; padding: 2px 8px; color: var(--ink); }
