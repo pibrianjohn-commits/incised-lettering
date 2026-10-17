@@ -4231,6 +4231,19 @@ function esc(s: string) {
 async function start() {
   buildControls();
   syncControls();
+  // The Ornament tab needs none of the letters, so it is ready before they have loaded: its tab can be opened at once.
+  initOrnament({
+    say,
+    pxPerMm,
+    undoChanged: (canUndo, canRedo) => {
+      if (stage !== 'ornament') return;
+      $<HTMLButtonElement>('undo').disabled = !canUndo;
+      $<HTMLButtonElement>('redo').disabled = !canRedo;
+    },
+    workerSource: reliefWorkerSource,
+    // The same bit the lettering's 3D view uses; the usual 30° when the machine settings are switched off.
+    vBitAngle: () => project.machine?.toolAngle ?? 30,
+  });
   const res = await fetch(`${import.meta.env.BASE_URL}fonts/Cinzel-Regular.woff`);
   if (!res.ok) throw new Error(`font file missing (${res.status})`);
   const alphabet = alphabetFromFont(await res.arrayBuffer(), 'SIL Open Font License 1.1');
@@ -4255,15 +4268,6 @@ async function start() {
   }
   $('loading').hidden = true;
   // Back to the stage last worked in (but not straight into 3D, which takes a moment to build).
-  initOrnament({
-    say,
-    pxPerMm,
-    undoChanged: (canUndo, canRedo) => {
-      if (stage !== 'ornament') return;
-      $<HTMLButtonElement>('undo').disabled = !canUndo;
-      $<HTMLButtonElement>('redo').disabled = !canRedo;
-    },
-  });
   const last = localStorage.getItem(STAGE_KEY) as Stage | null;
   setStage(last && STAGES.includes(last) && last !== '3d' ? last : 'write', true);
   fitPanel();

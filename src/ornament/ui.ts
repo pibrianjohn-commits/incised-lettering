@@ -4,6 +4,8 @@
 // it has its own undo and its own keys, and reads no machine settings.
 // The whole lid (CARD_02_lid_layout.md): the five places laid out together,
 // each keeping its own zones and layers, remembered in this browser.
+// The lid in 3D (CARD_05_3d_view.md): worked out in the 3D view's worker,
+// following every change within a moment.
 
 import { download } from '../files';
 import { History } from '../history';
@@ -63,6 +65,8 @@ import {
   type Lid,
   type Slot,
 } from './lid';
+import { lid3dReady, lidCuts, lidFrames, type LidJob, type LidResult } from './relief';
+import type { Lid3D, LidPlace } from './view3d';
 
 export interface OrnamentHost {
   say(text: string): void;
@@ -70,6 +74,10 @@ export interface OrnamentHost {
   pxPerMm(): number;
   /** The undo and redo buttons in the top bar. */
   undoChanged(canUndo: boolean, canRedo: boolean): void;
+  /** The 3D view's worker program (relief.worker.ts), of the page's own version. */
+  workerSource(): Promise<string>;
+  /** The V-bit's included angle, degrees: the same bit the lettering's 3D view uses. */
+  vBitAngle(): number;
 }
 
 /** What is open: one template, or the whole lid, each place with its own design (a shaped one shows its outline only, until the outlines card). */
@@ -91,9 +99,12 @@ const NONE: Slot = Object.freeze({ design: null, shaped: null }) as Slot;
 const slot = (): Slot => state.places[state.current] ?? NONE;
 let selected: string | null = null;
 let viewMode: ViewMode = 'layout';
-/** Flat, or From above (card 3): asked for; drawn only when the lid can be seen from above. */
-let lidView: LidView = 'flat';
+/** Flat, From above (card 3) or 3D (card 5): asked for; From above and 3D are shown only when the lid can be. */
+type Look = LidView | '3d';
+let lidView: Look = 'flat';
+/** How the drawing is laid out: 3D is drawn elsewhere, over a flat drawing kept up to date behind it. */
 const shownView = (): LidView => (lidView === 'above' && fromAboveReady(state).ok ? 'above' : 'flat');
+const shown3d = () => lidView === '3d' && lid3dReady(state).ok;
 let zoom: 'true' | 'fit' = 'true';
 let message = '';
 let open = false;
@@ -415,6 +426,8 @@ function renderSide() {
   $<HTMLButtonElement>('orn-save-lid').disabled = !hasLayers(state);
   $('orn-set-last').hidden = !state.whole;
   $('orn-set-last').textContent = state.whole ? lastSavedText(setStore(), state) : '';
+  $('orn-light').hidden = !shown3d();
+  syncLight();
   $('orn-zones').hidden = !d;
   $('orn-layer-sec').hidden = !d;
   $<HTMLButtonElement>('orn-save').disabled = !d;
@@ -626,8 +639,20 @@ function setViewMode(m: ViewMode) {
   draw();
 }
 
-/** Flat, or From above: the lid as it sits on the box. For looking only; without plan depths it stays Flat. */
-function setLidView(v: LidView) {
+/** Flat, From above (the lid as it sits on the box) or 3D. Both for looking only; without what they need from the templates, it stays Flat. */
+function setLidView(v: Look) {
+  if (v === '3d') {
+    const ready = lid3dReady(state);
+    lidView = '3d';
+    if (!ready.ok) {
+      draw();
+      return host.say(ready.message);
+    }
+    remember(LID_VIEW_KEY, v);
+    renderSide();
+    draw();
+    return host.say(`3D: the lid as assembled, under one low light (,  and  . swing it round, -  and  = lower and raise it). Changes in the side panel show within a moment.${slotPanel(slot()) && !state.whole ? ' One template on its own lies flat.' : ''}`);
+  }
   if (v === 'above') {
     const ready = fromAboveReady(state);
     if (!ready.ok) {
@@ -638,13 +663,28 @@ function setLidView(v: LidView) {
     }
   }
   lidView = v;
+  remember(LID_VIEW_KEY, v);
+  renderSide();
+  draw();
+  host.say(v === 'above' ? 'From above: the lid as it sits on the box. For looking only: click a place to work on it, laid flat.' : 'Flat: the lid opened out flat.');
+}
+
+function remember(key: string, value: string) {
   try {
-    localStorage.setItem(LID_VIEW_KEY, v);
+    localStorage.setItem(key, value);
   } catch {
     /* not remembered */
   }
-  draw();
-  host.say(v === 'above' ? 'From above: the lid as it sits on the box. For looking only: click a place to work on it, laid flat.' : 'Flat: the lid opened out flat.');
+}
+
+/** F: Flat, From above, 3D, and round again, past any the lid can't be shown in. */
+function nextLidView() {
+  const order: Look[] = ['flat', 'above', '3d'];
+  const now: Look = shown3d() ? '3d' : shownView();
+  for (let i = 1; i <= 3; i++) {
+    const v = order[(order.indexOf(now) + i) % 3];
+    if (v === 'flat' || (v === 'above' && fromAboveReady(state).ok) || (v === '3d' && lid3dReady(state).ok)) return setLidView(v);
+  }
 }
 
 function setZoom(z: 'true' | 'fit') {
@@ -713,6 +753,8 @@ const currentM = (): Affine => lidLayout(state, shownView())[state.current] ?? [
 
 function draw() {
   if (!open) return;
+  sync3d();
+  follow3d();
   const d = slot().design;
   const p = slotPanel(slot());
   const svg = $<HTMLElement>('orn-canvas');
@@ -721,8 +763,10 @@ function draw() {
   document.querySelectorAll<HTMLElement>('#orn-zoom [data-zoom]').forEach((b) => b.classList.toggle('on', b.dataset.zoom === zoom));
   $('orn-viewmode').hidden = !placements().some((q) => q.slot.design);
   const above = shownView() === 'above';
-  document.querySelectorAll<HTMLElement>('#orn-lidview [data-lidview]').forEach((b) => b.classList.toggle('on', b.dataset.lidview === (above ? 'above' : 'flat')));
-  $('orn-lidview').hidden = !state.whole;
+  const look = shown3d() ? '3d' : above ? 'above' : 'flat';
+  document.querySelectorAll<HTMLElement>('#orn-lidview [data-lidview]').forEach((b) => b.classList.toggle('on', b.dataset.lidview === look));
+  $('orn-lidview').hidden = !p;
+  $('orn-lidview').querySelector<HTMLElement>('[data-lidview="above"]')!.hidden = !state.whole;
   if (!p) {
     svg.innerHTML = '';
     svg.setAttribute('width', '0');
@@ -816,10 +860,15 @@ function draw() {
   const name = `${above ? 'Lid from above · ' : state.whole && p.place !== 'field' ? 'Lid · ' : ''}${PLACE_NAMES[p.place]} · ${mm(p.w)} × ${mm(p.h)} mm · ${thicknessText(p)}`;
   parts.push(rulers(bb, s));
   svg.innerHTML = parts.join('');
-  $('orn-title').textContent = name;
-  // An older hip template can't be seen from above: said plainly while From above is asked for.
+  $('orn-title').textContent = shown3d() ? `${state.whole ? 'The lid as assembled' : PLACE_NAMES[p.place]} · in 3D` : name;
+  // Tone, true size and handles belong to the flat drawing.
+  $('orn-viewmode').hidden ||= shown3d();
+  $('orn-zoom').hidden = shown3d();
+  if (shown3d()) $('orn-legend').innerHTML = '';
+  // An older hip template can't be seen from above, or in 3D: said plainly while that view is asked for.
   const noAbove = lidView === 'above' && state.whole && !above ? fromAboveReady(state) : null;
-  const lines = [noAbove && !noAbove.ok ? `${noAbove.message}.` : '', slot().shaped ? `${state.whole ? `${PLACE_NAMES[p.place]}: ` : ''}${SHAPED_LINE}` : ''].filter(Boolean);
+  const no3d = lidView === '3d' ? lid3dReady(state) : null;
+  const lines = [noAbove && !noAbove.ok ? `${noAbove.message}.` : '', no3d && !no3d.ok ? `${no3d.message}.` : '', !shown3d() && slot().shaped ? `${state.whole ? `${PLACE_NAMES[p.place]}: ` : ''}${SHAPED_LINE}` : ''].filter(Boolean);
   $('orn-shaped').hidden = !lines.length;
   $('orn-shaped').innerHTML = lines.map(esc).join('<br>');
 }
@@ -971,6 +1020,17 @@ export function ornamentKey(e: KeyboardEvent, inField: boolean): boolean {
     return true;
   }
   if (inField) return false;
+  if (shown3d()) {
+    if (e.key === 'Escape' && cancel3d()) return true;
+    if (e.key === ',' || e.key === '.') {
+      setLight(light.from + (e.key === '.' ? 15 : -15), light.height);
+      return true;
+    }
+    if (e.key === '-' || e.key === '=' || e.key === '+') {
+      setLight(light.from, light.height + (e.key === '-' ? -3 : 3));
+      return true;
+    }
+  }
   if (e.key === 'Escape' && selected) {
     select(null);
     return true;
@@ -996,7 +1056,7 @@ export function ornamentKey(e: KeyboardEvent, inField: boolean): boolean {
     return true;
   }
   if (k === 'f' && !e.shiftKey) {
-    setLidView(shownView() === 'above' ? 'flat' : 'above');
+    nextLidView();
     return true;
   }
   if (k === 'z') {
@@ -1019,6 +1079,14 @@ export function ornamentCommands(): { label: string; run: () => void; hint?: str
     { label: 'Ornament: view the layout in its finishes', run: () => setViewMode('layout'), hint: 'T', words: 'gold ebony' },
     { label: 'Ornament: see the lid from above (as it sits on the box)', run: () => setLidView('above'), hint: 'F', words: 'plan top view hips squashed box' },
     { label: 'Ornament: see the lid laid flat', run: () => setLidView('flat'), hint: 'F', words: 'opened out plan' },
+    { label: 'Ornament: see the lid in 3D (as assembled, under a low light)', run: () => setLidView('3d'), hint: 'F', words: 'relief raking light three dimensions model box hips slope' },
+    { label: 'Ornament 3D: light from the left', run: () => lightFrom(-90), hint: ', and .', words: 'raking swing' },
+    { label: 'Ornament 3D: light from the back', run: () => lightFrom(0), hint: ', and .', words: 'raking swing' },
+    { label: 'Ornament 3D: light from the right', run: () => lightFrom(90), hint: ', and .', words: 'raking swing' },
+    { label: 'Ornament 3D: light from the front', run: () => lightFrom(180), hint: ', and .', words: 'raking swing' },
+    { label: 'Ornament 3D: light low and raking', run: () => lightAt(8), hint: '- and =', words: 'lower height' },
+    { label: 'Ornament 3D: light higher', run: () => lightAt(light.height + 10), hint: '=', words: 'raise height' },
+    { label: 'Ornament 3D: the whole lid', run: () => look3d('fit'), words: 'camera view fit' },
     { label: 'Ornament: true size', run: () => setZoom('true'), hint: 'Shift+Z' },
     { label: 'Ornament: the whole panel (or the whole lid)', run: () => setZoom('fit'), hint: 'Z' },
     ...(['zone:border', 'zone:centre', 'zone:fields', 'rect', 'ellipse'] as const).map((v) => ({ label: `Ornament: add a layer, ${SHAPE_NAMES[v].toLowerCase()}`, run: () => addLayer(v), words: 'layer shape' })),
@@ -1037,6 +1105,7 @@ export function showOrnament() {
 export function hideOrnament() {
   open = false;
   $('orn').hidden = true;
+  sync3d();
 }
 
 export function initOrnament(h: OrnamentHost) {
@@ -1044,7 +1113,10 @@ export function initOrnament(h: OrnamentHost) {
   try {
     const v = localStorage.getItem(VIEW_KEY);
     if (v === 'tone' || v === 'layout') viewMode = v;
-    if (localStorage.getItem(LID_VIEW_KEY) === 'above') lidView = 'above';
+    const lv = localStorage.getItem(LID_VIEW_KEY);
+    if (lv === 'above' || lv === '3d') lidView = lv;
+    const lt = JSON.parse(localStorage.getItem(LIGHT_KEY) ?? 'null');
+    if (lt && Number.isFinite(lt.from) && Number.isFinite(lt.height)) light = { from: lt.from, height: lt.height };
     // The last lid (or template) opened, laid out ready, with every place's layers.
     const kept = keptLid(localStorage);
     if (kept) {
@@ -1057,4 +1129,286 @@ export function initOrnament(h: OrnamentHost) {
   }
   wireSide();
   wireCanvas();
+  wire3d();
+}
+
+// ---------------------------------------------------------------- the lid in 3D (card 5)
+
+const LIGHT_KEY = 'incised.ornament.light';
+/** One low light: round the lid (0 from the back, −90 the left, 90 the right, ±180 the front) and its height in degrees. It starts low and raking, from the left. */
+let light = { from: -90, height: 8 };
+
+const o3 = {
+  view: null as Lid3D | null,
+  /** three.js and the view, being fetched. */
+  loading: null as Promise<void> | null,
+  worker: null as Worker | null,
+  /** The work under way: its number, and what it is for. */
+  job: null as { id: number; key: string; places: LidPlace[] } | null,
+  lastId: 0,
+  /** What the lid on show was worked out for. */
+  shownKey: '',
+  /** What the newest lid worked out was for: on show, or waiting for 3D to be looked at. */
+  doneKey: '',
+  /** What was cancelled, so it isn't started again until something changes. */
+  cancelledKey: '',
+  /** A lid worked out before the view had arrived, to show once it has. */
+  pending: null as { result: LidResult; key: string; places: LidPlace[] } | null,
+  /** Opened in this visit: from then on it follows changes, even while Flat is shown, so it is ready when looked at again. */
+  wanted: false,
+  timer: 0,
+  cardTimer: 0,
+};
+
+/** Everything the lid in 3D is worked out from. */
+function lidKey(): string {
+  return JSON.stringify([
+    host.vBitAngle(),
+    state.whole,
+    state.whole ? '' : state.current,
+    PLACES.map((p) => {
+      const sl = state.places[p];
+      const panel = slotPanel(sl);
+      return panel ? [panel.w, panel.h, panel.slope, panel.planDepth, panel.outline, sl?.design?.layers ?? null, sl?.design?.zones ?? null] : null;
+    }),
+  ]);
+}
+
+function places3d(): LidPlace[] {
+  const frames = lidFrames(state);
+  return PLACES.flatMap((place) => {
+    const p = slotPanel(state.places[place]);
+    const frame = frames[place];
+    return p && frame ? [{ place, frame, w: p.w, h: p.h }] : [];
+  });
+}
+
+/** Show or hide the 3D view, as asked. */
+function sync3d() {
+  const on = open && shown3d();
+  $('orn-3d').hidden = !on;
+  $('orn-view').hidden = on;
+  if (!on) return;
+  o3.wanted = true;
+  void ensureView();
+  o3.view?.resize();
+  if (o3.pending && o3.view) show(o3.pending);
+}
+
+/** The lid follows every change, within a moment: one piece of work at a time, the newest state next. */
+function follow3d() {
+  if (!o3.wanted || !lid3dReady(state).ok) return;
+  const key = lidKey();
+  if (key === o3.doneKey || key === o3.cancelledKey || o3.job?.key === key) return;
+  clearTimeout(o3.timer);
+  o3.timer = window.setTimeout(startJob, o3.doneKey ? 120 : 0);
+}
+
+function startJob() {
+  if (o3.job || !lid3dReady(state).ok) return; // the newest is started when this one is done
+  const key = lidKey();
+  if (key === o3.doneKey) return;
+  const job: LidJob = { kind: 'ornament3d', id: ++o3.lastId, cuts: lidCuts(state), vAngle: host.vBitAngle() };
+  o3.job = { id: job.id, key, places: places3d() };
+  o3.cancelledKey = '';
+  document.body.dataset.orn3dState = 'working'; // for the browser tests
+  // The card only if it takes a while: changes that follow quickly don't flash it.
+  clearTimeout(o3.cardTimer);
+  o3.cardTimer = window.setTimeout(() => o3.job?.id === job.id && showWorking(0), o3.shownKey ? 600 : 0);
+  host.workerSource().then(
+    (source) => {
+      if (o3.job?.id !== job.id) return;
+      o3.worker ??= makeWorker(source);
+      o3.worker.postMessage(job);
+    },
+    () => {
+      if (o3.job?.id !== job.id) return;
+      o3.job = null;
+      showWorking(null);
+      if (shown3d()) failed('Part of the 3D view could not be loaded: this copy of the app may be out of date. Refresh the app (this needs the internet).');
+    },
+  );
+}
+
+type LidMessage = { kind: 'ornament3d'; id?: number; progress?: number; error?: string; version?: string; result?: LidResult };
+
+function makeWorker(source: string): Worker {
+  const w = new Worker(source, { type: 'module' });
+  w.onmessage = (e: MessageEvent<LidMessage>) => {
+    const msg = e.data;
+    const job = o3.job;
+    const id = msg.result?.id ?? msg.id;
+    if (msg.kind !== 'ornament3d' || !job || id !== job.id) return;
+    if (msg.progress !== undefined) {
+      if (!$('orn-working').hidden) showWorking(msg.progress);
+      return;
+    }
+    o3.job = null;
+    clearTimeout(o3.cardTimer);
+    showWorking(null);
+    if (msg.error || !msg.result) {
+      console.error('Ornament 3D:', msg.error);
+      o3.cancelledKey = job.key;
+      if (shown3d()) failed('The lid could not be worked out in 3D. Change something, or try again.');
+      return;
+    }
+    show({ result: msg.result, key: job.key, places: job.places });
+    follow3d();
+  };
+  w.onerror = (e) => {
+    e.preventDefault();
+    w.terminate();
+    if (o3.worker !== w) return;
+    o3.worker = null;
+    const job = o3.job;
+    o3.job = null;
+    showWorking(null);
+    if (job) o3.cancelledKey = job.key;
+    if (shown3d()) failed('The 3D worker stopped. Change something, or try again.');
+  };
+  return w;
+}
+
+/** A lid worked out: shown at once if 3D is being looked at, or kept until it is (the graphics chip isn't troubled meanwhile). */
+function show(r: { result: LidResult; key: string; places: LidPlace[] }) {
+  o3.doneKey = r.key;
+  if (!o3.job) document.body.dataset.orn3dState = 'done';
+  if (!o3.view || !open || !shown3d()) {
+    o3.pending = r;
+    return;
+  }
+  o3.pending = null;
+  o3.shownKey = r.key;
+  const id = r.result.id;
+  // One place on its own lies flat, with its edges at its thickness (6, the usual, if its template doesn't say).
+  const edges = state.whole ? null : (slotPanel(slot())?.thickness ?? 6);
+  o3.view.setLid(r.result, r.places, edges, () => {
+    // For the browser tests: which lid is on screen, and whether it is the lid as it is now.
+    document.body.dataset.orn3d = String(id);
+    document.body.dataset.orn3dCurrent = String(r.key === lidKey());
+  });
+}
+
+/** three.js and the view, fetched the first time 3D is looked at. */
+function ensureView(): Promise<void> {
+  if (o3.view) return Promise.resolve();
+  o3.loading ??= (async () => {
+    let mod: typeof import('./view3d');
+    try {
+      mod = await import('./view3d');
+    } catch {
+      o3.loading = null;
+      return failed('Part of the 3D view could not be loaded: this copy of the app may be out of date. Refresh the app (this needs the internet).');
+    }
+    try {
+      o3.view = new mod.Lid3D($('orn-3d-canvas'));
+    } catch (err) {
+      console.error(err);
+      o3.loading = null;
+      return failed('The 3D view could not start drawing: this browser’s 3D graphics (WebGL) are off. Check that hardware acceleration is on in the browser’s settings.');
+    }
+    o3.view.setLight(light.from, light.height);
+    await o3.view.prepare();
+    if (o3.pending && shown3d()) show(o3.pending);
+  })();
+  return o3.loading;
+}
+
+/** Esc: stop the lid being worked out. The lid shown stays. */
+function cancel3d(): boolean {
+  if (!o3.job) return false;
+  o3.worker?.terminate();
+  o3.worker = null;
+  o3.cancelledKey = o3.job.key;
+  o3.job = null;
+  document.body.dataset.orn3dState = 'cancelled';
+  clearTimeout(o3.cardTimer);
+  showWorking('cancelled');
+  if (o3.shownKey) host.say('Cancelled: the lid shown is from before the last change.');
+  return true;
+}
+
+function failed(text: string) {
+  showWorking('cancelled');
+  $('orn-working').querySelector('.v3d-what')!.textContent = text;
+  $('orn-working').querySelector<HTMLElement>('[data-orn3d="again"]')!.textContent = 'Try again';
+}
+
+/** The progress card: how far through (0 to 1), cancelled (with a button to start again), or hidden. */
+function showWorking(done: number | 'cancelled' | null) {
+  const card = $('orn-working');
+  card.hidden = done === null;
+  if (done === null) return;
+  const cancelled = done === 'cancelled';
+  card.classList.toggle('idle', cancelled);
+  card.querySelector('.v3d-what')!.textContent = cancelled ? 'Cancelled.' : 'Working out the lid…';
+  card.querySelector('.v3d-pct')!.textContent = cancelled ? '' : `${Math.round(done * 100)}%`;
+  card.querySelector<HTMLElement>('.v3d-bar i')!.style.width = cancelled ? '0' : `${(done * 100).toFixed(1)}%`;
+  card.querySelector('.v3d-foot span')!.textContent = cancelled ? (o3.shownKey ? 'The lid shown is from before the last change.' : 'Nothing to show yet.') : o3.shownKey ? 'The lid shown stays until the new one is ready.' : 'This takes a moment the first time.';
+  card.querySelector<HTMLElement>('[data-orn3d="cancel"]')!.hidden = cancelled;
+  const again = card.querySelector<HTMLElement>('[data-orn3d="again"]')!;
+  again.hidden = !cancelled;
+  again.textContent = 'Work it out';
+}
+
+/** Degrees round the lid, from −180 (not included) to 180. */
+const round360 = (v: number) => {
+  const a = (((v % 360) + 540) % 360) - 180;
+  return a === -180 ? 180 : a;
+};
+
+function syncLight() {
+  $<HTMLInputElement>('orn-light-from').value = String(light.from);
+  $<HTMLInputElement>('orn-light-height').value = String(light.height);
+  const a = round360(light.from);
+  const sides: [number, string][] = [[-90, 'the left'], [0, 'the back'], [90, 'the right'], [180, 'the front']];
+  const word = sides.find(([v]) => Math.abs(round360(a - v)) <= 10)?.[1];
+  $('orn-light-read').textContent = `Light from ${word ?? `${Math.round(a)}° round`}, ${Math.round(light.height)}° high${light.height <= 15 ? ': low and raking' : ''}.`;
+  document.querySelectorAll<HTMLElement>('#orn-light-quick [data-from]').forEach((b) => b.classList.toggle('on', round360(Number(b.dataset.from)) === a));
+}
+
+function setLight(from: number, height: number) {
+  light = { from: round360(from), height: Math.max(2, Math.min(70, height)) };
+  o3.view?.setLight(light.from, light.height);
+  remember(LIGHT_KEY, JSON.stringify(light));
+  syncLight();
+}
+
+/** For Ctrl+K: the light from one side, in the 3D view. */
+function lightFrom(from: number) {
+  if (!shown3d()) setLidView('3d');
+  setLight(from, light.height);
+}
+function lightAt(height: number) {
+  if (!shown3d()) setLidView('3d');
+  setLight(light.from, height);
+}
+function look3d(which: 'fit' | 'top' | 'front') {
+  if (!shown3d()) setLidView('3d');
+  o3.view?.view(which);
+}
+
+function wire3d() {
+  $('orn-3d').addEventListener('contextmenu', (e) => e.preventDefault());
+  $<HTMLInputElement>('orn-light-from').addEventListener('input', (e) => setLight(Number((e.target as HTMLInputElement).value), light.height));
+  $<HTMLInputElement>('orn-light-height').addEventListener('input', (e) => setLight(light.from, Number((e.target as HTMLInputElement).value)));
+  $('orn-light-quick').addEventListener('click', (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLElement>('[data-from]');
+    if (b) setLight(Number(b.dataset.from), light.height);
+  });
+  $('orn-3d-views').addEventListener('click', (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLElement>('[data-look]');
+    if (b) o3.view?.view(b.dataset.look as 'fit' | 'top' | 'front');
+  });
+  $('orn-working').addEventListener('click', (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLElement>('[data-orn3d]');
+    if (b?.dataset.orn3d === 'cancel') cancel3d();
+    if (b?.dataset.orn3d === 'again') {
+      o3.cancelledKey = '';
+      showWorking(null);
+      void ensureView();
+      startJob();
+    }
+  });
+  new ResizeObserver(() => o3.view?.resize()).observe($('orn-3d'));
 }

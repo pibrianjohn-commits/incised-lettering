@@ -146,9 +146,9 @@ function mapTexture(r: ReliefResult): THREE.DataTexture {
 /** About this many points along the longer side of a mesh: its shape; the fine detail is shaded from the depths. */
 const MESH = 700;
 
-/** One band of a grid `cols` steps across, as many rows as fit in 65 536 corners, kept for reuse. */
+/** One band of a grid `cols` steps across, as many rows as fit in 65 536 corners, kept for reuse (the ornament's lid uses it too). */
 const bands = new Map<number, THREE.BufferGeometry>();
-function band(cols: number): { geometry: THREE.BufferGeometry; rows: number } {
+export function band(cols: number): { geometry: THREE.BufferGeometry; rows: number } {
   const rows = Math.max(1, Math.floor(65536 / (cols + 1)) - 1);
   let g = bands.get(cols);
   if (!g) {

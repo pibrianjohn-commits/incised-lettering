@@ -166,7 +166,7 @@ export function fromAboveReady(lid: Lid): { ok: true } | { ok: false; message: s
  * its plan depth, as it is seen sitting on the box. Without a plan depth for
  * every hip, From above is drawn Flat.
  */
-export function lidLayout(lid: Lid, view: LidView = 'flat'): Partial<Record<Place, Affine>> {
+export function lidLayout(lid: Lid, view: LidView = 'flat', squash?: (p: Panel) => number): Partial<Record<Place, Affine>> {
   const field = slotPanel(lid.places.field);
   const out: Partial<Record<Place, Affine>> = {};
   if (!lid.whole || !field) {
@@ -174,7 +174,8 @@ export function lidLayout(lid: Lid, view: LidView = 'flat'): Partial<Record<Plac
     if (p) out[lid.current] = IDENTITY;
     return out;
   }
-  const above = view === 'above' && fromAboveReady(lid).ok;
+  // The 3D view (card 5) squashes each hip by its own slope instead.
+  const above = !!squash || (view === 'above' && fromAboveReady(lid).ok);
   const { w: W, h: H } = field;
   out.field = IDENTITY;
   const g = above ? 0 : HIP_GAP;
@@ -183,7 +184,7 @@ export function lidLayout(lid: Lid, view: LidView = 'flat'): Partial<Record<Plac
     if (!p) continue;
     const { from, to } = topEdge(p);
     // Across the hip: true width laid flat, or squashed to its plan depth.
-    const k = above ? p.planDepth! / p.h : 1;
+    const k = squash ? squash(p) : above ? p.planDepth! / p.h : 1;
     const along = place === 'hip-front' || place === 'hip-back' ? W : H;
     // Where the top edge's left end (as seen from outside) lands along the field edge.
     const start = (along - (to - from)) / 2;

@@ -6,18 +6,38 @@
 // The same program, in an instance of its own, works out the valley lines of
 // letters linked into one shape (letters.ts), which take a moment each: the
 // page shows their outlines meanwhile.
+//
+// The ornament's lid in 3D (ornament/relief.ts) is worked out here too, in an
+// instance of its own, so it never waits on the lettering's board.
 
 import { datumLines, type DatumRule } from './datum';
 import type { Contour } from './geometry';
-import { runJob, type ReliefJob } from './relief-job';
+import { runJob, toHalf, type ReliefJob } from './relief-job';
+import { runLidJob, type LidJob } from './ornament/relief';
 import { letterValleyOptions, valleyLines, type ValleyLine } from './valley';
 import { APP_VERSION } from './version';
 
 /** A linked run's joined outline (cap height 1), to work out its valley lines; or its valley lines at a size, for its datum lines. */
 export type ShapeJob = { kind: 'valleys'; key: string; outline: Contour[] } | { kind: 'datum'; key: string; valleys: ValleyLine[]; rule: DatumRule };
 
-self.onmessage = (e: MessageEvent<ReliefJob | ShapeJob>) => {
+self.onmessage = (e: MessageEvent<ReliefJob | ShapeJob | LidJob>) => {
   const data = e.data;
+  if ('kind' in data && data.kind === 'ornament3d') {
+    let last = 0;
+    try {
+      const result = runLidJob(data, (done) => {
+        const now = performance.now();
+        if (now - last < 40) return;
+        last = now;
+        self.postMessage({ kind: 'ornament3d', id: data.id, progress: done });
+      }, toHalf);
+      const transfer = result.maps.flatMap((m) => [m.half.buffer, m.finish.buffer]);
+      self.postMessage({ kind: 'ornament3d', result, version: APP_VERSION }, { transfer });
+    } catch (err) {
+      self.postMessage({ kind: 'ornament3d', id: data.id, error: String(err), version: APP_VERSION });
+    }
+    return;
+  }
   if ('kind' in data) {
     try {
       const answer = data.kind === 'valleys' ? { valleys: valleyLines(data.outline, letterValleyOptions) } : { datum: datumLines(data.valleys, data.rule) };

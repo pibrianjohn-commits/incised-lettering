@@ -2,6 +2,58 @@
 
 Newest first. Older reports move to ornament/design/PROGRESS_ARCHIVE.md.
 
+## Card 5: the 3D view (17 Oct 2026)
+
+Card: ornament/design/CARD_05_3d_view.md.
+
+![The lid in 3D, raking light from the left](design/card05-3d-left.png)
+
+![The same lid, raking light from the front](design/card05-3d-front.png)
+
+The lid in both pictures: a gold border on a V edge at 1, the centre in white gold at 2, boxwood rectangles at 1 with their mirrored twins, and ebony ellipses on a V edge at 3 inside them. The light is 8° high.
+
+### Results
+- Both unit tests the card asks for pass: a field with layers at 1 and 2 is lowered 1 and 2 where it should be and left at the top elsewhere (three points); hips with data-slope 20.556 sit at 20.556° within 0.1°, all four, their top edges level with the field and against its edges.
+- The slowed-CPU check (Chrome, CPU 4× slower, `npm run test:ornament3d`) passes. Dragging a layer about in Flat for a few seconds, with the 3D view following it in the background, held the page up for at most 120 ms at once (limit 250), so the drag stayed smooth. Back in 3D, the lid as dragged was on screen at once. Turning the lid with the mouse while the layer was nudged from the keyboard held it up for at most 128 ms, and the lid caught up with the last nudge at once.
+- The lettering's 3D check still passes in Chrome. All the other tests still pass (493 in all).
+- Tried in Firefox 136 too: the lid draws in 3D.
+
+### What was built
+- **Flat | From above | 3D.** F steps through them. With one template open on its own, it is Flat | 3D, and the place lies flat with its edges at its thickness.
+- **The lid as assembled.** The field is level. Each hip falls away from its field edge at its data-slope, meeting its neighbours on the corners. Hips that are still outline-only show as plain sloping faces.
+- **Every layer cut at its level.** A square edge is a square wall. A V edge is a wall at the V-bit's angle (the same bit as the lettering's 3D view, 30° now).
+- **Finishes in colour.** Ebony a near-black satin, gold, white gold, pearl a soft white, boxwood a pale yellow. Bare wood shows as ebony.
+- **One low light.** "Round" swings it all the way round the lid, with Left, Back, Right and Front buttons. "Height" raises or lowers it. It starts from the left, 8° high: low and raking. The light is remembered. Keys: , and . swing it round, - and = lower and raise it. Orbit and zoom as in the lettering's 3D view, with Whole lid, Straight down and Along the front.
+- **It follows changes.** Anything changed in the side panel (levels, edges, finishes, zones, undo) shows within a moment. Once 3D has been opened, it keeps up in the background while Flat is shown, so it is ready when you look again.
+- **Off the page.** The work is done in the lettering's 3D worker, with a progress bar if it takes a while, and Esc to stop it. After Esc, "Work it out" starts it again.
+- Ctrl+K: "see the lid in 3D", light from the left, back, right or front, light low and raking, light higher. The ? list has the new keys. BRIEF.md and PLAN.md record it.
+
+### Small fix
+- "Something could not be worked out…" when the Ornament tab was opened within a second of the page loading: the tab wasn't ready until the letters had loaded. It is now ready at once. Tried with the letters held back by 0.3 s and 1.5 s: the old version showed the message, the new one doesn't.
+
+### Faults found and fixed while using it
+- At first everything drew black: the view was showing every surface from underneath.
+- A hairline of background showed along the hips' corner lines. The places now overlap by a hair.
+- The light's buttons marked "Right" when the light was from the left.
+- After Esc there was no way to work the lid out again without changing something. The card now offers "Work it out".
+- A field on its own had no edges. They are now drawn at its thickness.
+
+### Assumptions (please check)
+- **V walls slope on the deeper side** of a layer's outline, as the bit leaves them. A sunk layer's wall is inside its outline; a raised layer's wall (a layer higher than what is under it) flares out beyond it.
+- **Bare wood is ebony**, and the walls of a cut take the finish of the layer they belong to.
+- **The hip's slope** comes from data-slope; if a template has only data-plan-depth, the slope that gives. With neither: "Export the templates again from Blender to see the lid in 3D", as for From above.
+- **The hips have no thickness** in the templates yet, so only their top faces are drawn.
+- **The V-bit's angle** is read from the lettering's machine settings (30°); with the machine side switched off it is 30°.
+- **Light directions** are as in the lettering's 3D view: 0 from the back, the left at −90, the right at 90, the front at 180.
+
+### Questions for the design chat
+- None.
+
+### Not tested
+- The slowed-CPU check in Firefox (the card asked for Chrome only).
+- On a real graphics chip: this machine draws 3D in software.
+- The installed offline copy.
+
 ## Card 4a: save fixes (17 Oct 2026)
 
 Card: ornament/design/CARD_04a_save_fixes.md.
@@ -34,38 +86,3 @@ Card: ornament/design/CARD_04a_save_fixes.md.
 - In Firefox (none on this machine): tried in Chromium only. Firefox has read zips this way since version 113. The card asked for no slowed-CPU test.
 - With the lid add-on reading the zip: it may need to unzip first.
 - The installed offline copy.
-
-## Card 4: numbered design sets (17 Oct 2026)
-
-Card: ornament/design/CARD_04_numbered_sets.md.
-
-### Results
-- Both tests the card asks for pass: two saves of a lid named walnut-box give walnut-box_001_field.svg … walnut-box_001_hip-left.svg, then the same five with 002; templates without data-lid save as lid_001_field.svg, lid_001_hip-front.svg, lid_001_hip-right.svg, lid_001_hip-back.svg, lid_001_hip-left.svg.
-- The card 2 save test now checks the new behaviour: all five places are saved, and the set opens back as the lid exactly as it was. All the other tests still pass (488 in all).
-- Tried in the browser with a walnut-box lid: two clicks gave ten files, 001 then 002, and "Last saved: walnut-box 002" beside the button, still there after the page was reloaded.
-
-### What was built
-- **Save lid design** now saves the whole lid as one numbered set: `<lid>_<number>_<place>.svg`, every place each time, with layers or without. A place with a design is saved as its design; a hip that is still a shaped panel is saved as its template, as it came.
-- **The lid's name** is the templates' data-lid (the field's, if they differ), or "lid" if there is none. Saved designs now carry data-lid on, so a set opened again saves under the same name.
-- **The number** is three digits from 001, one up per save, the same for the whole set, counted for each lid separately in this browser.
-- **"Last saved: walnut-box 002"** beside the button, for the lid that is open. Nothing shows before its first save.
-- The button is ready whenever the whole lid is open, even with no layers yet. Its tip, the Ctrl+K entry and BRIEF.md say what it now does.
-- **PLAN.md**, "The file format": the naming added.
-
-### Faults found and fixed while using it
-- None.
-
-### Assumptions (please check)
-- **Counted per lid.** walnut-box and oak-box each have their own 001, 002…
-- **Not undone.** Ctrl+Z doesn't take a set number back: the files are already in the Downloads folder.
-- **Odd characters.** A data-lid with spaces or characters a file name can't hold (/ \ : * ? " < > |) has them turned into "-": "walnut box" saves as walnut-box_001_….
-- If this browser won't keep anything (a private window that refuses storage), the numbers still go up for that visit, from 001 again next time.
-
-### Questions for the design chat
-- None.
-
-### Not tested
-- In Firefox (none on this machine): tried in Chromium only. The card asked for no slowed-CPU test.
-- With real templates from the lid add-on carrying data-lid.
-- The installed offline copy.
-
