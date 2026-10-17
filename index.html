@@ -360,13 +360,15 @@
       <!-- 6 Ornament: apart from the lettering (ornament/design/CARD_01_loop.md) -->
       <div class="stage-panel" data-panel="ornament" hidden>
         <section>
-          <h2>Template</h2>
+          <h2>Lid</h2>
           <div id="orn-template"></div>
           <div class="line-buttons wrap">
-            <button id="orn-open" title="An SVG template from the lid add-on in Blender, or a design saved here (Ctrl+O)">Open template…</button>
+            <button id="orn-open-lid" title="All five files from the lid add-on, picked together: field, hip-front, hip-right, hip-back, hip-left; templates or saved designs (Ctrl+Shift+O)">Open lid…</button>
+            <button id="orn-open" class="quiet" title="One SVG template from the lid add-on in Blender, or a design saved here (Ctrl+O)">Open template…</button>
             <button id="orn-sample" class="quiet" title="A plain lid field, 204 × 96 and 6 thick, as the lid add-on makes them">Try a sample field</button>
           </div>
           <input type="file" id="orn-file" accept=".svg,image/svg+xml" hidden />
+          <input type="file" id="orn-lid-file" accept=".svg,image/svg+xml" multiple hidden />
         </section>
         <section id="orn-zones" hidden>
           <h2>Zones</h2>
@@ -389,8 +391,11 @@
           <div id="orn-readout" aria-live="polite"></div>
         </section>
         <section>
-          <button id="orn-save" class="primary" disabled title="One SVG for the lid add-on, the size and place of its template (Ctrl+S)">Save design</button>
-          <p class="hint small">Saves to the Downloads folder. A saved design opens again here exactly as it was.</p>
+          <div class="line-buttons wrap">
+            <button id="orn-save-lid" class="primary" hidden disabled title="One design SVG for each place with layers (field-design.svg, hip-front-design.svg…), for the lid add-on (Ctrl+Shift+S)">Save lid design</button>
+            <button id="orn-save" disabled title="One SVG for the lid add-on: the place being worked on, the size and place of its template (Ctrl+S)">Save design</button>
+          </div>
+          <p class="hint small">Saves to the Downloads folder. A saved design opens again here exactly as it was. The lid last opened, with its layers, is kept in this browser.</p>
         </section>
       </div>
 

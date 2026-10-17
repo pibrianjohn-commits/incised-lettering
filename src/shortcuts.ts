@@ -16,8 +16,11 @@ export const SHORTCUTS: { group: string; items: [string, string][] }[] = [
   {
     group: 'Ornament (key 6)',
     items: [
-      ['Ctrl + O', 'Open a template from the lid add-on, or a design saved here'],
-      ['Ctrl + S', 'Save the design, for the lid add-on'],
+      ['Ctrl + Shift + O', 'Open the lid: all five files from the lid add-on, picked together'],
+      ['Ctrl + O', 'Open one template from the lid add-on, or a design saved here'],
+      ['Ctrl + Shift + S', 'Save the lid design: a file for each place with layers'],
+      ['Ctrl + S', 'Save the design of the place being worked on'],
+      ['Click a place / [ and ]', 'Work on that place of the lid, or step to the next or previous one'],
       ['Ctrl + Z / Ctrl + Shift + Z', 'Undo and redo in the ornament (its own, apart from the lettering)'],
       ['Click a shape', 'Select its layer'],
       ['Drag a placed shape', 'Move it; drag its handles to size it'],
@@ -25,7 +28,7 @@ export const SHORTCUTS: { group: string; items: [string, string][] }[] = [
       ['Alt + ↑ / ↓', 'Move the selected layer earlier or later (later layers win where they overlap)'],
       ['Delete', 'Take out the selected layer'],
       ['T', 'Tone view (deeper is darker), or back to the finishes'],
-      ['Z / Shift + Z', 'The whole panel, or true size'],
+      ['Z / Shift + Z', 'The whole panel (or lid), or true size'],
     ],
   },
   {
