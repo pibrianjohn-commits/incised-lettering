@@ -363,12 +363,12 @@
           <h2>Lid</h2>
           <div id="orn-template"></div>
           <div class="line-buttons wrap">
-            <button id="orn-open-lid" title="All five files from the lid add-on, picked together: field, hip-front, hip-right, hip-back, hip-left; templates or saved designs (Ctrl+Shift+O)">Open lid…</button>
+            <button id="orn-open-lid" title="All five files from the lid add-on, picked together: field, hip-front, hip-right, hip-back, hip-left; templates or saved designs, or a saved set’s zip (Ctrl+Shift+O)">Open lid…</button>
             <button id="orn-open" class="quiet" title="One SVG template from the lid add-on in Blender, or a design saved here (Ctrl+O)">Open template…</button>
             <button id="orn-sample" class="quiet" title="A plain lid field, 204 × 96 and 6 thick, as the lid add-on makes them">Try a sample field</button>
           </div>
           <input type="file" id="orn-file" accept=".svg,image/svg+xml" hidden />
-          <input type="file" id="orn-lid-file" accept=".svg,image/svg+xml" multiple hidden />
+          <input type="file" id="orn-lid-file" accept=".svg,image/svg+xml,.zip,application/zip" multiple hidden />
         </section>
         <section id="orn-zones" hidden>
           <h2>Zones</h2>
@@ -392,7 +392,7 @@
         </section>
         <section>
           <div class="line-buttons wrap">
-            <button id="orn-save-lid" class="primary" hidden disabled title="The whole lid as a numbered set, one SVG for every place (lid_001_field.svg, lid_001_hip-front.svg…), for the lid add-on (Ctrl+Shift+S)">Save lid design</button>
+            <button id="orn-save-lid" class="primary" hidden disabled title="The places with layers as one numbered set in one zip (lid_001.zip, holding lid_001_field.svg…), for the lid add-on (Ctrl+Shift+S)">Save lid design</button>
             <span id="orn-set-last" class="hint small" hidden></span>
             <button id="orn-save" disabled title="One SVG for the lid add-on: the place being worked on, the size and place of its template (Ctrl+S)">Save design</button>
           </div>
